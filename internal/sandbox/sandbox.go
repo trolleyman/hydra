@@ -122,8 +122,8 @@ type NetworkPolicy struct {
 	// false, every host is reachable (subject to Enabled). Derived from Mode.
 	FilterHosts bool
 	// Mode is the resolved egress posture (off/unrestricted/advisory/hard). It
-	// decides whether startEgress attempts the hard pasta+nft boundary; hard
-	// fails closed (no network) when that boundary can't be built.
+	// decides whether startEgress attempts the platform hard boundary; hard fails
+	// closed (no network) when that boundary cannot be built.
 	Mode NetworkMode
 	// AllowedHosts is the user's outbound host allow-list, unioned on top of
 	// DefaultAllowedHosts and enforced by the egress proxy when FilterHosts is true
@@ -133,13 +133,18 @@ type NetworkPolicy struct {
 	// matching BlockedHosts is denied even if it is otherwise allowed.
 	BlockedHosts []string
 	// AllowedLoopbackPorts lists host-loopback TCP ports the sandbox may reach
-	// even in hard mode, where the pasta netns otherwise cuts off the host's
-	// 127.0.0.1 entirely (pasta splices in-namespace connections to
-	// 127.0.0.1:<port> through to the host's loopback). Lets a head talk to a
-	// host-local daemon that hardcodes loopback, e.g. adb's server on 5037.
+	// even in hard mode. Linux splices them through pasta; Darwin emits narrow
+	// Seatbelt rules. Lets a head talk to a host-local daemon that hardcodes
+	// loopback, e.g. adb's server on 5037.
 	// Irrelevant outside hard mode: off has no network, and the other modes share
 	// the host's loopback anyway.
 	AllowedLoopbackPorts []int
+	// HardProxyPort is the host-loopback filtering proxy port a Darwin Seatbelt
+	// profile permits in hard mode. It is runtime state, never user config.
+	HardProxyPort int
+	// HardInboundPort is a one-shot runner service port that may bind beyond
+	// loopback on Darwin. It is runtime state, never user config.
+	HardInboundPort int
 }
 
 // DefaultAllowedHosts is the built-in egress allow-list applied whenever host
@@ -481,6 +486,21 @@ func RuntimeEnv(env []string, hostTmpDir string) []string {
 		env = append(filtered, prefix+tmpDir)
 	}
 	return env
+}
+
+func withoutEnvKeys(env []string, keys ...string) []string {
+	blocked := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		blocked[key] = true
+	}
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if !blocked[key] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // preSpawnEnvSetup points $HYDRA_ENV at a writable file before the user's script

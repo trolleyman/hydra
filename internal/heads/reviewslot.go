@@ -100,7 +100,7 @@ const reviewOpeningPrompt = `Review the current diff now. Raise each actionable 
 func reviewConversationID(projectRoot, id, worktreePath, home string, agentType sandbox.AgentType) string {
 	switch agentType {
 	case sandbox.AgentTypeClaude:
-		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
+		dir := paths.ClaudeProjectDirForSession(projectRoot, id, home, worktreePath)
 		return claudestream.LatestSessionID(dir)
 	case sandbox.AgentTypeCodex:
 		return readCodexSlotConversationID(projectRoot, id)
@@ -185,7 +185,8 @@ func RemoveReviewSessionDir(projectRoot, headID string, agentType sandbox.AgentT
 	if slug == "" {
 		return
 	}
-	if err := os.RemoveAll(filepath.Join(u.HomeDir, ".claude", "projects", slug)); err != nil {
+	dir := paths.ClaudeProjectDirForSession(projectRoot, ReviewSessionID(headID), u.HomeDir, paths.GetReviewCheckoutDirFromProjectRoot(projectRoot, headID))
+	if err := os.RemoveAll(dir); err != nil {
 		log.Printf("warn: heads: purge remove review session dir for %s: %v", headID, err)
 	}
 }
@@ -291,7 +292,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 
 	conversationID := reviewConversationID(projectRoot, id, worktreePath, home, agentType)
 	resuming := conversationID != ""
-	argv, err := sandbox.AgentArgv(agentType, resuming, reviewPrompt, "", "", true, conversationID, seed.MCPConfigPath)
+	argv, err := sandbox.AgentArgv(agentType, resuming, reviewPrompt, "", "", true, conversationID, seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}

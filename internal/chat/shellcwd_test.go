@@ -11,9 +11,13 @@ import (
 
 // appendTranscriptLines appends JSONL records to the head's Claude transcript,
 // the way the CLI does as it works.
-func appendTranscriptLines(t *testing.T, worktree string, lines ...string) {
+func appendTranscriptLines(t *testing.T, projectRoot, id, worktree string, lines ...string) {
 	t.Helper()
-	dir := paths.ClaudeProjectDir(worktree)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := paths.ClaudeProjectDirForSession(projectRoot, id, home, worktree)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +80,7 @@ func TestManagerReadsShellCwdFromTranscript(t *testing.T) {
 		t.Fatalf("cwd known before the transcript recorded it: %+v", got)
 	}
 
-	appendTranscriptLines(t, worktree,
+	appendTranscriptLines(t, root, "head", worktree,
 		`{"type":"assistant","uuid":"u1","cwd":"`+worktree+`","message":{"content":[]}}`,
 		`{"type":"user","uuid":"u2","cwd":"`+worktree+`/web","message":{"content":[{"type":"tool_result","tool_use_id":"tool1"}]}}`,
 	)
@@ -88,7 +92,7 @@ func TestManagerReadsShellCwdFromTranscript(t *testing.T) {
 
 	// A second read of the same lines must not append the event twice, and a
 	// result for a tool that is not Bash carries no shell to record.
-	appendTranscriptLines(t, worktree,
+	appendTranscriptLines(t, root, "head", worktree,
 		`{"type":"user","uuid":"u4","cwd":"`+worktree+`/web","message":{"content":[{"type":"tool_result","tool_use_id":"tool2"}]}}`,
 		`{"type":"user","uuid":"u5","cwd":"`+worktree+`/docs","message":{"content":[{"type":"tool_result","tool_use_id":"read1"}]}}`,
 	)

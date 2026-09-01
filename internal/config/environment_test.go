@@ -27,7 +27,7 @@ func TestInheritedEnvRoundTripAndResolve(t *testing.T) {
 }
 
 func TestInheritedEnvRejectsInvalidAndManagedNames(t *testing.T) {
-	for _, name := range []string{"", "1TOKEN", "BAD-NAME", "HYDRA_STATE_DIR", "HOME", "HTTP_PROXY", "CODEX_HOME"} {
+	for _, name := range []string{"", "1TOKEN", "BAD-NAME", "HYDRA_STATE_DIR", "hydra_state_dir", "HOME", "HTTP_PROXY", "Http_Proxy", "CLAUDE_CONFIG_DIR", "claude_config_dir", "CODEX_HOME"} {
 		t.Run(name, func(t *testing.T) {
 			if err := ValidateInheritedEnvName(name); err == nil {
 				t.Fatalf("ValidateInheritedEnvName(%q) succeeded", name)

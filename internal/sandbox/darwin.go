@@ -104,9 +104,52 @@ func BuildSpec(opts Options) (*Spec, error) {
 	if opts.WorkingDirReadOnly {
 		fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(opts.WorktreePath))
 	}
-	// Network.
+	// A head may signal itself and processes it spawned, but not its supervisor
+	// parent or unrelated host processes. Besides containing `kill`/`pkill`, this
+	// prevents an agent from killing the hydra-internal process that owns its
+	// sandbox and control socket.
+	b.WriteString("(deny signal)\n")
+	b.WriteString("(allow signal (target self))\n")
+	b.WriteString("(allow signal (target children))\n")
+	if opts.HardenGUI {
+		// macOS GUI, clipboard, and Apple Events access is brokered by these Mach
+		// services rather than filesystem sockets. Deny their bootstrap lookups.
+		for _, service := range []string{
+			"com.apple.windowserver",
+			"com.apple.windowserver.active",
+			"com.apple.pasteboard.1",
+			"com.apple.pboard",
+			"com.apple.coreservices.appleevents",
+		} {
+			fmt.Fprintf(&b, "(deny mach-lookup (global-name %q))\n", service)
+		}
+	}
+	// Network. Hard mode keeps ordinary IP egress denied and opens only the
+	// host-loopback filtering proxy plus explicitly configured loopback services.
+	// Unix-domain sockets (including mDNSResponder) are unaffected; name
+	// resolution is not itself an egress route, and the host-side proxy resolves
+	// CONNECT destinations independently.
 	if !opts.Network.Enabled {
 		b.WriteString("(deny network*)\n")
+	} else if opts.Network.Mode == NetHard {
+		if opts.Network.HardProxyPort < 1 || opts.Network.HardProxyPort > 65535 {
+			return nil, errtrace.Wrap(fmt.Errorf("macOS hard egress requires a valid filtering proxy port"))
+		}
+		b.WriteString("(deny network-outbound (remote ip))\n")
+		b.WriteString("(deny network-bind (local ip))\n")
+		b.WriteString("(allow network-bind (local tcp \"localhost:*\") (local udp \"localhost:*\"))\n")
+		if port := opts.Network.HardInboundPort; port > 0 && port <= 65535 {
+			fmt.Fprintf(&b, "(allow network-bind (local tcp \"*:%d\"))\n", port)
+		}
+		ports := append([]int{opts.Network.HardProxyPort}, opts.Network.AllowedLoopbackPorts...)
+		seen := make(map[int]bool, len(ports))
+		for _, port := range ports {
+			if port < 1 || port > 65535 || seen[port] {
+				continue
+			}
+			seen[port] = true
+			fmt.Fprintf(&b, "(allow network-outbound (remote tcp \"localhost:%d\"))\n", port)
+		}
 	}
 
 	// Copy-on-write mounts. macOS has no overlay primitive in Seatbelt, but APFS
@@ -144,6 +187,9 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// when it falls through. The resolved $HYDRA_ENV is persisted in this head's
 	// private temp directory so sibling sandboxed shells can reuse it.
 	env := RuntimeEnv(opts.Env, opts.TmpDir)
+	if opts.HardenGUI {
+		env = withoutEnvKeys(env, "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS")
+	}
 	args = append(args, withPreSpawn(opts.PreSpawnScript, SandboxPreSpawnEnvFile(opts.TmpDir), opts.Argv)...)
 
 	return &Spec{

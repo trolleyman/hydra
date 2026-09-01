@@ -29,8 +29,8 @@ const (
 	GuestPrefixLen = "24"
 )
 
-// HardMode describes whether the kernel/tooling can give a real (inescapable)
-// egress boundary on this host, and the resolved tool paths to build it.
+// HardMode describes whether Linux's pasta+nft tooling can give a real
+// (inescapable) egress boundary, and the resolved tool paths to build it.
 type HardMode struct {
 	Available bool
 	PastaPath string
@@ -42,7 +42,7 @@ var (
 	hardRes  HardMode
 )
 
-// DetectHardMode reports whether a hard egress boundary is possible here, caching
+// DetectHardMode reports whether the Linux hard boundary is possible, caching
 // the (host-stable) result. It requires: pasta with --map-host-loopback, an nft
 // binary, and - decisively - a SMOKE TEST that actually spins up the pasta netns +
 // nft ruleset and confirms it works. The smoke test means hard mode only ever

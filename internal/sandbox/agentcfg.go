@@ -725,7 +725,10 @@ func ListCodexMCPServers(data []byte) []MCPServer {
 // source of MCP servers; empty keeps the non-strict launch, which declares just
 // the control server inline and leaves the seeded ~/.claude.json to supply the
 // rest. seedHead decides which, since it is what writes the file.
-func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID, strictMCPConfigPath string) ([]string, error) {
+// claudeSettingSources optionally limits the settings scopes Claude loads.
+// Darwin passes "user" because its immutable generated user settings substitute
+// for the root-owned managed tier and project/local disableAllHooks must not win.
+func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID, strictMCPConfigPath, claudeSettingSources string) ([]string, error) {
 	if chatMode && agentType != AgentTypeClaude && agentType != AgentTypeCodex {
 		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude and codex agents, not %q", agentType))
 	}
@@ -740,6 +743,9 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 			argv = append(argv, "--mcp-config", strictMCPConfigPath, "--strict-mcp-config")
 		} else {
 			argv = append(argv, claudeMCPConfigArgs(string(agentType))...)
+		}
+		if claudeSettingSources != "" {
+			argv = append(argv, "--setting-sources", claudeSettingSources)
 		}
 		if systemPrompt != "" {
 			argv = append(argv, "--append-system-prompt", systemPrompt)

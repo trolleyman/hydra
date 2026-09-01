@@ -470,8 +470,12 @@ func tailNotifications(dir string, stop <-chan struct{}, out chan<- [][]byte) {
 // claudeProjectDir resolves the Claude project directory recording a
 // worktree's transcripts (~/.claude/projects/<worktree-slug>), or "" when it
 // can't be determined.
-func claudeProjectDir(worktree string) string {
-	return paths.ClaudeProjectDir(worktree)
+func claudeProjectDir(projectRoot, sessionID, worktree string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return paths.ClaudeProjectDirForSession(projectRoot, sessionID, home, worktree)
 }
 
 // pumpChatOutput relays a chat session's events to the socket until
@@ -519,7 +523,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		// live contains only events appended after it.
 		s.sendChatHistory(conn, sessionID, fmt.Sprintf("%d", snapshot.Through+1), 100)
 	}
-	dir := claudeProjectDir(worktree)
+	dir := claudeProjectDir(projectRoot, sessionID, worktree)
 	// Which of the questions just replayed is the CLI actually still blocked on.
 	// Ahead of replay_done, so the client has it when it settles the transcript.
 	if pending, known := s.Sessions.PendingQuestions(sessionID); known {

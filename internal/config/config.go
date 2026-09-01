@@ -356,11 +356,11 @@ var inheritedEnvReserved = map[string]bool{
 	"TMPDIR": true, "TMP": true, "TEMP": true,
 	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
 	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
-	"CODEX_HOME": true, "GEMINI_SYSTEM_MD": true, "GEMINI_WRITE_SYSTEM_MD": true,
+	"CLAUDE_CONFIG_DIR": true, "CODEX_HOME": true,
+	"GEMINI_SYSTEM_MD": true, "GEMINI_WRITE_SYSTEM_MD": true,
 	"CLAUDE_CODE_NO_FLICKER": true, "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": true,
 	"MISE_TRUSTED_CONFIG_PATHS": true,
-	"HTTP_PROXY":                true, "http_proxy": true, "HTTPS_PROXY": true, "https_proxy": true,
-	"ALL_PROXY": true, "all_proxy": true, "NO_PROXY": true, "no_proxy": true,
+	"HTTP_PROXY":                true, "HTTPS_PROXY": true, "ALL_PROXY": true, "NO_PROXY": true,
 }
 
 // ValidateInheritedEnvName checks one sandbox.inherit_env entry. It is exported
@@ -376,7 +376,8 @@ func ValidateInheritedEnvName(name string) error {
 			return errtrace.Errorf("invalid environment variable name %q", name)
 		}
 	}
-	if strings.HasPrefix(name, "HYDRA_") || inheritedEnvReserved[name] {
+	upperName := strings.ToUpper(name)
+	if strings.HasPrefix(upperName, "HYDRA_") || inheritedEnvReserved[upperName] {
 		return errtrace.Errorf("environment variable %q is managed by Hydra and cannot be inherited", name)
 	}
 	return nil
