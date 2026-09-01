@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -760,7 +759,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "", seed.MCPConfigPath)
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "", seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
@@ -1406,12 +1405,12 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	resumeSession := ""
 	switch head.AgentType {
 	case sandbox.AgentTypeClaude:
-		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
+		dir := paths.ClaudeProjectDirForSession(projectRoot, head.ID, home, worktreePath)
 		resumeSession = claudestream.LatestSessionID(dir)
 	case sandbox.AgentTypeCodex:
 		resumeSession = head.ConversationID
 	}
-	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession, seed.MCPConfigPath)
+	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession, seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -2023,7 +2022,7 @@ func removeClaudeSessionDir(head Head) {
 	if slug == "" {
 		return
 	}
-	dir := filepath.Join(u.HomeDir, ".claude", "projects", slug)
+	dir := paths.ClaudeProjectDirForSession(head.ProjectPath, head.ID, u.HomeDir, worktree)
 	if err := os.RemoveAll(dir); err != nil {
 		log.Printf("warn: heads: purge remove claude session dir %s for %s: %v", dir, head.ID, err)
 	} else {

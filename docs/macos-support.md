@@ -1,14 +1,13 @@
 # macOS support: current state and implementation plan
 
 Status: **partially implemented**. The core Seatbelt backend, shared
-build-addressed Hydra runtime, private temporary storage, and mount-free Codex
-configuration delivery, and Seatbelt hard egress described under "What works"
-are present. Codex reaches the point where a complete sandbox spec can be built,
-but real-hardware end-to-end validation remains. Claude, Gemini, and Copilot still
-need provider-specific redirects and fail explicitly at sandbox construction
-instead of running without their seeded policy. The phases below track the
-remaining provider-config, hard-network, hardening, hardcoded-`/tmp`
-compatibility, and validation work.
+build-addressed Hydra runtime, private temporary storage, mount-free Claude and
+Codex configuration delivery, and Seatbelt hard egress described under "What
+works" are present. Codex passes its first real-hardware head spawn;
+Claude still needs the same end-to-end validation. Gemini and Copilot need
+provider-specific redirects and fail explicitly at sandbox construction instead
+of running without their seeded policy. The phases below track the remaining
+provider-config, hardcoded-`/tmp` compatibility, and validation work.
 
 ## Background
 
@@ -61,6 +60,18 @@ What works:
   Codex can refresh it per head; macOS keychain authentication remains available.
   Static `skills`, `plugins`, `prompts`, and `rules` directories are shared by
   read-only links to the user's original `CODEX_HOME`.
+- Claude uses a persistent per-head `CLAUDE_CONFIG_DIR` beneath the same provider
+  state root. Its process working directory remains the head worktree; only its
+  configuration, cache, and transcript root is redirected. Hydra merges the
+  user's settings into an immutable generated `settings.json`, limits Claude to
+  that user settings scope so project-local `disableAllHooks` cannot suppress
+  the gate, and always launches with a separate immutable strict MCP config.
+  The writable `.claude.json` is re-sanitized before each launch so Claude can
+  preserve its own state without retaining an unapproved MCP server. File auth
+  is copied once, macOS Keychain auth remains available, static user extensions
+  are linked read-only, and an existing worktree transcript is APFS-cloned into
+  the per-head directory on first launch. Spawn, resume, chat transcript import,
+  shell-cwd tracking, review slots, and purge all resolve the redirected path.
 - Daemon, PTY sessions, unix sockets, autostart, and socket paths are all
   portable (`creack/pty`, `//go:build !windows`). The one `/proc` dependency
   (`pidIsHydraDaemon` in `internal/daemon/upgrade.go`) has a documented safe
@@ -77,15 +88,16 @@ What works:
 
 What is broken or missing:
 
-- **Claude, Gemini, and Copilot config seeding is not implemented.**
-  `internal/heads/seed.go` delivers per-head agent config via `Options.Binds`
-  and `Options.ROOverlays` - the gate policy JSON, the MCP catalog, merged
-  `~/.claude.json`, Gemini / Copilot / Codex config files, and Claude's tamper-proof
-  `/etc/claude-code/managed-settings.json` (hooks + gate wiring). These inputs
-  still need path redirects. The Darwin backend now rejects remaining
+- **Gemini and Copilot config seeding is not implemented.**
+  `internal/heads/seed.go` still delivers their settings, hooks, instructions,
+  and related generated inputs through `Options.Binds` or files inside the
+  writable worktree. The mount inputs still need path redirects and the
+  worktree-owned inputs need immutable native substitutes. The Darwin backend
+  rejects remaining
   `Binds`, `ROOverlays`, and `TmpfsDirs`, so these providers stop with a clear
   mount-input error instead of running with no decision gate, status hooks, or
-  MCP control server. GUI hardening is implemented independently of those
+  MCP control server. Claude and Codex emit no mount inputs on Darwin. GUI
+  hardening is implemented independently of the remaining
   provider redirects and still needs the real-hardware probes described below.
 - Programs that open the literal `/tmp` instead of honoring `TMPDIR` cannot use
   the private scratch path; shared `/tmp` is deliberately inaccessible.
@@ -107,7 +119,8 @@ What is broken or missing:
 | Feature | Verdict | macOS mechanism |
 |---|---|---|
 | FS sandbox (writable/masked/restore_ro) | done | Seatbelt allow/deny |
-| Codex config seeding | implemented, needs E2E validation | per-head `CODEX_HOME` + immutable files |
+| Codex config seeding | implemented, first spawn validated | per-head `CODEX_HOME` + immutable files |
+| Claude config seeding | implemented, needs E2E validation | per-head `CLAUDE_CONFIG_DIR` + immutable settings/MCP |
 | Other provider seeding | feasible, biggest remaining provider job | copy + env redirection |
 | Hard network egress | implemented, needs E2E validation | Seatbelt loopback-only + existing CONNECT proxy |
 | Per-head temporary storage | done for standard temp APIs | `TMPDIR` + Seatbelt deny on shared temp roots |
@@ -127,7 +140,7 @@ and Seatbelt rules. Hydra uses three classes of runtime state:
   runtime/<build-id>/hydra-internal       shared, immutable
   projects/<project>/tmp/<head-id>/       per-head, writable
   projects/<project>/seed/<head-id>/      per-head, immutable inputs
-  projects/<project>/providers/<head-id>/ per-head, persistent provider state
+  projects/<project>/providers/<head-id>/ per-head, persistent Claude/Codex state
 ```
 
 - `runtime/<build-id>/hydra-internal` is staged once per Hydra build and shared
@@ -145,9 +158,11 @@ and Seatbelt rules. Hydra uses three classes of runtime state:
   hooks, and instructions. Every file is readable but protected by a late
   `deny file-write*` rule.
 - `providers/<head-id>` contains provider-owned state that must survive a
-  stop/resume. For Codex this is its redirected home: session/auth state is
-  writable, while the generated policy-bearing files inside it receive later
-  immutable-path denies. It survives archive and is removed on permanent purge.
+  stop/resume. Claude and Codex each receive a redirected provider home beneath
+  it: session/auth state is writable, while generated policy-bearing files
+  receive later immutable-path denies. The provider root changes; the agent's
+  process cwd does not and remains its worktree. State survives archive and is
+  removed on permanent purge.
 
 Only byte-identical immutable inputs are shared. Gate policy, approvals, status,
 provider configuration containing worktree/head details, pre-spawn environment,
@@ -181,7 +196,12 @@ silent downgrade.
       - Darwin: write head-specific inputs beneath `seed/<head-id>`, use the
         shared build-addressed Hydra binary, add explicit read-only Seatbelt
         rules, and redirect the agent to real paths:
-        - `~/.claude.json` + `~/.claude` -> `CLAUDE_CONFIG_DIR`.
+        - [x] Claude: per-head `CLAUDE_CONFIG_DIR`; immutable merged user
+          settings and strict MCP input; writable re-sanitized `.claude.json`;
+          one-time file-auth copy; Keychain auth; shared static extensions;
+          legacy transcript clone; redirected transcript consumers. Project and
+          local settings scopes are excluded because macOS has no unprivileged
+          managed-settings tier that they cannot override.
         - Gemini system prompt already uses `GEMINI_SYSTEM_MD` (a redirect,
           not a bind) - works today; Gemini `settings.json` needs the same
           treatment or a fallback.
@@ -201,14 +221,15 @@ silent downgrade.
       generated hooks, and MCP configs; protect it with a Darwin immutable-path
       rule. Canonicalize `/tmp` and `/var` aliases before emitting Seatbelt path
       rules so the kernel-visible `/private/...` path is actually matched.
-- [ ] Managed settings substitute. The macOS managed-settings location is a
+- [x] Claude managed settings substitute. The macOS managed-settings location is a
       root-owned system path, so per-head files there are impossible. Instead:
       seed the identical hooks/gate config as ordinary user settings inside
       the redirected `CLAUDE_CONFIG_DIR`, then add a Seatbelt
-      `deny file-write*` rule on that file. Same tamper-proofing (the kernel
-      refuses the write), delivered at a different settings-precedence layer.
-      Copilot / Codex configs seed the same way (copy into redirected or real
-      dot-dirs, Seatbelt-deny writes where tampering matters).
+      `deny file-write*` rule on that file and launch with only the generated
+      user settings source. The kernel refuses writes and no lower project/local
+      settings scope is loaded, so `disableAllHooks` cannot override it. Codex
+      uses the equivalent immutable redirected config. Copilot still needs its
+      provider-specific substitute.
 - [x] Delete the stale `sandbox-demo/` comment references.
 
 ### Phase 2: hard network egress

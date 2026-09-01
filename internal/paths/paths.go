@@ -686,14 +686,37 @@ func migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir st
 // letter or digit becomes '-' (no collapsing of runs), so e.g.
 // /home/u/code/hydra/.hydra/local/worktrees/x ->
 // -home-u-code-hydra--hydra-local-worktrees-x.
-// ClaudeProjectDir resolves the directory where Claude Code records a worktree's
-// transcripts (~/.claude/projects/<slug>), or "" when it can't be determined.
+// ClaudeConfigDirForSession resolves Claude's writable configuration and session
+// root. Darwin heads use Hydra's persistent per-session provider state; other
+// platforms retain Claude's configured shared user directory.
+func ClaudeConfigDirForSession(projectRoot, id, home string) string {
+	if runtime.GOOS == "darwin" && projectRoot != "" && id != "" {
+		return filepath.Join(GetProviderStateDirFromProjectRoot(projectRoot, id), "claude")
+	}
+	if configured := os.Getenv("CLAUDE_CONFIG_DIR"); configured != "" {
+		return configured
+	}
+	return filepath.Join(home, ".claude")
+}
+
+// ClaudeProjectDirForSession resolves the directory where one Claude session
+// records a worktree's transcripts, or "" when it can't be determined.
+func ClaudeProjectDirForSession(projectRoot, id, home, worktree string) string {
+	if home == "" || worktree == "" {
+		return ""
+	}
+	return filepath.Join(ClaudeConfigDirForSession(projectRoot, id, home), "projects", ClaudeProjectsSlug(worktree))
+}
+
+// ClaudeProjectDir resolves the legacy/shared directory where Claude records a
+// worktree's transcripts. Session-aware callers should use
+// ClaudeProjectDirForSession so Darwin selects its per-head provider state.
 func ClaudeProjectDir(worktree string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || worktree == "" {
 		return ""
 	}
-	return filepath.Join(home, ".claude", "projects", ClaudeProjectsSlug(worktree))
+	return ClaudeProjectDirForSession("", "", home, worktree)
 }
 
 func ClaudeProjectsSlug(p string) string {

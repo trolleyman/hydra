@@ -357,7 +357,10 @@ func firstQuestion(raw json.RawMessage) string {
 // use this helper so they always show the same authored description.
 func CommandDescription(command string) string {
 	script := strings.TrimSpace(command)
-	for _, launcher := range []string{"bash -lc ", "bash -c ", "/bin/bash -lc ", "/bin/bash -c ", "/usr/bin/bash -lc ", "/usr/bin/bash -c "} {
+	for _, launcher := range []string{
+		"bash -lc ", "bash -c ", "/bin/bash -lc ", "/bin/bash -c ", "/usr/bin/bash -lc ", "/usr/bin/bash -c ",
+		"zsh -lc ", "zsh -c ", "/bin/zsh -lc ", "/bin/zsh -c ", "/usr/bin/zsh -lc ", "/usr/bin/zsh -c ",
+	} {
 		if strings.HasPrefix(script, launcher) {
 			script = strings.TrimSpace(strings.TrimPrefix(script, launcher))
 			if len(script) >= 2 && (script[0] == '\'' || script[0] == '"') && script[len(script)-1] == script[0] {

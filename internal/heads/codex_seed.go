@@ -30,13 +30,14 @@ func configuredCodexHome(home string) string {
 	return filepath.Join(home, ".codex")
 }
 
-// writeCodexSeedFile atomically replaces a generated config file. Darwin keeps
+// writeProviderSeedFile atomically replaces a generated provider config file.
+// Darwin keeps
 // these files in a provider-writable directory, so following an old symlink on
 // resume could otherwise redirect the daemon's write outside CODEX_HOME.
-func writeCodexSeedFile(path string, data []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".hydra-codex-seed-*")
+func writeProviderSeedFile(path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".hydra-provider-seed-*")
 	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("create temporary Codex seed: %w", err))
+		return errtrace.Wrap(fmt.Errorf("create temporary provider seed: %w", err))
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)

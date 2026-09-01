@@ -13,7 +13,7 @@ import (
 )
 
 func prepareSeedDir(projectRoot, cacheDir, id string, agentType sandbox.AgentType) (string, error) {
-	if agentType != sandbox.AgentTypeCodex {
+	if agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeCodex {
 		return cacheDir, nil
 	}
 	dir := paths.GetSeedDirFromProjectRoot(projectRoot, id)

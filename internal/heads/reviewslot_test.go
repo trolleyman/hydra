@@ -68,7 +68,7 @@ func TestReviewConversationIDDetectsClaudeTranscript(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	worktree := paths.GetReviewCheckoutDirFromProjectRoot(root, "h1")
-	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
+	dir := paths.ClaudeProjectDirForSession(root, ReviewSessionID("h1"), home, worktree)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
