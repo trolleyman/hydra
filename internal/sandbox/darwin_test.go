@@ -3,11 +3,17 @@
 package sandbox
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildSpecDarwinImmutablePathOverridesWritableParent(t *testing.T) {
@@ -128,6 +134,145 @@ func TestBuildSpecDarwinRejectsMountInputs(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot apply mount-based inputs") {
 		t.Fatalf("BuildSpec mount input error = %v", err)
+	}
+}
+
+func TestBuildSpecDarwinHardEgressAllowsOnlyProxyAndConfiguredLoopback(t *testing.T) {
+	spec, err := BuildSpec(Options{
+		WorktreePath: t.TempDir(),
+		Home:         t.TempDir(),
+		Network: NetworkPolicy{
+			Mode:                 NetHard,
+			Enabled:              true,
+			FilterHosts:          true,
+			HardProxyPort:        43123,
+			HardInboundPort:      38913,
+			AllowedLoopbackPorts: []int{5037, 43123, 0, 70000},
+		},
+		Argv: []string{"/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+	data, err := os.ReadFile(spec.Args[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := string(data)
+	deny := `(deny network-outbound (remote ip))`
+	proxyAllow := `(allow network-outbound (remote tcp "localhost:43123"))`
+	serviceAllow := `(allow network-outbound (remote tcp "localhost:5037"))`
+	bindDeny := `(deny network-bind (local ip))`
+	loopbackBind := `(allow network-bind (local tcp "localhost:*") (local udp "localhost:*"))`
+	inboundBind := `(allow network-bind (local tcp "*:38913"))`
+	for _, rule := range []string{deny, proxyAllow, serviceAllow, bindDeny, loopbackBind, inboundBind} {
+		if !strings.Contains(profile, rule) {
+			t.Errorf("hard-egress profile lacks %q:\n%s", rule, profile)
+		}
+	}
+	if strings.Count(profile, proxyAllow) != 1 {
+		t.Errorf("proxy port rule count = %d, want 1", strings.Count(profile, proxyAllow))
+	}
+	if strings.Contains(profile, "localhost:0") || strings.Contains(profile, "localhost:70000") {
+		t.Fatalf("invalid loopback port reached profile:\n%s", profile)
+	}
+	if strings.Index(profile, deny) > strings.Index(profile, proxyAllow) {
+		t.Fatalf("loopback allow must follow the general IP deny:\n%s", profile)
+	}
+}
+
+func TestBuildSpecDarwinHardEgressRequiresProxyPort(t *testing.T) {
+	_, err := BuildSpec(Options{
+		WorktreePath: t.TempDir(),
+		Home:         t.TempDir(),
+		Network:      NetworkPolicy{Mode: NetHard, Enabled: true, FilterHosts: true},
+		Argv:         []string{"/bin/true"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires a valid filtering proxy port") {
+		t.Fatalf("BuildSpec hard egress error = %v", err)
+	}
+}
+
+func TestBuildSpecDarwinHardEgressEnforcesLoopbackPort(t *testing.T) {
+	listen := func() net.Listener {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			if strings.Contains(err.Error(), "operation not permitted") {
+				t.Skip("test runner sandbox cannot open loopback listeners")
+			}
+			t.Fatal(err)
+		}
+		return ln
+	}
+	allowed := listen()
+	defer allowed.Close()
+	blocked := listen()
+	defer blocked.Close()
+	allowedPort := allowed.Addr().(*net.TCPAddr).Port
+	blockedPort := blocked.Addr().(*net.TCPAddr).Port
+
+	received := make(chan error, 1)
+	go func() {
+		conn, err := allowed.Accept()
+		if err != nil {
+			received <- err
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		buf := make([]byte, 2)
+		if _, err := io.ReadFull(conn, buf); err != nil {
+			received <- err
+			return
+		}
+		if string(buf) != "ok" {
+			received <- fmt.Errorf("received %q, want ok", buf)
+			return
+		}
+		received <- nil
+	}()
+
+	spec, err := BuildSpec(Options{
+		WorktreePath: t.TempDir(),
+		Home:         t.TempDir(),
+		Network: NetworkPolicy{
+			Mode:          NetHard,
+			Enabled:       true,
+			FilterHosts:   true,
+			HardProxyPort: allowedPort,
+		},
+		Argv: []string{
+			"/bin/bash", "-c",
+			`exec 3<>/dev/tcp/127.0.0.1/$1 || exit 41; printf ok >&3; if exec 4<>/dev/tcp/127.0.0.1/$2 2>/dev/null; then exit 42; fi`,
+			"bash", strconv.Itoa(allowedPort), strconv.Itoa(blockedPort),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, spec.Path, spec.Args[1:]...)
+	cmd.Env = spec.Env
+	cmd.Dir = spec.Dir
+	output, runErr := cmd.CombinedOutput()
+	if strings.Contains(string(output), "sandbox_apply: Operation not permitted") {
+		t.Skip("sandbox-exec cannot nest inside the test runner's existing sandbox")
+	}
+	if runErr != nil {
+		t.Fatalf("hard-egress probe failed: %v\n%s", runErr, output)
+	}
+	select {
+	case err := <-received:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("allowed loopback listener received no connection")
 	}
 }
 

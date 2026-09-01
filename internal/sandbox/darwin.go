@@ -104,9 +104,32 @@ func BuildSpec(opts Options) (*Spec, error) {
 	if opts.WorkingDirReadOnly {
 		fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(opts.WorktreePath))
 	}
-	// Network.
+	// Network. Hard mode keeps ordinary IP egress denied and opens only the
+	// host-loopback filtering proxy plus explicitly configured loopback services.
+	// Unix-domain sockets (including mDNSResponder) are unaffected; name
+	// resolution is not itself an egress route, and the host-side proxy resolves
+	// CONNECT destinations independently.
 	if !opts.Network.Enabled {
 		b.WriteString("(deny network*)\n")
+	} else if opts.Network.Mode == NetHard {
+		if opts.Network.HardProxyPort < 1 || opts.Network.HardProxyPort > 65535 {
+			return nil, errtrace.Wrap(fmt.Errorf("macOS hard egress requires a valid filtering proxy port"))
+		}
+		b.WriteString("(deny network-outbound (remote ip))\n")
+		b.WriteString("(deny network-bind (local ip))\n")
+		b.WriteString("(allow network-bind (local tcp \"localhost:*\") (local udp \"localhost:*\"))\n")
+		if port := opts.Network.HardInboundPort; port > 0 && port <= 65535 {
+			fmt.Fprintf(&b, "(allow network-bind (local tcp \"*:%d\"))\n", port)
+		}
+		ports := append([]int{opts.Network.HardProxyPort}, opts.Network.AllowedLoopbackPorts...)
+		seen := make(map[int]bool, len(ports))
+		for _, port := range ports {
+			if port < 1 || port > 65535 || seen[port] {
+				continue
+			}
+			seen[port] = true
+			fmt.Fprintf(&b, "(allow network-outbound (remote tcp \"localhost:%d\"))\n", port)
+		}
 	}
 
 	// Copy-on-write mounts. macOS has no overlay primitive in Seatbelt, but APFS

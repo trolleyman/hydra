@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -82,20 +83,28 @@ func TestStartCommandEgressModes(t *testing.T) {
 		t.Fatal("Close did not release the proxy")
 	}
 
-	// Hard: with tooling available the wrap must be set (and carry the inbound
-	// forward); without it the policy fails closed (Enabled flipped off).
+	// Hard: Linux wraps in pasta+nft; Darwin records the proxy port for Seatbelt;
+	// an unsupported host fails closed (Enabled flipped off).
 	hard := sandbox.NetworkPolicy{Enabled: true, FilterHosts: true, Mode: sandbox.NetHard}
 	s = StartCommandEgress("t", sandbox.AgentTypeBash, &hard, 38913, nil)
-	if DetectHardMode().Available {
-		if s.Wrap == nil {
+	if hard.Enabled {
+		if len(s.Env) == 0 || s.proxy == nil {
+			t.Fatalf("active hard mode lacks proxy/env: %+v", s)
+		}
+		if runtime.GOOS == "linux" && s.Wrap == nil {
 			t.Fatal("hard mode with tooling must produce a wrap")
 		}
-		argv := s.Wrap([]string{"/usr/bin/bwrap", "--", "bash"}, "")
-		if !argHasValue(argv, "-t", "127.0.0.1/38913") {
-			t.Errorf("hard wrap missing inbound forward: %v", argv)
+		if runtime.GOOS == "linux" {
+			argv := s.Wrap([]string{"/usr/bin/bwrap", "--", "bash"}, "")
+			if !argHasValue(argv, "-t", "127.0.0.1/38913") {
+				t.Errorf("hard wrap missing inbound forward: %v", argv)
+			}
 		}
-	} else if hard.Enabled {
-		t.Fatal("hard without tooling must fail closed (Enabled=false)")
+		if runtime.GOOS == "darwin" && (s.Wrap != nil || hard.HardProxyPort == 0) {
+			t.Fatalf("Darwin hard mode did not configure Seatbelt: wrap=%v port=%d", s.Wrap != nil, hard.HardProxyPort)
+		}
+	} else if s.proxy != nil || len(s.Env) != 0 {
+		t.Fatalf("failed-closed hard mode retained proxy/env: %+v", s)
 	}
 	s.Close()
 }

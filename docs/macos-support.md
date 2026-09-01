@@ -2,9 +2,9 @@
 
 Status: **partially implemented**. The core Seatbelt backend, shared
 build-addressed Hydra runtime, private temporary storage, and mount-free Codex
-configuration delivery described under "What works" are present. Codex reaches
-the point where a complete sandbox spec can be built, but hard network mode and
-real-hardware end-to-end validation remain. Claude, Gemini, and Copilot still
+configuration delivery, and Seatbelt hard egress described under "What works"
+are present. Codex reaches the point where a complete sandbox spec can be built,
+but real-hardware end-to-end validation remains. Claude, Gemini, and Copilot still
 need provider-specific redirects and fail explicitly at sandbox construction
 instead of running without their seeded policy. The phases below track the
 remaining provider-config, hard-network, hardening, hardcoded-`/tmp`
@@ -62,9 +62,15 @@ What works:
   portable (`creack/pty`, `//go:build !windows`). The one `/proc` dependency
   (`pidIsHydraDaemon` in `internal/daemon/upgrade.go`) has a documented safe
   fallback. The folder picker has a native `osascript` path.
-- Hard-mode egress fails **closed**: `pasta`/`nft` do not exist on macOS, so
-  `DetectHardMode` reports unavailable and `internal/heads/egress.go` disables
-  the head's network entirely rather than running unfiltered.
+- Hard-mode egress uses the existing host-side filtering CONNECT proxy plus a
+  Seatbelt rule that denies all IP egress except TCP to that one random
+  loopback proxy port and `allowed_loopback_ports`. The sandbox needs no direct
+  DNS route because CONNECT hostnames are resolved by the host-side proxy;
+  access to the local `mDNSResponder` Unix socket is harmless and remains
+  available. IP listeners are restricted to loopback, except a one-shot
+  runner's explicit inbound service port. The proxy port stays pinned for a
+  supervisor's lifetime because its Seatbelt profile is baked at first launch,
+  matching Linux's invariant.
 
 What is broken or missing:
 
@@ -72,19 +78,19 @@ What is broken or missing:
   `internal/heads/seed.go` delivers per-head agent config via `Options.Binds`
   and `Options.ROOverlays` - the gate policy JSON, the MCP catalog, merged
   `~/.claude.json`, Gemini / Copilot / Codex config files, and Claude's tamper-proof
-  `/etc/claude-code/managed-settings.json` (hooks + gate wiring). `darwin.go`
+  `/etc/claude-code/managed-settings.json` (hooks + gate wiring). These inputs
   still need path redirects. The Darwin backend now rejects remaining
   `Binds`, `ROOverlays`, and `TmpfsDirs`, so these providers stop with a clear
   mount-input error instead of running with no decision gate, status hooks, or
-  MCP control server. `EgressWrap` and `HardenGUI` remain unimplemented.
+  MCP control server. `HardenGUI` remains unimplemented.
 - Programs that open the literal `/tmp` instead of honoring `TMPDIR` cannot use
   the private scratch path; shared `/tmp` is deliberately inaccessible.
-- No hard-mode network filtering (only global on/off; advisory mode works).
-- No seccomp equivalent, no `HardenGUI`, writable CoW clones skipped.
+- Hard-mode network filtering needs its real-hardware bypass/allow-list probe;
+  the in-repo enforcement test skips when run inside another Seatbelt sandbox.
+- No `HardenGUI`; writable CoW clones are skipped. Seccomp deliberately has no
+  macOS port because its blocked syscall surface is Linux-specific.
 - Latent nit: `paths.ComparePaths` is case-sensitive on darwin but APFS is
   case-insensitive by default.
-- Stale comments in `darwin.go` and `defaults.go` reference a `sandbox-demo/`
-  directory that is not in the repo or its history.
 - Never validated on real hardware.
 
 ## Feasibility summary
@@ -94,7 +100,7 @@ What is broken or missing:
 | FS sandbox (writable/masked/restore_ro) | done | Seatbelt allow/deny |
 | Codex config seeding | implemented, needs E2E validation | per-head `CODEX_HOME` + immutable files |
 | Other provider seeding | feasible, biggest remaining provider job | copy + env redirection |
-| Hard network egress | feasible, simpler than Linux | Seatbelt loopback-only + existing CONNECT proxy |
+| Hard network egress | implemented, needs E2E validation | Seatbelt loopback-only + existing CONNECT proxy |
 | Per-head temporary storage | done for standard temp APIs | `TMPDIR` + Seatbelt deny on shared temp roots |
 | Seccomp | not needed | threats are Linux-specific or Seatbelt-covered |
 | HardenGUI | feasible, stronger than Linux | mach-service + signal rules |
@@ -201,22 +207,26 @@ silent downgrade.
 Goal: `network.mode = "hard"` works on macOS instead of degrading to
 network-off.
 
-- [ ] Seatbelt profile: `(deny network*)` plus allow rules for loopback to the
+- [x] Seatbelt profile: deny IP egress plus allow rules for loopback to the
       egress proxy port only. The existing Go CONNECT proxy
       (`internal/egress/proxy.go`) runs unchanged; proxy env vars are injected
       as on Linux. Non-proxy-aware traffic fails at the kernel, exactly like
       the nft lock. Hostname filtering already lives in the proxy on both
       platforms.
-- [ ] `network.allowed_loopback_ports` maps to additional loopback allow
+- [x] `network.allowed_loopback_ports` maps to additional loopback allow
       rules (simpler than pasta's `-T` splicing on Linux).
-- [ ] Decide DNS posture: with CONNECT-by-hostname the sandbox needs no
-      direct DNS, but macOS resolution flows through the `mDNSResponder` unix
-      socket - allow it (resolution is not egress) or deny for strictness.
-- [ ] `DetectHardMode` grows a darwin arm that reports available (no external
-      tools needed); `internal/heads/egress.go` stops forcing `EgressOff`.
-- [ ] Note the port-pinning invariant from Linux does not apply (no netns
-      bakes a port), but keeping the pinned-port behavior is harmless and
-      consistent.
+- [x] DNS posture: deny every direct IP route but leave the local
+      `mDNSResponder` Unix socket available. Resolution is not egress, and the
+      proxy independently resolves CONNECT hostnames.
+- [x] The platform boundary abstraction reports Darwin hard mode available
+      without external tools; heads and one-shot runner commands use it instead
+      of forcing `EgressOff`.
+- [x] Keep the proxy port pinned for the supervisor lifetime. Darwin's Seatbelt
+      profile bakes that port just as Linux's nft rule does.
+- [ ] Run the real-hardware enforcement probe: allowed proxy port succeeds,
+      another listening loopback port fails, and direct non-loopback sockets
+      fail. The test is present but cannot nest inside an existing Seatbelt
+      sandbox.
 
 ### Phase 3: /tmp, hardening, CoW
 
