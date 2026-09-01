@@ -83,10 +83,10 @@ func resolveUserPath(p, home string) string {
 	return filepath.Clean(p)
 }
 
-// ComparePaths compares two paths using platform-appropriate rules.
-// On Windows it is case-insensitive; on other platforms it is case-sensitive.
+// ComparePaths compares two paths using platform-appropriate rules. Windows and
+// default macOS filesystems are case-insensitive; other platforms are sensitive.
 func ComparePaths(p1, p2 string) bool {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		return strings.EqualFold(p1, p2)
 	}
 	return p1 == p2

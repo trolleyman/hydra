@@ -104,6 +104,26 @@ func BuildSpec(opts Options) (*Spec, error) {
 	if opts.WorkingDirReadOnly {
 		fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(opts.WorktreePath))
 	}
+	// A head may signal itself and processes it spawned, but not its supervisor
+	// parent or unrelated host processes. Besides containing `kill`/`pkill`, this
+	// prevents an agent from killing the hydra-internal process that owns its
+	// sandbox and control socket.
+	b.WriteString("(deny signal)\n")
+	b.WriteString("(allow signal (target self))\n")
+	b.WriteString("(allow signal (target children))\n")
+	if opts.HardenGUI {
+		// macOS GUI, clipboard, and Apple Events access is brokered by these Mach
+		// services rather than filesystem sockets. Deny their bootstrap lookups.
+		for _, service := range []string{
+			"com.apple.windowserver",
+			"com.apple.windowserver.active",
+			"com.apple.pasteboard.1",
+			"com.apple.pboard",
+			"com.apple.coreservices.appleevents",
+		} {
+			fmt.Fprintf(&b, "(deny mach-lookup (global-name %q))\n", service)
+		}
+	}
 	// Network. Hard mode keeps ordinary IP egress denied and opens only the
 	// host-loopback filtering proxy plus explicitly configured loopback services.
 	// Unix-domain sockets (including mDNSResponder) are unaffected; name
@@ -167,6 +187,9 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// when it falls through. The resolved $HYDRA_ENV is persisted in this head's
 	// private temp directory so sibling sandboxed shells can reuse it.
 	env := RuntimeEnv(opts.Env, opts.TmpDir)
+	if opts.HardenGUI {
+		env = withoutEnvKeys(env, "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS")
+	}
 	args = append(args, withPreSpawn(opts.PreSpawnScript, SandboxPreSpawnEnvFile(opts.TmpDir), opts.Argv)...)
 
 	return &Spec{

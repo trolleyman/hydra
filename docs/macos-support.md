@@ -87,10 +87,12 @@ What is broken or missing:
   the private scratch path; shared `/tmp` is deliberately inaccessible.
 - Hard-mode network filtering needs its real-hardware bypass/allow-list probe;
   the in-repo enforcement test skips when run inside another Seatbelt sandbox.
-- No `HardenGUI`; writable CoW clones are skipped. Seccomp deliberately has no
-  macOS port because its blocked syscall surface is Linux-specific.
-- Latent nit: `paths.ComparePaths` is case-sensitive on darwin but APFS is
-  case-insensitive by default.
+- Provider-specific GUI automation is blocked by Mach-service denies and GUI
+  environment removal, but still needs a real `pbpaste` / AppleScript probe.
+- Writable APFS CoW clones work when the destination can be populated as a
+  private directory; in-place overlays over existing absolute/home paths remain
+  impossible. Seccomp deliberately has no macOS port because its blocked syscall
+  surface is Linux-specific.
 - Never validated on real hardware.
 
 ## Feasibility summary
@@ -103,9 +105,9 @@ What is broken or missing:
 | Hard network egress | implemented, needs E2E validation | Seatbelt loopback-only + existing CONNECT proxy |
 | Per-head temporary storage | done for standard temp APIs | `TMPDIR` + Seatbelt deny on shared temp roots |
 | Seccomp | not needed | threats are Linux-specific or Seatbelt-covered |
-| HardenGUI | feasible, stronger than Linux | mach-service + signal rules |
-| cow_paths | half done | clonefile; in-place overlays impossible |
-| pkill self-kill protection | feasible | Seatbelt `signal` operation |
+| HardenGUI | implemented, needs E2E validation | mach-service denies + env removal |
+| cow_paths | partial by platform limit | writable clonefile copy; in-place overlays impossible |
+| pkill self-kill protection | implemented, needs E2E validation | Seatbelt target-scoped `signal` rules |
 
 ## Target runtime layout
 
@@ -241,23 +243,23 @@ network-off.
 - [ ] Programs that hardcode `/tmp` need a targeted redirect or an explicit
       unsupported diagnostic; unprivileged macOS has no mechanism that can give
       them a private mount at that literal path.
-- [ ] `HardenGUI`: same env unsets as Linux; instead of hiding socket paths,
+- [x] `HardenGUI`: same env unsets as Linux; instead of hiding socket paths,
       deny mach-lookup on WindowServer / pasteboard services (how macOS GUI
       access actually flows).
-- [ ] pkill self-kill: Seatbelt `signal` operation with target scoping gives a
+- [x] pkill self-kill: Seatbelt `signal` operation with target scoping gives a
       kernel-level fix that Linux only approximates via the decision gate.
-- [ ] Writable CoW clones: enable the currently-skipped writable variant -
-      APFS clones are block-level CoW and writable by nature, and cow writes
-      are per-head and discarded, so no mirror-back is needed. In-place
-      overlays over real host paths (`~/.gradle`) stay impossible without
-      mounts: handle per-tool via env redirects (`GRADLE_USER_HOME`) or
+- [x] Writable CoW clones: APFS clonefile copies are writable, private, retained
+      across resume, and never mirrored back when Hydra can populate a distinct
+      destination directory.
+- [ ] In-place overlays over real host paths (`~/.gradle`) remain impossible
+      without mounts: handle per-tool via env redirects (`GRADLE_USER_HOME`) or
       document the limitation.
 - [ ] Seccomp: do **not** port. The Linux blocklist
       (`internal/sandbox/seccomp/seccomp-gen.c`) targets mount/userns escapes,
       `open_by_handle_at`, kernel modules, kexec, keyring, eBPF - all either
       Linux-only surface or already root/entitlement-gated on macOS. Seatbelt
       is itself the syscall-level MAC layer. Document the mapping instead.
-- [ ] `paths.ComparePaths`: treat darwin as case-insensitive like Windows (or
+- [x] `paths.ComparePaths`: treat darwin as case-insensitive like Windows (or
       probe the filesystem), to match APFS defaults.
 
 ### Phase 4: validation

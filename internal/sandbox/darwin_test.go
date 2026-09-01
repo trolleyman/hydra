@@ -276,6 +276,87 @@ func TestBuildSpecDarwinHardEgressEnforcesLoopbackPort(t *testing.T) {
 	}
 }
 
+func TestBuildSpecDarwinHardensGUIAndSignals(t *testing.T) {
+	spec, err := BuildSpec(Options{
+		WorktreePath: t.TempDir(),
+		Home:         t.TempDir(),
+		HardenGUI:    true,
+		Env: []string{
+			"PATH=/usr/bin",
+			"DISPLAY=:0",
+			"WAYLAND_DISPLAY=wayland-0",
+			"XAUTHORITY=/tmp/xauth",
+			"DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus",
+		},
+		Argv: []string{"/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+	for _, entry := range spec.Env {
+		for _, key := range []string{"DISPLAY=", "WAYLAND_DISPLAY=", "XAUTHORITY=", "DBUS_SESSION_BUS_ADDRESS="} {
+			if strings.HasPrefix(entry, key) {
+				t.Errorf("GUI environment leaked %q", entry)
+			}
+		}
+	}
+	if !containsExact(spec.Env, "PATH=/usr/bin") {
+		t.Errorf("GUI hardening dropped unrelated environment: %v", spec.Env)
+	}
+	data, err := os.ReadFile(spec.Args[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := string(data)
+	for _, rule := range []string{
+		`(deny signal)`,
+		`(allow signal (target self))`,
+		`(allow signal (target children))`,
+		`(deny mach-lookup (global-name "com.apple.windowserver.active"))`,
+		`(deny mach-lookup (global-name "com.apple.pasteboard.1"))`,
+		`(deny mach-lookup (global-name "com.apple.coreservices.appleevents"))`,
+	} {
+		if !strings.Contains(profile, rule) {
+			t.Errorf("hardened profile lacks %q:\n%s", rule, profile)
+		}
+	}
+}
+
+func TestCowCloneDarwinCreatesPrivateWritableCopy(t *testing.T) {
+	root := t.TempDir()
+	lower := filepath.Join(root, "lower")
+	dest := filepath.Join(root, "dest")
+	for _, dir := range []string{lower, dest} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(lower, "input.txt"), []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mount := CowMount{Lower: lower, Dest: dest, Upper: filepath.Join(root, "writable-marker")}
+	if err := cowClone(mount); err != nil {
+		t.Fatal(err)
+	}
+	copyPath := filepath.Join(dest, "input.txt")
+	if data, err := os.ReadFile(copyPath); err != nil || string(data) != "source" {
+		t.Fatalf("clone contents = %q, %v", data, err)
+	}
+	if err := os.WriteFile(copyPath, []byte("private edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(lower, "input.txt")); err != nil || string(data) != "source" {
+		t.Fatalf("editing clone changed source: %q, %v", data, err)
+	}
+	if err := cowClone(mount); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(copyPath); err != nil || string(data) != "private edit" {
+		t.Fatalf("resume clone overwrote private edit: %q, %v", data, err)
+	}
+}
+
 func containsExact(entries []string, want string) bool {
 	for _, entry := range entries {
 		if entry == want {

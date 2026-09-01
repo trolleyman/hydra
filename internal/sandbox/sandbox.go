@@ -488,6 +488,21 @@ func RuntimeEnv(env []string, hostTmpDir string) []string {
 	return env
 }
 
+func withoutEnvKeys(env []string, keys ...string) []string {
+	blocked := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		blocked[key] = true
+	}
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if !blocked[key] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
 // preSpawnEnvSetup points $HYDRA_ENV at a writable file before the user's script
 // runs, so the script can persist environment variables into the launched agent
 // by appending `KEY=value` lines to it (the GitHub Actions $GITHUB_ENV model) -
