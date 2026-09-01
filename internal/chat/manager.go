@@ -64,6 +64,7 @@ type observedLine struct {
 }
 
 type worker struct {
+	id          string
 	store       *Store
 	in          chan observedLine
 	ctx         HeadContext
@@ -110,7 +111,7 @@ func (m *Manager) store(id string) (*Store, error) {
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	w := &worker{store: s, in: make(chan observedLine, 1024), ctx: ctx, codexSubs: map[string]codexSpawn{}, codexAssistantDeltas: pendingCodexAssistantDeltas(s.events)}
+	w := &worker{id: id, store: s, in: make(chan observedLine, 1024), ctx: ctx, codexSubs: map[string]codexSpawn{}, codexAssistantDeltas: pendingCodexAssistantDeltas(s.events)}
 	m.workers[id] = w
 	if s.Snapshot().Through == 0 && ctx.Prompt != "" {
 		prompt, _ := json.Marshal([]map[string]any{{"type": "text", "text": ctx.Prompt}})
@@ -764,7 +765,7 @@ func (m *Manager) importClaudeHistory(id string, w *worker) {
 	if err != nil {
 		return
 	}
-	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(w.ctx.WorkingDirectory()))
+	dir := paths.ClaudeProjectDirForSession(w.ctx.ProjectRoot, id, home, w.ctx.WorkingDirectory())
 	transcript := claudestream.LatestTranscript(dir)
 	if transcript == "" {
 		return

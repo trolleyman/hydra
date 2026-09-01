@@ -275,7 +275,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// the uncommitted blocks before it starts. Runs inline (see SetOnChatResume):
 	// once the new process appends, the tail is no longer safe to judge.
 	reg.SetOnChatResume(func(id, worktree string) {
-		retracted, err := chatEvents.RetractOrphanedTurn(id, paths.ClaudeProjectDir(worktree))
+		agent, _ := store.GetAgent(id)
+		projectRoot := ""
+		if agent != nil {
+			projectRoot = agent.ProjectPath
+		}
+		home, _ := os.UserHomeDir()
+		retracted, err := chatEvents.RetractOrphanedTurn(id, paths.ClaudeProjectDirForSession(projectRoot, id, home, worktree))
 		if err != nil {
 			log.Printf("warn: retract orphaned turn for %s: %v", id, err)
 			return

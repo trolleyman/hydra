@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -52,8 +53,14 @@ func TestSeedHeadClaudeConfigIsPerHead(t *testing.T) {
 
 	firstSeed := seedClaudeHead(t, projectRoot, home, "head-one", gate.Policy{})
 	secondSeed := seedClaudeHead(t, projectRoot, home, "head-two", gate.Policy{})
-	first := bindSource(t, firstSeed, target)
-	second := bindSource(t, secondSeed, target)
+	var first, second string
+	if runtime.GOOS == "darwin" {
+		first = filepath.Join(envValue(firstSeed.Env, "CLAUDE_CONFIG_DIR"), ".claude.json")
+		second = filepath.Join(envValue(secondSeed.Env, "CLAUDE_CONFIG_DIR"), ".claude.json")
+	} else {
+		first = bindSource(t, firstSeed, target)
+		second = bindSource(t, secondSeed, target)
+	}
 	if first == second {
 		t.Errorf("both heads seeded the same config file %q; it must be per-head", first)
 	}
@@ -92,11 +99,23 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
 
 	off := seedClaudeHead(t, projectRoot, home, "lenient", gate.Policy{})
-	if off.MCPConfigPath != "" {
+	if runtime.GOOS != "darwin" && off.MCPConfigPath != "" {
 		t.Errorf("non-strict policy set MCPConfigPath = %q, want empty", off.MCPConfigPath)
 	}
 
 	res := seedClaudeHead(t, projectRoot, home, "strict-head", gate.Policy{StrictMCP: true})
+	if runtime.GOOS == "darwin" {
+		if !strings.HasPrefix(res.MCPConfigPath, paths.GetSeedDirFromProjectRoot(projectRoot, "strict-head")+string(os.PathSeparator)) {
+			t.Fatalf("MCPConfigPath = %q, want native seed path", res.MCPConfigPath)
+		}
+		if !stringInSlice(res.ImmutablePaths, res.MCPConfigPath) {
+			t.Fatalf("native strict MCP config is not immutable: %v", res.ImmutablePaths)
+		}
+		if srv := readMCPServer(t, res.MCPConfigPath, gate.HydraControlServer); srv["command"] != res.HydraBinPath {
+			t.Errorf("control server = %+v, want command %q", srv, res.HydraBinPath)
+		}
+		return
+	}
 	if res.MCPConfigPath != strictMCPConfigSandboxPath {
 		t.Fatalf("MCPConfigPath = %q, want %q", res.MCPConfigPath, strictMCPConfigSandboxPath)
 	}

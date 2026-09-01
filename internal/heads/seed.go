@@ -67,6 +67,10 @@ type seedResult struct {
 	// turns it into --mcp-config <path> --strict-mcp-config; empty means the
 	// non-strict launch (control server inline, seeded ~/.claude.json for the rest).
 	MCPConfigPath string
+	// ClaudeSettingSources narrows Claude's settings scopes on platforms without
+	// an OS-managed settings tier. Darwin uses only the immutable generated user
+	// settings so a project-local disableAllHooks cannot suppress Hydra's gate.
+	ClaudeSettingSources string
 	// ROOverlays expose per-head files under otherwise read-only system dirs via a
 	// read-only overlay - e.g. /etc/claude-code/managed-settings.json under /etc.
 	// See sandbox.ROOverlay (a tmpfs mountpoint can't be created under the
@@ -216,58 +220,74 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 
 	switch agentType {
 	case sandbox.AgentTypeClaude:
-		// Hooks (status + gate), skip-dangerous, and the MCP allow-list go into
-		// Claude's MANAGED settings, bound read-only at the system managed path. This
-		// is the only tamper-proof scope: managed hooks keep running even if the agent
-		// writes {"disableAllHooks": true} into a writable user/project settings.json
-		// (which a read-only ~/.claude/settings.json bind could NOT prevent, since the
-		// agent can still create a project-scope .claude/settings.json). We therefore
-		// do NOT seed ~/.claude/settings.json at all - the user's own settings apply
-		// normally and our policy layers on top authoritatively. (docs/security-audit.md F4.)
+		layout, err := prepareClaudeSeedLayout(projectRoot, id, home, worktreePath, res)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		// Hooks (status + gate), skip-dangerous, and the MCP allow-list need a
+		// settings scope the head cannot override. Linux uses Claude's root-owned
+		// managed-settings tier. Darwin writes immutable settings inside the
+		// redirected CLAUDE_CONFIG_DIR and limits the CLI to that generated user
+		// scope, excluding project/local settings that could set disableAllHooks.
 		// The set of MCP servers KEPT in the seeded config: whole-server grants plus
 		// any server referenced by a per-tool grant (so a partially-allowed server
 		// still spawns and the runtime gate enforces the per-tool subset), minus any
 		// server on the block list (block overrides allow).
 		mcpKeep := mcpKeepSet(policy.MCPAllowed, policy.MCPToolsAllowed, policy.MCPBlocked)
-		managed, err := sandbox.BuildClaudeSettings(nil, stableHydraBin, policy.GateEnabled, mcpKeep)
+		var existingSettings []byte
+		if layout.native {
+			existingSettings = readHostFile(filepath.Join(layout.hostConfigDir, "settings.json"))
+		}
+		managed, err := sandbox.BuildClaudeSettings(existingSettings, stableHydraBin, policy.GateEnabled, mcpKeep)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		// Claude reads tamper-proof managed settings only from the fixed system path
+		// Linux reads tamper-proof managed settings only from the fixed system path
 		// /etc/claude-code/managed-settings.json (not relocatable). That dir doesn't
 		// exist on the host and lives under the read-only `/` bind, so bwrap can't
 		// mkdir a tmpfs mountpoint there. Instead expose it via a read-only overlay
 		// over /etc: write the file into a per-head upper layer that mirrors /etc's
 		// layout and union it on top of the real /etc (see sandbox.ROOverlay).
-		etcUpper := filepath.Join(cacheDir, "claude-etc-overlay", id)
-		mirrorDir := filepath.Join(etcUpper, filepath.Base(sandbox.ClaudeManagedSettingsDir))
-		if err := os.MkdirAll(mirrorDir, 0o755); err != nil {
-			return nil, errtrace.Wrap(err)
+		if layout.native {
+			managedFile := layout.settingsPath()
+			if err := writeProviderSeedFile(managedFile, managed, 0o644); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			res.ImmutablePaths = append(res.ImmutablePaths, managedFile)
+		} else {
+			etcUpper := filepath.Join(cacheDir, "claude-etc-overlay", id)
+			mirrorDir := filepath.Join(etcUpper, filepath.Base(sandbox.ClaudeManagedSettingsDir))
+			if err := os.MkdirAll(mirrorDir, 0o755); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			managedFile := filepath.Join(mirrorDir, filepath.Base(sandbox.ClaudeManagedSettingsPath))
+			if err := os.WriteFile(managedFile, managed, 0644); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			res.ROOverlays = append(res.ROOverlays, sandbox.ROOverlay{
+				Dir:   filepath.Dir(sandbox.ClaudeManagedSettingsDir),
+				Upper: etcUpper,
+			})
 		}
-		managedFile := filepath.Join(mirrorDir, filepath.Base(sandbox.ClaudeManagedSettingsPath))
-		if err := os.WriteFile(managedFile, managed, 0644); err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-		res.ROOverlays = append(res.ROOverlays, sandbox.ROOverlay{
-			Dir:   filepath.Dir(sandbox.ClaudeManagedSettingsDir),
-			Upper: etcUpper,
-		})
 
-		hostClaudeJSON := readHostFile(filepath.Join(home, ".claude.json"))
-		// Per-head, like every other seeded file: one shared copy was rewritten
-		// from scratch by every spawn and resume in the project, so a launch
-		// truncated the very file its siblings' sandboxes were reading through
-		// this bind. The per-project cache dir is not itself per-head, hence the
-		// id prefix (as with <id>-gate-policy.json).
+		hostClaudeJSON := readHostFile(layout.configSourcePath())
+		// Keep the legacy registry per-head. Linux exposes a generated cache file
+		// through the existing bind; Darwin re-sanitizes the persistent provider
+		// copy before each launch while strict MCP config remains authoritative.
 		claudeJSONHost := seedFilePath(res.seedDir, id, "claude.json")
+		if layout.native {
+			claudeJSONHost = layout.configPath()
+		}
 		cfg, err := sandbox.BuildClaudeConfig(hostClaudeJSON, worktreePath, mcpKeep, stableHydraBin, string(agentType))
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		if err := os.WriteFile(claudeJSONHost, cfg, 0644); err != nil {
+		if err := writeProviderSeedFile(claudeJSONHost, cfg, 0o600); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		deliverSeedFile(res, claudeJSONHost, path.Join(home, ".claude.json"), false)
+		if !layout.native {
+			deliverSeedFile(res, claudeJSONHost, layout.hostConfigPath, false)
+		}
 
 		mcpJSON := readHostFile(filepath.Join(projectRoot, ".mcp.json"))
 
@@ -277,8 +297,10 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// per-head /tmp - NOT over a host-owned path like ~/.claude.json, whose bind
 		// the host can detach by replacing the file (which is what silently undid
 		// the filtering the seeded config was doing). mcpKeep is the same set the
-		// non-strict path keeps, so the two agree on what is allowed.
-		if policy.StrictMCP {
+		// non-strict path keeps, so the two agree on what is allowed. Darwin always
+		// uses strict mode because its writable provider registry must never become
+		// an executable MCP-server source.
+		if policy.StrictMCP || layout.native {
 			strictCfg, err := sandbox.BuildStrictMCPConfig(hostClaudeJSON, mcpJSON, mcpKeep, stableHydraBin, string(agentType))
 			if err != nil {
 				return nil, errtrace.Wrap(err)
@@ -370,7 +392,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		if prePrompt != "" {
 			agentsHost := layout.generatedPath("AGENTS.md")
 			content := combineInstructions(prePrompt, readHostFile(filepath.Join(layout.hostHome, "AGENTS.md")))
-			if err := writeCodexSeedFile(agentsHost, content, 0644); err != nil {
+			if err := writeProviderSeedFile(agentsHost, content, 0644); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
 			deliverCodexSeedFile(res, layout, agentsHost, "AGENTS.md", false)
@@ -381,7 +403,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		if err := writeCodexSeedFile(hooksHost, hooks, 0o644); err != nil {
+		if err := writeProviderSeedFile(hooksHost, hooks, 0o644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 		deliverCodexSeedFile(res, layout, hooksHost, "hooks.json", true)
@@ -401,7 +423,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			log.Printf("warn: not seeding hydra MCP into codex config for %s: %v", id, cfgErr)
 		} else {
 			codexCfgHost := layout.generatedPath("config.toml")
-			if err := writeCodexSeedFile(codexCfgHost, codexCfg, 0o644); err != nil {
+			if err := writeProviderSeedFile(codexCfgHost, codexCfg, 0o644); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
 			deliverCodexSeedFile(res, layout, codexCfgHost, "config.toml", true)
@@ -647,6 +669,7 @@ func readHostFile(p string) []byte {
 // Gemini try to write into the read-only `.hydra/local/cache` inside the sandbox and
 // crash with EROFS. seedGeminiPrePrompt sets the ones it wants explicitly.
 var envKeysHydraOwns = map[string]bool{
+	"CLAUDE_CONFIG_DIR":      true,
 	"CODEX_HOME":             true,
 	"GEMINI_SYSTEM_MD":       true,
 	"GEMINI_WRITE_SYSTEM_MD": true,
