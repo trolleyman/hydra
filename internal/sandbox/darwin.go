@@ -35,6 +35,12 @@ func BuildSpec(opts Options) (*Spec, error) {
 	if opts.NoSandbox {
 		return errtrace.Wrap2(rawSpec(opts))
 	}
+	if len(opts.Binds) > 0 || len(opts.ROOverlays) > 0 || len(opts.TmpfsDirs) > 0 {
+		return nil, errtrace.Wrap(fmt.Errorf(
+			"macOS sandbox cannot apply mount-based inputs (binds=%d, read-only overlays=%d, tmpfs dirs=%d)",
+			len(opts.Binds), len(opts.ROOverlays), len(opts.TmpfsDirs),
+		))
+	}
 
 	sandboxExec, err := exec.LookPath("sandbox-exec")
 	if err != nil {

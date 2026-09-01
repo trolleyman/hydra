@@ -1,13 +1,14 @@
 # macOS support: current state and implementation plan
 
-Status: **partially implemented**. The core Seatbelt backend and shared
-build-addressed Hydra runtime described under "What works" are present. The
-supervisor no longer depends on the Linux-only `/tmp/hydra-internal` bind, but
-provider configuration still uses ignored bind/overlay delivery, so macOS heads
-are not supported yet. Per-head temporary storage is implemented for programs
-that honor the standard temp environment. The phases below track the remaining
-provider-config, hard-network, hardening, hardcoded-`/tmp` compatibility, and
-real-hardware validation work.
+Status: **partially implemented**. The core Seatbelt backend, shared
+build-addressed Hydra runtime, private temporary storage, and mount-free Codex
+configuration delivery described under "What works" are present. Codex reaches
+the point where a complete sandbox spec can be built, but hard network mode and
+real-hardware end-to-end validation remain. Claude, Gemini, and Copilot still
+need provider-specific redirects and fail explicitly at sandbox construction
+instead of running without their seeded policy. The phases below track the
+remaining provider-config, hard-network, hardening, hardcoded-`/tmp`
+compatibility, and validation work.
 
 ## Background
 
@@ -49,6 +50,14 @@ What works:
   pre-prompt, persists the pre-spawn environment there for sibling shells, and
   denies the shared `/tmp` and user temp roots. A narrow later rule exposes the
   head's own scratch directory and its random Hydra supervisor socket directory.
+- Codex uses a persistent per-head `CODEX_HOME` beneath the project state. Hydra
+  writes merged `AGENTS.md`, `hooks.json`, and `config.toml` there atomically and
+  Seatbelt makes those exact files immutable while leaving provider-owned state
+  writable. Gate policy and MCP catalog inputs use real immutable paths beneath
+  `seed/<head-id>`. A file-based `auth.json` is copied once with mode 0600 so
+  Codex can refresh it per head; macOS keychain authentication remains available.
+  Static `skills`, `plugins`, `prompts`, and `rules` directories are shared by
+  read-only links to the user's original `CODEX_HOME`.
 - Daemon, PTY sessions, unix sockets, autostart, and socket paths are all
   portable (`creack/pty`, `//go:build !windows`). The one `/proc` dependency
   (`pidIsHydraDaemon` in `internal/daemon/upgrade.go`) has a documented safe
@@ -59,15 +68,15 @@ What works:
 
 What is broken or missing:
 
-- **Provider config seeding is a silent no-op (the critical gap).**
+- **Claude, Gemini, and Copilot config seeding is not implemented.**
   `internal/heads/seed.go` delivers per-head agent config via `Options.Binds`
   and `Options.ROOverlays` - the gate policy JSON, the MCP catalog, merged
   `~/.claude.json`, Gemini / Copilot / Codex config files, and Claude's tamper-proof
   `/etc/claude-code/managed-settings.json` (hooks + gate wiring). `darwin.go`
-  never reads `Binds`, `ROOverlays`, `TmpfsDirs`, `EgressWrap`, or `HardenGUI`,
-  and returns no error. On a Mac a sandboxed head therefore runs
-  with no decision gate, no status hooks, no MCP control server, and the
-  user's real `~/.claude.json`.
+  still need path redirects. The Darwin backend now rejects remaining
+  `Binds`, `ROOverlays`, and `TmpfsDirs`, so these providers stop with a clear
+  mount-input error instead of running with no decision gate, status hooks, or
+  MCP control server. `EgressWrap` and `HardenGUI` remain unimplemented.
 - Programs that open the literal `/tmp` instead of honoring `TMPDIR` cannot use
   the private scratch path; shared `/tmp` is deliberately inaccessible.
 - No hard-mode network filtering (only global on/off; advisory mode works).
@@ -83,7 +92,8 @@ What is broken or missing:
 | Feature | Verdict | macOS mechanism |
 |---|---|---|
 | FS sandbox (writable/masked/restore_ro) | done | Seatbelt allow/deny |
-| Config seeding (Binds/ROOverlays) | feasible, biggest job | copy + env redirection |
+| Codex config seeding | implemented, needs E2E validation | per-head `CODEX_HOME` + immutable files |
+| Other provider seeding | feasible, biggest remaining provider job | copy + env redirection |
 | Hard network egress | feasible, simpler than Linux | Seatbelt loopback-only + existing CONNECT proxy |
 | Per-head temporary storage | done for standard temp APIs | `TMPDIR` + Seatbelt deny on shared temp roots |
 | Seccomp | not needed | threats are Linux-specific or Seatbelt-covered |
@@ -102,6 +112,7 @@ and Seatbelt rules. Hydra uses three classes of runtime state:
   runtime/<build-id>/hydra-internal       shared, immutable
   projects/<project>/tmp/<head-id>/       per-head, writable
   projects/<project>/seed/<head-id>/      per-head, immutable inputs
+  projects/<project>/providers/<head-id>/ per-head, persistent provider state
 ```
 
 - `runtime/<build-id>/hydra-internal` is staged once per Hydra build and shared
@@ -118,6 +129,10 @@ and Seatbelt rules. Hydra uses three classes of runtime state:
   head: gate policy, MCP catalog, strict MCP configuration, provider settings,
   hooks, and instructions. Every file is readable but protected by a late
   `deny file-write*` rule.
+- `providers/<head-id>` contains provider-owned state that must survive a
+  stop/resume. For Codex this is its redirected home: session/auth state is
+  writable, while the generated policy-bearing files inside it receive later
+  immutable-path denies. It survives archive and is removed on permanent purge.
 
 Only byte-identical immutable inputs are shared. Gate policy, approvals, status,
 provider configuration containing worktree/head details, pre-spawn environment,
@@ -140,7 +155,7 @@ Goal: a sandboxed macOS head gets the same gate/hooks/MCP wiring as Linux, and
 any option the darwin backend cannot honor is a spawn-time error instead of a
 silent downgrade.
 
-- [ ] `darwin.go`: return an explicit error for any populated option it does
+- [x] `darwin.go`: return an explicit error for any populated option it does
       not implement (`Binds`, `ROOverlays`, `TmpfsDirs`) until each gains a
       darwin path. Silent security-relevant no-ops are the worst option.
 - [ ] Introduce a per-OS delivery strategy in `internal/heads/seed.go`.
@@ -160,9 +175,10 @@ silent downgrade.
           generated hook/MCP entry receive the materialized path.
         - Gate policy JSON + MCP catalog: per-head paths passed via the env
           vars / settings the hooks already read.
-        - Codex: per-head `CODEX_HOME` containing merged `AGENTS.md`,
-          `hooks.json`, and `config.toml`, with credential/session material
-          exposed separately according to the CLI's supported path controls.
+        - [x] Codex: per-head `CODEX_HOME` containing merged `AGENTS.md`,
+          `hooks.json`, and `config.toml`; persistent writable provider state;
+          one-time file-auth copy; shared static extension links; original
+          `CODEX_HOME` read-only.
         - Copilot: use its supported config/instruction redirect, or fail the
           spawn explicitly until one is available.
 - [x] Stage the running Hydra executable once per content hash under the runtime

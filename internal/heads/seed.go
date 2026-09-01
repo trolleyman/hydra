@@ -42,6 +42,12 @@ const strictMCPConfigSandboxPath = "/tmp/hydra-mcp-config.json"
 
 // seedResult holds the per-head sandbox inputs produced by seedHead.
 type seedResult struct {
+	// seedDir is the host directory for this platform's generated immutable
+	// inputs. Linux uses the existing project cache; Darwin uses seed/<head-id>.
+	seedDir string
+	// nativeSeedPaths selects real-path delivery on Darwin after a provider has
+	// established the corresponding path redirect (currently per-head CODEX_HOME).
+	nativeSeedPaths bool
 	// Binds are host->sandbox file binds for agent config (Linux only; macOS
 	// sandbox-exec has no bind mounts).
 	Binds []sandbox.Bind
@@ -90,8 +96,12 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	if err := paths.EnsureHydraLocalIgnored(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	seedDir, err := prepareSeedDir(projectRoot, cacheDir, id, agentType)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 
-	res := &seedResult{}
+	res := &seedResult{seedDir: seedDir}
 	if projectID, ok := statepath.ProjectID(projectRoot); ok {
 		res.Env = append(res.Env,
 			statepath.ProjectEnvironment+"="+projectID,
@@ -249,7 +259,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// truncated the very file its siblings' sandboxes were reading through
 		// this bind. The per-project cache dir is not itself per-head, hence the
 		// id prefix (as with <id>-gate-policy.json).
-		claudeJSONHost := filepath.Join(cacheDir, id+"-claude.json")
+		claudeJSONHost := seedFilePath(res.seedDir, id, "claude.json")
 		cfg, err := sandbox.BuildClaudeConfig(hostClaudeJSON, worktreePath, mcpKeep, stableHydraBin, string(agentType))
 		if err != nil {
 			return nil, errtrace.Wrap(err)
@@ -257,7 +267,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		if err := os.WriteFile(claudeJSONHost, cfg, 0644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		res.Binds = append(res.Binds, sandbox.Bind{Source: claudeJSONHost, Target: path.Join(home, ".claude.json")})
+		deliverSeedFile(res, claudeJSONHost, path.Join(home, ".claude.json"), false)
 
 		mcpJSON := readHostFile(filepath.Join(projectRoot, ".mcp.json"))
 
@@ -273,12 +283,11 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			if err != nil {
 				return nil, errtrace.Wrap(err)
 			}
-			strictHost := filepath.Join(cacheDir, id+"-mcp-config.json")
+			strictHost := seedFilePath(res.seedDir, id, "mcp-config.json")
 			if err := os.WriteFile(strictHost, strictCfg, 0644); err != nil {
 				return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", strictHost, err))
 			}
-			res.Binds = append(res.Binds, sandbox.Bind{Source: strictHost, Target: strictMCPConfigSandboxPath, ReadOnly: true})
-			res.MCPConfigPath = strictMCPConfigSandboxPath
+			res.MCPConfigPath = deliverSeedFile(res, strictHost, strictMCPConfigSandboxPath, true)
 		}
 
 		// Seed the catalog of host-configured MCP servers so the `hydra mcp` control
@@ -307,7 +316,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		}
 
 	case sandbox.AgentTypeGemini:
-		settingsHost := filepath.Join(cacheDir, "gemini-settings.json")
+		settingsHost := seedFilePath(res.seedDir, id, "gemini-settings.json")
 		merged, err := sandbox.BuildGeminiSettings(readHostFile(filepath.Join(home, ".gemini", "settings.json")), stableHydraBin)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
@@ -315,7 +324,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		if err := os.WriteFile(settingsHost, merged, 0644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		res.Binds = append(res.Binds, sandbox.Bind{Source: settingsHost, Target: path.Join(home, ".gemini", "settings.json")})
+		deliverSeedFile(res, settingsHost, path.Join(home, ".gemini", "settings.json"), false)
 
 		if prePrompt != "" {
 			if err := seedGeminiPrePrompt(res, cacheDir, id, home, prePrompt); err != nil {
@@ -341,54 +350,61 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// home-dir custom instructions (~/.copilot/copilot-instructions.md),
 		// merged over the host's.
 		if prePrompt != "" {
-			instrHost := filepath.Join(cacheDir, id+"-copilot-instructions.md")
+			instrHost := seedFilePath(res.seedDir, id, "copilot-instructions.md")
 			content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".copilot", "copilot-instructions.md")))
 			if err := os.WriteFile(instrHost, content, 0644); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
-			res.Binds = append(res.Binds, sandbox.Bind{Source: instrHost, Target: path.Join(home, ".copilot", "copilot-instructions.md")})
+			deliverSeedFile(res, instrHost, path.Join(home, ".copilot", "copilot-instructions.md"), false)
 		}
 
 	case sandbox.AgentTypeCodex:
+		layout, err := prepareCodexSeedLayout(projectRoot, cacheDir, id, home, res)
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
 		// Codex has no --append-system-prompt; it
 		// reads standing guidance from AGENTS.md files. Deliver the pre-prompt as
 		// the global ~/.codex/AGENTS.md (merged over the host's), which applies to
 		// every Codex session regardless of the repo's own AGENTS.md.
 		if prePrompt != "" {
-			agentsHost := filepath.Join(cacheDir, id+"-codex-AGENTS.md")
-			content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".codex", "AGENTS.md")))
-			if err := os.WriteFile(agentsHost, content, 0644); err != nil {
+			agentsHost := layout.generatedPath("AGENTS.md")
+			content := combineInstructions(prePrompt, readHostFile(filepath.Join(layout.hostHome, "AGENTS.md")))
+			if err := writeCodexSeedFile(agentsHost, content, 0644); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
-			res.Binds = append(res.Binds, sandbox.Bind{Source: agentsHost, Target: path.Join(home, ".codex", "AGENTS.md")})
+			deliverCodexSeedFile(res, layout, agentsHost, "AGENTS.md", false)
 		}
 
-		hooksHost := filepath.Join(cacheDir, id+"-codex-hooks.json")
-		hooks, err := sandbox.BuildCodexHooks(readHostFile(filepath.Join(home, ".codex", "hooks.json")), stableHydraBin, policy.GateEnabled)
+		hooksHost := layout.generatedPath("hooks.json")
+		hooks, err := sandbox.BuildCodexHooks(readHostFile(filepath.Join(layout.hostHome, "hooks.json")), stableHydraBin, policy.GateEnabled)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		if err := os.WriteFile(hooksHost, hooks, 0o644); err != nil {
+		if err := writeCodexSeedFile(hooksHost, hooks, 0o644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		res.Binds = append(res.Binds, sandbox.Bind{Source: hooksHost, Target: path.Join(home, ".codex", "hooks.json"), ReadOnly: true})
+		deliverCodexSeedFile(res, layout, hooksHost, "hooks.json", true)
 
 		// Keep only trusted MCP servers and seed the Hydra control server into
 		// ~/.codex/config.toml (git_* tools + MCP discovery), while preserving
 		// model/auth and every other Codex setting.
 		// A malformed host config would error - skip seeding then (codex keeps its
 		// real config, just without the hydra tools) rather than clobber it.
-		hostCodexConfig := readHostFile(filepath.Join(home, ".codex", "config.toml"))
+		hostCodexConfig := readHostFile(filepath.Join(layout.hostHome, "config.toml"))
 		mcpKeep := mcpKeepSet(policy.MCPAllowed, policy.MCPToolsAllowed, policy.MCPBlocked)
 		codexCfg, cfgErr := sandbox.BuildCodexConfig(hostCodexConfig, stableHydraBin, mcpKeep)
 		if cfgErr != nil {
+			if res.nativeSeedPaths {
+				return nil, errtrace.Wrap(fmt.Errorf("build required macOS Codex config for %s: %w", id, cfgErr))
+			}
 			log.Printf("warn: not seeding hydra MCP into codex config for %s: %v", id, cfgErr)
 		} else {
-			codexCfgHost := filepath.Join(cacheDir, id+"-codex-config.toml")
-			if err := os.WriteFile(codexCfgHost, codexCfg, 0o644); err != nil {
+			codexCfgHost := layout.generatedPath("config.toml")
+			if err := writeCodexSeedFile(codexCfgHost, codexCfg, 0o644); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
-			res.Binds = append(res.Binds, sandbox.Bind{Source: codexCfgHost, Target: path.Join(home, ".codex", "config.toml"), ReadOnly: true})
+			deliverCodexSeedFile(res, layout, codexCfgHost, "config.toml", true)
 		}
 
 		// Discovery reads the unfiltered host config, so a server omitted above is
@@ -451,17 +467,17 @@ func seedMCPCatalog(res *seedResult, cacheDir, id string, hostClaudeJSON, mcpJSO
 	return errtrace.Wrap(seedMCPCatalogEntries(res, cacheDir, id, sandbox.ListMCPServers(hostClaudeJSON, mcpJSON)))
 }
 
-func seedMCPCatalogEntries(res *seedResult, cacheDir, id string, catalog []sandbox.MCPServer) error {
+func seedMCPCatalogEntries(res *seedResult, _ string, id string, catalog []sandbox.MCPServer) error {
 	data, err := json.Marshal(catalog)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	catalogHost := filepath.Join(cacheDir, id+"-mcp-catalog.json")
+	catalogHost := seedFilePath(res.seedDir, id, "mcp-catalog.json")
 	if err := os.WriteFile(catalogHost, data, 0644); err != nil {
 		return errtrace.Wrap(err)
 	}
-	res.Binds = append(res.Binds, sandbox.Bind{Source: catalogHost, Target: mcpCatalogSandboxPath, ReadOnly: true})
-	res.Env = append(res.Env, gate.EnvMCPCatalogPath+"="+mcpCatalogSandboxPath)
+	visiblePath := deliverSeedFile(res, catalogHost, mcpCatalogSandboxPath, true)
+	res.Env = append(res.Env, gate.EnvMCPCatalogPath+"="+visiblePath)
 	return nil
 }
 
@@ -501,17 +517,17 @@ func mcpKeepSet(serversAllowed, toolsAllowed, serversBlocked []string) []string 
 // directory used for the "ask" round-trip, wiring both via env vars the
 // `hydra gate` hook reads. The policy's Home/WorktreePath are filled here so the
 // in-sandbox hook can resolve the credential/policy paths it protects.
-func seedGatePolicy(res *seedResult, cacheDir, id, projectRoot, worktreePath, home string, policy gate.Policy) error {
+func seedGatePolicy(res *seedResult, _ string, id, projectRoot, worktreePath, home string, policy gate.Policy) error {
 	policy.Home = home
 	policy.WorktreePath = worktreePath
 	policy.ProjectRoot = projectRoot
 
-	policyHost := filepath.Join(cacheDir, id+"-gate-policy.json")
+	policyHost := seedFilePath(res.seedDir, id, "gate-policy.json")
 	if err := policy.Save(policyHost); err != nil {
 		return errtrace.Wrap(err)
 	}
-	res.Binds = append(res.Binds, sandbox.Bind{Source: policyHost, Target: GateSandboxPolicyPath, ReadOnly: true})
-	res.Env = append(res.Env, gate.EnvPolicyPath+"="+GateSandboxPolicyPath)
+	visiblePath := deliverSeedFile(res, policyHost, GateSandboxPolicyPath, true)
+	res.Env = append(res.Env, gate.EnvPolicyPath+"="+visiblePath)
 
 	approvalDir := paths.GetApprovalsDirFromProjectRoot(projectRoot, id)
 	if err := os.MkdirAll(approvalDir, 0755); err != nil {
@@ -537,23 +553,23 @@ func seedGeminiPrePrompt(res *seedResult, cacheDir, id, home, prePrompt string) 
 
 	if dflt := geminiDefaultSystemPrompt(cacheDir); dflt != "" {
 		combined := strings.TrimRight(dflt, "\n") + "\n\n" + prePrompt + "\n"
-		sysHost := filepath.Join(cacheDir, id+"-gemini-system.md")
+		sysHost := seedFilePath(res.seedDir, id, "gemini-system.md")
 		if err := os.WriteFile(sysHost, []byte(combined), 0644); err != nil {
 			return errtrace.Wrap(err)
 		}
 		target := path.Join(home, ".gemini", "hydra-system.md")
-		res.Binds = append(res.Binds, sandbox.Bind{Source: sysHost, Target: target})
-		res.Env = append(res.Env, "GEMINI_SYSTEM_MD="+target)
+		visiblePath := deliverSeedFile(res, sysHost, target, false)
+		res.Env = append(res.Env, "GEMINI_SYSTEM_MD="+visiblePath)
 		return nil
 	}
 
 	// Fallback: GEMINI.md context file, merged over the host's global one.
-	ctxHost := filepath.Join(cacheDir, id+"-gemini-context.md")
+	ctxHost := seedFilePath(res.seedDir, id, "gemini-context.md")
 	content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".gemini", "GEMINI.md")))
 	if err := os.WriteFile(ctxHost, content, 0644); err != nil {
 		return errtrace.Wrap(err)
 	}
-	res.Binds = append(res.Binds, sandbox.Bind{Source: ctxHost, Target: path.Join(home, ".gemini", "GEMINI.md")})
+	deliverSeedFile(res, ctxHost, path.Join(home, ".gemini", "GEMINI.md"), false)
 	return nil
 }
 
@@ -631,6 +647,7 @@ func readHostFile(p string) []byte {
 // Gemini try to write into the read-only `.hydra/local/cache` inside the sandbox and
 // crash with EROFS. seedGeminiPrePrompt sets the ones it wants explicitly.
 var envKeysHydraOwns = map[string]bool{
+	"CODEX_HOME":             true,
 	"GEMINI_SYSTEM_MD":       true,
 	"GEMINI_WRITE_SYSTEM_MD": true,
 	// HYDRA_* head-context variables (see headContextEnv): set per-head, so

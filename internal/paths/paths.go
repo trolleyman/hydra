@@ -205,6 +205,18 @@ func GetCacheDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetProjectStateDirFromProjectRoot(projectRoot), "cache")
 }
 
+// GetSeedDirFromProjectRoot returns a session's immutable generated-input
+// directory. Platforms with mountless sandbox delivery expose these real paths.
+func GetSeedDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetProjectStateDirFromProjectRoot(projectRoot), "seed", id)
+}
+
+// GetProviderStateDirFromProjectRoot returns persistent provider-owned state for
+// one session. It survives archive/resume and is removed on permanent purge.
+func GetProviderStateDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetProjectStateDirFromProjectRoot(projectRoot), "providers", id)
+}
+
 func GetDBPathFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetStateDirFromProjectRoot(projectRoot), "db.sqlite3")
 }

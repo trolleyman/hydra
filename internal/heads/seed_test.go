@@ -122,6 +122,7 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 
 func TestSeedHeadCodexGateAndFilteredMCP(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	worktree := filepath.Join(projectRoot, "wt", "codex-head")
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
@@ -147,7 +148,7 @@ command = "drop"
 	}
 
 	configTarget := path.Join(home, ".codex", "config.toml")
-	configSource := bindSource(t, res, configTarget)
+	configSource := deliveredCodexSource(t, res, configTarget)
 	var cfg map[string]any
 	data, err := os.ReadFile(configSource)
 	if err != nil {
@@ -161,7 +162,8 @@ command = "drop"
 		t.Fatalf("filtered Codex servers = %#v", servers)
 	}
 
-	hooksSource := bindSource(t, res, path.Join(home, ".codex", "hooks.json"))
+	hooksTarget := path.Join(home, ".codex", "hooks.json")
+	hooksSource := deliveredCodexSource(t, res, hooksTarget)
 	hooks, err := os.ReadFile(hooksSource)
 	if err != nil {
 		t.Fatal(err)
@@ -169,11 +171,11 @@ command = "drop"
 	if !strings.Contains(string(hooks), "gate codex") {
 		t.Fatalf("Codex gate missing from hooks: %s", hooks)
 	}
-	if bind := bindForTarget(res, configTarget); bind == nil || !bind.ReadOnly {
-		t.Fatalf("Codex config bind must be read-only: %+v", bind)
+	if !deliveredReadOnly(res, configTarget, configSource) {
+		t.Fatalf("Codex config is not delivered read-only: target=%q source=%q", configTarget, configSource)
 	}
-	if bind := bindForTarget(res, path.Join(home, ".codex", "hooks.json")); bind == nil || !bind.ReadOnly {
-		t.Fatalf("Codex hooks bind must be read-only: %+v", bind)
+	if !deliveredReadOnly(res, hooksTarget, hooksSource) {
+		t.Fatalf("Codex hooks are not delivered read-only: target=%q source=%q", hooksTarget, hooksSource)
 	}
 	if !envHasPrefix(res.Env, gate.EnvPolicyPath+"=") || !envHasPrefix(res.Env, gate.EnvApprovalDir+"=") {
 		t.Fatalf("Codex gate environment missing: %v", res.Env)
@@ -182,6 +184,7 @@ command = "drop"
 
 func TestSeededInstructionFilesArePerSession(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	for _, dir := range []string{".codex", ".copilot", ".gemini"} {
 		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
 			t.Fatal(err)
@@ -212,8 +215,16 @@ func TestSeededInstructionFilesArePerSession(t *testing.T) {
 				return res
 			}
 
-			headSource := bindSource(t, seed("head", "author instructions"), tt.target)
-			reviewSource := bindSource(t, seed(ReviewSessionID("head"), reviewSystemPrompt), tt.target)
+			headSeed := seed("head", "author instructions")
+			reviewSeed := seed(ReviewSessionID("head"), reviewSystemPrompt)
+			var headSource, reviewSource string
+			if tt.agentType == sandbox.AgentTypeCodex {
+				headSource = deliveredCodexSource(t, headSeed, tt.target)
+				reviewSource = deliveredCodexSource(t, reviewSeed, tt.target)
+			} else {
+				headSource = bindSource(t, headSeed, tt.target)
+				reviewSource = bindSource(t, reviewSeed, tt.target)
+			}
 			if headSource == reviewSource {
 				t.Fatalf("head and review slot share instruction source %q", headSource)
 			}
@@ -235,6 +246,40 @@ func bindForTarget(res *seedResult, target string) *sandbox.Bind {
 		}
 	}
 	return nil
+}
+
+func deliveredCodexSource(t *testing.T, res *seedResult, target string) string {
+	t.Helper()
+	if bind := bindForTarget(res, target); bind != nil {
+		return bind.Source
+	}
+	runtimeHome := envValue(res.Env, "CODEX_HOME")
+	if runtimeHome == "" {
+		t.Fatalf("Codex seed has neither a bind for %q nor CODEX_HOME: %+v", target, res)
+	}
+	return filepath.Join(runtimeHome, filepath.Base(target))
+}
+
+func deliveredReadOnly(res *seedResult, target, source string) bool {
+	if bind := bindForTarget(res, target); bind != nil {
+		return bind.ReadOnly
+	}
+	for _, immutable := range res.ImmutablePaths {
+		if immutable == source {
+			return true
+		}
+	}
+	return false
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 func envHasPrefix(env []string, prefix string) bool {

@@ -1810,6 +1810,7 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		RemoveAgentRuntimeFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
 		removeHeadTmpDir(head.ProjectPath, head.ID)
+		removeSeedInputs(head.ProjectPath, head.ID)
 		// The review slot's own detached checkout is reclaimed by the
 		// KillReviewSession call above, which runs whether or not the kill failed -
 		// a worktree is a real git registration and outlives the process either way.
@@ -1968,6 +1969,10 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 		removeCowDir(head.ProjectPath, head.ID)
 		removeHeadTmpDir(head.ProjectPath, head.ID)
 		removeHeadTmpDir(head.ProjectPath, ReviewSessionID(head.ID))
+		removeSeedInputs(head.ProjectPath, head.ID)
+		removeSeedInputs(head.ProjectPath, ReviewSessionID(head.ID))
+		removeProviderState(head.ProjectPath, head.ID)
+		removeProviderState(head.ProjectPath, ReviewSessionID(head.ID))
 		removeClaudeSessionDir(head)
 		// The review slot's checkout, its own transcript dir (keyed by that
 		// checkout's path, so removeClaudeSessionDir above does not reach it) and

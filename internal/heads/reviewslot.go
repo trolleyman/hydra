@@ -215,6 +215,7 @@ func KillReviewSession(reg *session.Registry, projectRoot, headID string) {
 	stopEgressProxy(id)
 	removeNamespaceHost(id)
 	removeHeadTmpDir(projectRoot, id)
+	removeSeedInputs(projectRoot, id)
 	// After the supervisor is gone: it has the tree bind-mounted, and pulling a
 	// worktree out from under a live bwrap is how you get a half-removed tree that
 	// `worktree add` then refuses to reclaim.

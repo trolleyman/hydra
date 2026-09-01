@@ -119,6 +119,18 @@ func TestBuildSpecDarwinPrivateTempPolicyAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestBuildSpecDarwinRejectsMountInputs(t *testing.T) {
+	_, err := BuildSpec(Options{
+		WorktreePath: t.TempDir(),
+		Home:         t.TempDir(),
+		Binds:        []Bind{{Source: "/source", Target: "/target"}},
+		Argv:         []string{"/bin/true"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot apply mount-based inputs") {
+		t.Fatalf("BuildSpec mount input error = %v", err)
+	}
+}
+
 func containsExact(entries []string, want string) bool {
 	for _, entry := range entries {
 		if entry == want {
