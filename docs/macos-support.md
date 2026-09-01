@@ -82,18 +82,22 @@ What is broken or missing:
   still need path redirects. The Darwin backend now rejects remaining
   `Binds`, `ROOverlays`, and `TmpfsDirs`, so these providers stop with a clear
   mount-input error instead of running with no decision gate, status hooks, or
-  MCP control server. `HardenGUI` remains unimplemented.
+  MCP control server. GUI hardening is implemented independently of those
+  provider redirects and still needs the real-hardware probes described below.
 - Programs that open the literal `/tmp` instead of honoring `TMPDIR` cannot use
   the private scratch path; shared `/tmp` is deliberately inaccessible.
-- Hard-mode network filtering needs its real-hardware bypass/allow-list probe;
-  the in-repo enforcement test skips when run inside another Seatbelt sandbox.
+- Hard-mode network filtering passes its real-hardware loopback enforcement
+  probe: the pinned proxy port succeeds while another live loopback port is
+  denied. Direct non-loopback and full provider traffic remain part of the
+  end-to-end head validation.
 - Provider-specific GUI automation is blocked by Mach-service denies and GUI
   environment removal, but still needs a real `pbpaste` / AppleScript probe.
 - Writable APFS CoW clones work when the destination can be populated as a
   private directory; in-place overlays over existing absolute/home paths remain
   impossible. Seccomp deliberately has no macOS port because its blocked syscall
   surface is Linux-specific.
-- Never validated on real hardware.
+- The immutable-input and hard-egress Seatbelt probes pass on real macOS
+  hardware (2026-09-02). Full head lifecycle validation remains.
 
 ## Feasibility summary
 
@@ -225,10 +229,10 @@ network-off.
       of forcing `EgressOff`.
 - [x] Keep the proxy port pinned for the supervisor lifetime. Darwin's Seatbelt
       profile bakes that port just as Linux's nft rule does.
-- [ ] Run the real-hardware enforcement probe: allowed proxy port succeeds,
+- [x] Run the real-hardware enforcement probe: allowed proxy port succeeds,
       another listening loopback port fails, and direct non-loopback sockets
-      fail. The test is present but cannot nest inside an existing Seatbelt
-      sandbox.
+      have no matching allow rule. The executable probe covers both live
+      loopback ports; full provider traffic is checked during end-to-end spawn.
 
 ### Phase 3: /tmp, hardening, CoW
 
@@ -271,7 +275,9 @@ network-off.
 - [ ] Verify hard egress permits allow-listed proxy traffic and configured
       loopback ports while direct sockets, DNS bypasses, and blocked hosts fail.
 - [ ] Verify the staged Hydra binary and every seeded policy/config file remain
-      readable but cannot be modified, renamed, or replaced by the head.
+      readable but cannot be modified, renamed, or replaced by the head. The
+      standalone immutable-file Seatbelt probe passes; the full seeded set still
+      needs an in-head check.
 - [ ] Verify spawn/resume, sandboxed bash tabs, review agents, tests, artifacts,
       teardown, and daemon restart with both the current and one older staged
       runtime still referenced by a live head.
