@@ -2,6 +2,7 @@ package http
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -58,6 +59,52 @@ func TestRememberApprovalHostGoesToDefaults(t *testing.T) {
 	ac, ok := cfg.Agents["claude"]
 	if !ok || ac.Policy == nil || !slices.Contains(ac.Policy.MCPAllowed, "some-server") {
 		t.Errorf("mcp grant not in per-agent [claude.policy].mcp_allowed: %+v", ac.Policy)
+	}
+
+	// Readable host paths are also agent-specific, but live under its sandbox.
+	readable := filepath.Join(root, "host-sdk")
+	if err := rememberApproval(root, "claude", "filesystem_read", readable); err != nil {
+		t.Fatalf("rememberApproval(filesystem_read): %v", err)
+	}
+	cfg, err = config.LoadFile(config.GetProjectConfigPath(root))
+	if err != nil || cfg == nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	ac = cfg.Agents["claude"]
+	if ac.Sandbox == nil || !slices.Contains(ac.Sandbox.ReadablePaths, readable) {
+		t.Errorf("filesystem grant not in per-agent [claude.sandbox].readable_paths: %+v", ac.Sandbox)
+	}
+}
+
+func TestCanonicalReadablePath(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.Mkdir(realDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "alias")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	got, err := canonicalReadablePath(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != realDir {
+		t.Fatalf("canonical path = %q, want %q", got, realDir)
+	}
+	if _, err := canonicalReadablePath(filepath.Join(root, "missing")); err == nil {
+		t.Fatal("missing path should be rejected")
+	}
+}
+
+func TestPathWithin(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "tmp", "masked")
+	if !pathWithin(filepath.Join(root, "child", "file"), root) || !pathWithin(root, root) {
+		t.Fatal("pathWithin should include a directory and its descendants")
+	}
+	if pathWithin(root+"-other", root) {
+		t.Fatal("path prefix without a component boundary must not match")
 	}
 }
 

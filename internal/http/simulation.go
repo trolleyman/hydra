@@ -5196,6 +5196,7 @@ var simApprovalOptions = []simApprovalOption{
 	{"MCP server", "The first call to a whole MCP server.", "mcp"},
 	{"Web fetch", "An outbound fetch - allowing trusts the host for the session.", "webfetch"},
 	{"Egress host", "A connection the proxy is holding: the host is on no list.", "egress"},
+	{"Host path", "An existing host file or directory mounted read-only after a sandbox restart.", "filesystem_read"},
 	{"Unrecognized tool", "A tool Hydra's gate has no rule for.", "tool"},
 }
 
@@ -5233,6 +5234,12 @@ func simApprovalRequest(kind string) (api.ApprovalRequest, bool) {
 		req.Target = "telemetry.example.com"
 		req.Reason = ptr("the connection is held at the egress proxy: the host is on neither list")
 		req.Summary = "wants to connect to \"telemetry.example.com\""
+	case "filesystem_read":
+		req.Tool = "mcp__hydra__request_read_access"
+		req.Target = "/opt/acme-sdk/include"
+		req.Reason = ptr("the path is outside the sandbox's readable allow-list")
+		req.Description = ptr("I need the installed SDK headers to compile the project's native extension.")
+		req.Summary = "wants read access to host path \"/opt/acme-sdk/include\""
 	case "tool":
 		req.Tool = "weather__forecast"
 		req.Target = "weather__forecast"

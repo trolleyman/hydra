@@ -1740,6 +1740,15 @@ paths:
             type: string
           description: Only return the diff for this specific file path
         - in: query
+          name: viewed_blob_sha
+          required: false
+          schema:
+            type: string
+          description: >-
+            With path, compare the file version previously marked viewed to its
+            current head-side content. This returns only changes made after that
+            review baseline. The blob must still exist in the repository.
+        - in: query
           name: context
           required: false
           schema:
@@ -5711,7 +5720,7 @@ components:
           description: The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
         kind:
           type: string
-          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)"
+          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', 'host_command' (run a command on the host, outside the sandbox), or 'filesystem_read' (mount a host path read-only)"
         target:
           type: string
           description: The MCP server name, '<server>__<tool>', host, or command the approval is about (for host_command, the full command text)
@@ -5767,7 +5776,7 @@ components:
           description: The user's verdict for the parked tool call
         remember:
           type: boolean
-          description: "When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again"
+          description: "When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again"
         command:
           type: string
           description: >-
@@ -5776,6 +5785,12 @@ components:
             (never re-reading the head-writable request file), which closes the
             TOCTOU window where an agent could swap the command after the user
             saw it. Ignored for every other kind.
+        path:
+          type: string
+          description: >-
+            For a filesystem_read approval only: the canonical host path the UI
+            displayed and the user approved. The daemon grants this echoed path,
+            never the target in the agent-writable request file.
 
     NetworkConfig:
       type: object
@@ -5849,16 +5864,18 @@ components:
           items:
             type: string
           nullable: true
+        readable_paths:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Extra host paths exposed read-only. Additive across config layers and always narrowed by masked_paths.
         masked_paths:
           type: array
           items:
             type: string
           nullable: true
-        restore_ro:
-          type: array
-          items:
-            type: string
-          nullable: true
+          description: Defense-in-depth denied paths. Additive across config layers and applied after every read/write allowance.
         cow_paths:
           type: array
           items:

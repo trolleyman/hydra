@@ -39,8 +39,8 @@ func buildHooksMap(cmd string, events []string) map[string]interface{} {
 }
 
 // HookCommand returns the shell command a hook runs to report status back to
-// Hydra, invoking the hydra binary at hydraBin (its real host path, visible
-// inside the sandbox via the read-only root bind).
+// Hydra, invoking the hydra binary at hydraBin (delivered as an explicit
+// read-only sandbox input).
 func HookCommand(hydraBin, agent string) string {
 	return shellQuote(hydraBin) + " trigger-hook " + agent
 }

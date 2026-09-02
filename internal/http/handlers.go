@@ -1535,8 +1535,8 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	if c.Sandbox != nil {
 		out.Sandbox = &api.SandboxConfig{
 			WritablePaths:  &c.Sandbox.WritablePaths,
+			ReadablePaths:  &c.Sandbox.ReadablePaths,
 			MaskedPaths:    &c.Sandbox.MaskedPaths,
-			RestoreRo:      &c.Sandbox.RestoreRO,
 			CowPaths:       &c.Sandbox.CowPaths,
 			InheritEnv:     &c.Sandbox.InheritEnv,
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
@@ -1612,11 +1612,11 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		if a.Sandbox.WritablePaths != nil {
 			sb.WritablePaths = *a.Sandbox.WritablePaths
 		}
+		if a.Sandbox.ReadablePaths != nil {
+			sb.ReadablePaths = *a.Sandbox.ReadablePaths
+		}
 		if a.Sandbox.MaskedPaths != nil {
 			sb.MaskedPaths = *a.Sandbox.MaskedPaths
-		}
-		if a.Sandbox.RestoreRo != nil {
-			sb.RestoreRO = *a.Sandbox.RestoreRo
 		}
 		if a.Sandbox.CowPaths != nil {
 			sb.CowPaths = *a.Sandbox.CowPaths
@@ -3387,6 +3387,10 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if request.Params.Path != nil {
 		path = *request.Params.Path
 	}
+	viewedBlobSHA := ""
+	if request.Params.ViewedBlobSha != nil {
+		viewedBlobSHA = *request.Params.ViewedBlobSha
+	}
 
 	contextLines := 3
 	if request.Params.Context != nil {
@@ -3430,14 +3434,42 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
-	// full_context expands every eligible file in one response (no per-file
-	// follow-up requests). With a path it expands just that file, which is how
-	// the client promotes a single big file to the full-content reveal model
-	// after the bulk caps left it windowed. Either way a file over the caps comes
-	// back at contextLines, so a declined promotion still answers the widened
-	// windowed request in the same round-trip.
+	// A reviewed-blob request is a one-file follow-up made after the normal diff
+	// tells the client that a previously viewed file changed. Compare that saved
+	// version directly with the latest head-side blob so already-reviewed changes
+	// do not reappear in the file card.
 	var diffFiles []git.DiffFile
-	if fullContext {
+	if viewedBlobSHA != "" {
+		if path == "" {
+			return nil, errtrace.Wrap(fmt.Errorf("viewed_blob_sha requires path"))
+		}
+		currentBlobSHA := git.HeadBlobSHAs(diffRoot, headRef, []string{path})[path]
+		if currentBlobSHA != "" && currentBlobSHA != viewedBlobSHA {
+			diffContext := contextLines
+			if fullContext {
+				diffContext = fullFileContext
+			}
+			diffFiles, err = git.GetBlobDiff(diffRoot, viewedBlobSHA, currentBlobSHA, path, ignoreWhitespace, diffContext)
+			if err == nil && fullContext && len(diffFiles) == 1 {
+				lines := 0
+				for _, h := range diffFiles[0].Hunks {
+					lines += len(h.Lines)
+				}
+				if diffFiles[0].Additions+diffFiles[0].Deletions <= maxFullChanges && lines <= maxFullLines {
+					diffFiles[0].Expanded = true
+					diffFiles[0].TotalLines = diffFiles[0].LastLineNum()
+				} else {
+					diffFiles, err = git.GetBlobDiff(diffRoot, viewedBlobSHA, currentBlobSHA, path, ignoreWhitespace, contextLines)
+				}
+			}
+		}
+	} else if fullContext {
+		// full_context expands every eligible file in one response (no per-file
+		// follow-up requests). With a path it expands just that file, which is how
+		// the client promotes a single big file to the full-content reveal model
+		// after the bulk caps left it windowed. Either way a file over the caps comes
+		// back at contextLines, so a declined promotion still answers the widened
+		// windowed request in the same round-trip.
 		var onlyPaths []string
 		if path != "" {
 			onlyPaths = []string{path}
@@ -3451,7 +3483,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	// Append untracked files when including uncommitted changes.
-	if includeUncommitted && workingDir != "" {
+	if viewedBlobSHA == "" && includeUncommitted && workingDir != "" {
 		if untrackedDiffs, err := git.GetUntrackedDiff(workingDir, path, contextLines); err == nil {
 			diffFiles = append(diffFiles, untrackedDiffs...)
 		}

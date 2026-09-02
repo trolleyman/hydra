@@ -12,7 +12,7 @@ export type ApprovalRequest = {
      */
     tool: string;
     /**
-     * What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)
+     * What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', 'host_command' (run a command on the host, outside the sandbox), or 'filesystem_read' (mount a host path read-only)
      */
     kind: string;
     /**

@@ -108,6 +108,31 @@ func TestRequestAccessApprovedAndDenied(t *testing.T) {
 	}
 }
 
+func TestRequestReadAccessAdvertisedValidatedAndCalled(t *testing.T) {
+	if names := toolNames(toolDefs(Deps{})); contains(names, "request_read_access") {
+		t.Fatalf("request_read_access should be hidden without an approval channel: %v", names)
+	}
+	var gotPath, gotWhy string
+	deps := Deps{RequestReadAccess: func(path, why string) (bool, string) {
+		gotPath, gotWhy = path, why
+		return true, "approved"
+	}}
+	if names := toolNames(toolDefs(deps)); !contains(names, "request_read_access") {
+		t.Fatalf("request_read_access missing when wired: %v", names)
+	}
+	resps := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_read_access","arguments":{"path":" /opt/sdk ","why":" inspect headers "}}}`)
+	if gotPath != "/opt/sdk" || gotWhy != "inspect headers" {
+		t.Fatalf("request args = %q, %q", gotPath, gotWhy)
+	}
+	if resps[0]["result"].(map[string]any)["isError"] != false {
+		t.Fatal("approved request should succeed")
+	}
+	resps = runLines(t, deps, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request_read_access","arguments":{"path":"/opt/sdk"}}}`)
+	if resps[0]["result"].(map[string]any)["isError"] != true {
+		t.Fatal("missing why should fail")
+	}
+}
+
 func TestUnknownMethod(t *testing.T) {
 	resps := runLines(t, Deps{}, `{"jsonrpc":"2.0","id":1,"method":"bogus/method"}`)
 	if resps[0]["error"] == nil {

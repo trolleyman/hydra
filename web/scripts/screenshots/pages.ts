@@ -502,7 +502,23 @@ export const pages: {
       approval: { kind: 'egress', target: 'telemetry.example.com', agentName: 'Add crash reporting', agentId: 'agent-approval', projectId: 'sim-project' },
     },
   },
-  // 3f. The sandbox escape hatch: the agent asks to run a command on the HOST,
+  // 3f. A host filesystem path: the canonical file/directory is shown in full,
+  // with the sandbox restart and grant lifetime made explicit.
+  {
+    name: 'agent-approvals-filesystem-read',
+    path: '/settings',
+    toast: {
+      message: '',
+      type: 'warning',
+      actions: [
+        { label: 'Allow once', variant: 'primary' },
+        { label: 'Always allow', variant: 'primary' },
+        { label: 'Deny', variant: 'danger' },
+      ],
+      approval: { kind: 'filesystem_read', target: '/opt/acme-sdk/include', agentName: 'Build the native extension', agentId: 'agent-approval', projectId: 'sim-project', description: 'I need the installed SDK headers to compile the project native extension.' },
+    },
+  },
+  // 3g. The sandbox escape hatch: the agent asks to run a command on the HOST,
   // outside its sandbox (`hydra host-run`). Loud red HOST identity, the full
   // command shown in a red mono box - chain-split (a newline per top-level
   // ;/&&), line-numbered and bash syntax-highlighted for auditability - and
@@ -522,7 +538,7 @@ export const pages: {
       approval: { kind: 'host_command', target: 'cd "$HOME/tools" && ./gen-certs.sh --local ; security add-trusted-cert -d dev-root.pem', agentName: 'Set up local HTTPS certs', agentId: 'agent-approval', projectId: 'sim-project' },
     },
   },
-  // 3g. An agent running in ANOTHER project: an amber folder+project
+  // 3h. An agent running in ANOTHER project: an amber folder+project
   // banner. Always allow is still offered (a remembered grant is
   // scoped to the project the approval resolves in).
   {

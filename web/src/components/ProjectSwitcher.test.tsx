@@ -37,14 +37,15 @@ describe('ProjectSwitcher - agent tally', () => {
     expect(screen.getByTitle('3 agents - 3 waiting')).toBeInTheDocument()
   })
 
-  it('shows the notification dot next to the name, not in the tally', () => {
+  it('shows the notification dot on the bottom-right of the project icon', () => {
     renderSwitcher({ items, index: 0 })
-    // Bravo has 1 unread agent: a blue dot labelled with the count. It sits in
-    // the same flex row as the project name (its direct parent contains the
-    // name text), not inside the trailing tally.
+    // Bravo has 1 unread agent: a blue dot labelled with the count. Its direct
+    // parent is the relative icon wrapper, not the project name or tally.
     const dot = screen.getByTitle('1 unread update')
     expect(dot.className).toContain('bg-sky-500')
-    expect(dot.parentElement?.textContent).toBe('Bravo')
+    expect(dot.className).toContain('-bottom-0.5')
+    expect(dot.parentElement?.className).toContain('relative')
+    expect(dot.parentElement?.textContent).not.toContain('Bravo')
     // Alpha has nothing unread and nothing blocked: Bravo's is the only dot.
     expect(screen.queryAllByTitle(/needs your input|unread update/)).toHaveLength(1)
   })

@@ -52,6 +52,10 @@ and `web/src/DiffViewer.tsx`):
   set (each set's files in a masonry grid). The agent-page
   `ArtifactsPanel` is two-sided (base+head refs); `RepositoryArtifactsView` is the
   single-ref sibling used by the repository browser.
+- The Files settings choose 3, 5, 7, or 10 unchanged context lines around each
+  change, defaulting to 3. The browser-wide preference is shared with repository
+  branch comparisons and drives both the server's windowed diff context and the
+  client-side whole-file collapse model.
 - The commit range selectors keep every right-side commit selectable. Choosing a
   right endpoint that is not newer than the current left endpoint moves left to
   that commit's first parent, producing a one-commit diff; an already-valid
@@ -200,17 +204,16 @@ and `web/src/DiffViewer.tsx`):
   it. Adjacent
   bounded reads keep their requested starts when their exact range lengths
   account for all returned lines. Adjacent bounded ranges of the same file do
-  not need headings between them. When an unbounded boundary cannot otherwise
-  be proved, agents print a static marker such as
-  `printf '%s\n' '--- [file] web/src/App.tsx ---'`; the untyped
-  `printf '%s\n' '--- Notes ---'` form creates an ordinary heading and `[dir]`
+  not need headings between them. Agents label each file or directory section
+  in a multi-section call with a static marker such as
+  `echo '--- [file] web/src/App.tsx ---'`; the untyped
+  `echo '--- Notes ---'` form creates an ordinary heading and `[dir]`
   selects the shared directory treatment. The older `[text]` spelling remains
   accepted for existing transcripts. File and directory marker values are exact
   paths without annotations such as `(continued)`. A Bash call with several
-  unbounded sections puts the marker immediately before every command that
-  produces one, including the first, and keeps reads bounded where possible so
-  truncation cannot remove its boundary evidence. A constant `echo` is accepted,
-  while `printf` is the canonical cross-shell spelling. The parser only consumes
+  file or directory sections puts the marker immediately before every command
+  that produces one, including the first. This includes bounded reads of
+  different files because a range can stop early at EOF. The parser only consumes
   a marker when it can correlate it unambiguously with the constant-printing
   command. In a script where a numbered search immediately
   precedes a read of the same file, repeated search rows can pin the read's start
@@ -310,6 +313,10 @@ and `web/src/DiffViewer.tsx`):
   `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
   `forwardSidebarWheelToMain` (`__root.tsx`) forwards leftover sidebar wheel
   delta into `[data-main-scroll]` / `[data-inspector-scroll]`.
+- Native desktop windows put Back and Forward controls in the global top bar,
+  between the sidebar toggle and project dropdown. They follow TanStack's
+  in-window navigation history and stay disabled when no entry exists in that
+  direction; browser tabs rely on their own browser chrome instead.
 - All resizing is hand-rolled pointer/mouse drag - no split-pane library: sidebar
   width (`__root.tsx`), diff file-list width (`DiffViewer.tsx`), terminal height
   (`AgentTerminal.tsx`).

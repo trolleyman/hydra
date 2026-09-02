@@ -1455,7 +1455,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 		cfg.ApplySharedCaches(&opts, m.projectRoot, "", true)
 		// The pre-spawn script is intentionally ignored: artifact generation is a
 		// plain command, not an agent spawn.
-		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+		writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		// The artifact output dir lives outside the checkout, so make it writable
 		// explicitly (the checkout itself is covered by WorktreePath).
 		writable = append(writable, outputDir)
@@ -1463,8 +1463,8 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 			opts.GitCommonDir = gcd // ephemeral worktree git metadata lives here
 		}
 		opts.WritablePaths = writable
+		opts.ReadablePaths = readable
 		opts.MaskedPaths = sandbox.ResolveMaskedPaths(m.projectRoot, runDir, masked)
-		opts.RestoreRO = restore
 		// Apply the project's cow_paths so a shared host cache configured for
 		// per-head copy-on-write isolation (e.g. ~/.gradle) is writable during
 		// generation too - reads hit the shared warm cache, writes (Gradle's lock

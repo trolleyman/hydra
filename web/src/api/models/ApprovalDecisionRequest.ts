@@ -8,13 +8,17 @@ export type ApprovalDecisionRequest = {
      */
     decision: ApprovalDecisionRequest.decision;
     /**
-     * When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again
+     * When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again
      */
     remember?: boolean;
     /**
      * For a host_command approval only: the exact command text the UI displayed and the user approved. The daemon runs THIS text verbatim (never re-reading the head-writable request file), which closes the TOCTOU window where an agent could swap the command after the user saw it. Ignored for every other kind.
      */
     command?: string;
+    /**
+     * For a filesystem_read approval only: the canonical host path the UI displayed and the user approved. The daemon grants this echoed path, never the target in the agent-writable request file.
+     */
+    path?: string;
 };
 export namespace ApprovalDecisionRequest {
     /**

@@ -598,13 +598,13 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	if !sv.spec.Host {
 		cfg, _ := config.Load(root)
 		cfg.ApplySharedCaches(&opts, root, "", false)
-		writable, masked, restore, _, netPol, _ := cfg.ResolveSandboxOptions("")
+		writable, readable, masked, _, netPol, _ := cfg.ResolveSandboxOptions("")
 		if gcd, err := git.GetCommonDir(root); err == nil {
 			opts.GitCommonDir = gcd
 		}
 		opts.WritablePaths = writable
-		opts.MaskedPaths = masked
-		opts.RestoreRO = restore
+		opts.ReadablePaths = readable
+		opts.MaskedPaths = sandbox.ResolveMaskedPaths(root, root, masked)
 		// Sandboxed services honor the project's network mode like agent heads do
 		// (hard = pasta netns + nft + CONNECT proxy); the session lives as long as
 		// the service process (closed via the returned cleanup). Unknown hosts are

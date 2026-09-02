@@ -5,7 +5,7 @@
 // place. Every key shares the `hydra-` prefix; keys with dynamic segments are
 // exposed as builder functions so their prefix lives in exactly one spot.
 
-import { hasDesktopBridge, postDesktopMessage } from './desktopBridge'
+import { hasDesktopBridge, postDesktopMessage } from './desktopBridge.ts'
 
 const pendingDesktopWrites = new Map<string, string | null>()
 let desktopWriteTimer: number | undefined
@@ -100,6 +100,10 @@ export const StorageKeys = {
   // (image / large text) into a composer also inserts its "[filename]" at the
   // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
   pasteMarkers: 'hydra-paste-markers',
+  // '0' when Enter should add a newline in the chat composer, leaving
+  // Cmd/Ctrl+Enter as send. Absent/'1' = Enter sends (the default). Shift+Enter
+  // always adds a newline. See lib/composerPrefs.ts + AgentChat.
+  enterSends: 'hydra-enter-sends',
   // '0' when the user turned OFF auto-pairing in the composers: typing an opener
   // (` ( [ { " ') inserts its closer, Enter on a "```" line opens a fenced
   // block, and a mark typed over a selection wraps it. Absent/'1' = on (the default). See
@@ -160,6 +164,9 @@ export const StorageKeys = {
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',
   // Whether to tint the exact changed words within a modified line (default on).
   diffWordHighlight: 'hydra-diff-word-highlight',
+  // Number of unchanged lines shown around each change. Shared by the agent
+  // and repository diff viewers; absent or invalid = 3.
+  diffContextLines: 'hydra-diff-context-lines',
   diffSingleFile: 'hydra-diff-single-file',
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',

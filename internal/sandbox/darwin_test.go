@@ -16,6 +16,108 @@ import (
 	"time"
 )
 
+func TestBuildSpecDarwinReadableAllowlistAndMasks(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktree")
+	home := filepath.Join(root, "home")
+	secret := filepath.Join(home, ".ssh", "key")
+	allowed := filepath.Join(home, "tool-state")
+	unrelated := filepath.Join(root, "unrelated")
+	for _, path := range []string{filepath.Dir(secret), worktree} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, content := range map[string]string{secret: "secret", allowed: "allowed", unrelated: "unrelated"} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec, err := BuildSpec(Options{
+		WorktreePath: worktree,
+		Home:         home,
+		ReadablePaths: []string{
+			"~",
+		},
+		MaskedPaths: []string{"~/.ssh"},
+		Env:         []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+		Argv: []string{"/bin/sh", "-c",
+			`test "$(cat "$1")" = allowed || exit 41
+if cat "$2" >/dev/null 2>&1; then exit 42; fi
+if cat "$3" >/dev/null 2>&1; then exit 43; fi`, "sh", allowed, secret, unrelated},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	profileData, err := os.ReadFile(spec.Args[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := string(profileData)
+	readAt := strings.LastIndex(profile, `(allow file-read* `+sbPathRule(home)+`)`)
+	maskAt := strings.LastIndex(profile, `(deny file-read* file-write* `+sbPathRule(filepath.Dir(secret))+`)`)
+	if readAt < 0 || maskAt < readAt {
+		t.Fatalf("credential mask must follow broad read allowance:\n%s", profile)
+	}
+
+	cmd := exec.Command(spec.Path, spec.Args[1:]...)
+	cmd.Env = spec.Env
+	cmd.Dir = spec.Dir
+	output, runErr := cmd.CombinedOutput()
+	if nestedSandboxDenied(output) {
+		t.Skip("sandbox-exec cannot nest inside the test runner's existing sandbox")
+	}
+	if runErr != nil {
+		t.Fatalf("read allowlist probe failed: %v\n%s", runErr, output)
+	}
+}
+
+func TestBuildSpecDarwinGitCommonDirIsExplicitlyReadable(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktree")
+	home := filepath.Join(root, "home")
+	gitDir := filepath.Join(root, "repo", ".git")
+	for _, path := range []string{worktree, home, gitDir} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		mode GitIsolationMode
+		want string
+	}{
+		{name: "readonly", mode: GitIsolationReadonly, want: `(allow file-read* ` + sbPathRule(gitDir) + `)`},
+		{name: "writable", want: `(allow file-read* file-write* ` + sbPathRule(gitDir) + `)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec, err := BuildSpec(Options{
+				WorktreePath: worktree,
+				GitCommonDir: gitDir,
+				GitIsolation: tc.mode,
+				Home:         home,
+				Env:          []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+				Argv:         []string{"/usr/bin/true"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer spec.Cleanup()
+			profile, err := os.ReadFile(spec.Args[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(profile), tc.want) {
+				t.Fatalf("Git common-dir rule %q missing:\n%s", tc.want, profile)
+			}
+		})
+	}
+}
+
 func TestBuildSpecDarwinImmutablePathOverridesWritableParent(t *testing.T) {
 	worktree := t.TempDir()
 	home := t.TempDir()
@@ -503,6 +605,7 @@ func TestBuildSpecDarwinKeepsSharedCachesAndMiseReadOnly(t *testing.T) {
 		WorktreePath:  worktree,
 		Home:          home,
 		WritablePaths: Defaults().WritablePaths,
+		ReadablePaths: Defaults().ReadablePaths,
 		Env:           []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
 		Argv: []string{"/bin/sh", "-c", `
 mkdir -p "$GOCACHE" "$MISE_CACHE_DIR" || exit 41

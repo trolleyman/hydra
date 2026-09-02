@@ -128,7 +128,7 @@ describe('diff sidebar path tooltips', () => {
 })
 
 describe('file header metadata', () => {
-  it('marks generated files and passes the current viewed state to the toggle', () => {
+  it('marks generated files and passes the current blob to the viewed toggle', () => {
     const onToggleViewed = vi.fn()
     render(
       <FileDiff
@@ -146,7 +146,7 @@ describe('file header metadata', () => {
 
     expect(screen.getByText('Auto-generated')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
-    expect(onToggleViewed).toHaveBeenCalledWith('Cargo.lock', 'blob-1', false)
+    expect(onToggleViewed).toHaveBeenCalledWith('Cargo.lock', 'blob-1')
   })
 
   it('searches for and applies a syntax language override', () => {
@@ -169,8 +169,42 @@ describe('file header metadata', () => {
   })
 })
 
+describe('viewed file delta', () => {
+  it('labels new changes and marks the latest blob when reviewed', () => {
+    const onToggleViewed = vi.fn()
+    const reviewedDelta = file({
+      path: 'README.md',
+      head_blob_sha: 'current-blob',
+      hunks: [hunk([ctx('already reviewed', 1), add('new since review', 2)])],
+    })
+    const { rerender } = render(
+      <FileDiff
+        file={reviewedDelta} sideBySide={false} currentContext={3}
+        viewed={false} showingSinceViewed onToggleViewed={onToggleViewed}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('New since viewed')).toBeVisible()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
+    expect(onToggleViewed).toHaveBeenCalledWith('README.md', 'current-blob')
+
+    rerender(
+      <FileDiff
+        file={reviewedDelta} sideBySide={false} currentContext={3}
+        viewed showingSinceViewed={false} onToggleViewed={onToggleViewed}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    expect(screen.queryByText('New since viewed')).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Viewed' })).toBeChecked()
+  })
+})
+
 // A whole-file (expanded) diff: 40 unchanged lines, a change, 40 more. The
-// reveal model shows CTX lines either side of the change and collapses the rest
+// reveal model shows the selected context either side of the change and collapses the rest
 // behind expanders, so the rendered row count is far below the line count.
 function wholeFile(): DiffFile {
   const lines: DiffLine[] = []
@@ -228,10 +262,10 @@ function windowedFile(): DiffFile {
   })
 }
 
-function renderBody(f: DiffFile, sideBySide: boolean) {
+function renderBody(f: DiffFile, sideBySide: boolean, currentContext = 3) {
   const { container } = render(
     <FileDiff
-      file={f} sideBySide={sideBySide} currentContext={3}
+      file={f} sideBySide={sideBySide} currentContext={currentContext}
       onComment={() => {}} onExpand={() => {}}
       isCollapsed={false} onToggleCollapse={() => {}}
     />,
@@ -286,6 +320,15 @@ describe('bodyShape matches what the body renders', () => {
     // Leading and trailing edge expanders each offer a directional action and
     // show-all, both counting the 37 lines they hide.
     expect(shape).toMatchObject({ expanders: [{ buttons: 2, hidden: 37 }, { buttons: 2, hidden: 37 }] })
+  })
+
+  it('uses the selected context for whole-file rendering and measurement', () => {
+    const f = wholeFile()
+    const shape = bodyShape(f, false, false, 10)
+    const seen = renderBody(f, false, 10)
+    expect(rows(shape)).toBe(seen.unifiedCells)
+    expect(expanders(shape)).toBe(seen.expanders)
+    expect(shape).toMatchObject({ expanders: [{ buttons: 2, hidden: 30 }, { buttons: 2, hidden: 30 }] })
   })
 
   it('describes the fixed-height bodies', () => {

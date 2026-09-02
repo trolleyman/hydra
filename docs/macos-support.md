@@ -36,8 +36,8 @@ What works:
 
 - The whole tree cross-compiles and vets cleanly for `darwin` (arm64 + amd64).
 - `internal/sandbox/darwin.go` + `internal/sandbox/profiles/sandbox.sb`
-  implement the core FS policy: `writable_paths` / `masked_paths` /
-  `restore_ro`, the git common-dir write grant, coarse network on/off,
+  implement the core default-deny FS policy: `readable_paths` /
+  `writable_paths` / `masked_paths`, the git common-dir grant, network policy,
   `NoSandbox`, and read-only `cow_paths` via APFS clonefile (`cp -c`).
 - The running Hydra executable is content-addressed and staged once beneath
   `<hydra-state>/runtime/<sha256>/hydra-internal`. Supervisors, generated hooks,
@@ -128,7 +128,7 @@ What is broken or missing:
 
 | Feature | Verdict | macOS mechanism |
 |---|---|---|
-| FS sandbox (writable/masked/restore_ro) | done | Seatbelt allow/deny |
+| FS sandbox (readable/writable/masked) | done | Seatbelt allow/deny |
 | Codex config seeding | implemented, first spawn validated | per-head `CODEX_HOME` + immutable files |
 | Claude config seeding | implemented, needs E2E validation | per-head `CLAUDE_CONFIG_DIR` + immutable settings/MCP |
 | Other provider seeding | feasible, biggest remaining provider job | copy + env redirection |

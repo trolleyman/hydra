@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxCacheConfig, SandboxConfig } from '../../api'
 import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, TriangleAlert, Lock, KeyRound, Database } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
+import { Tooltip } from '../Tooltip'
 import { ShellEditor } from '../ShellEditor'
 import { Markdown } from '../../lib/MarkdownRenderer'
 import { HighlightedTextarea } from '../HighlightedTextarea'
@@ -220,13 +221,10 @@ export function CacheListEditor({
         const target = kind === 'path' ? entry.path ?? '' : entry.env ?? ''
         return (
           <div key={key} className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1.25fr)_1.75rem] items-center gap-2">
-            <input
-              aria-label="Cache key"
-              value={key}
-              onChange={(e) => update(key, e.target.value, entry)}
-              placeholder="cache_key"
-              spellCheck={false}
-              className={`${LIST_ROW_TEXT} ${LIST_ROW_CHROME} ${LIST_ROW_PLACEHOLDER} min-w-0 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500`}
+            <CacheKeyInput
+              cacheKey={key}
+              cacheKeys={Object.keys(caches)}
+              onRename={(nextKey) => update(key, nextKey, entry)}
             />
             <select
               aria-label={`Cache type for ${key}`}
@@ -263,6 +261,77 @@ export function CacheListEditor({
       <button type="button" onClick={add} className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors ml-1 cursor-pointer">
         <Plus className="w-3.5 h-3.5" /> Add cache
       </button>
+    </div>
+  )
+}
+
+function CacheKeyInput({
+  cacheKey,
+  cacheKeys,
+  onRename,
+}: {
+  cacheKey: string
+  cacheKeys: string[]
+  onRename: (nextKey: string) => void
+}) {
+  // Keep the name as a draft until commit. Using the live map key as both the
+  // input value and React row key remounts the row after every keystroke, which
+  // drops focus; committing a duplicate immediately also overwrites its entry.
+  const [draft, setDraft] = useState(cacheKey)
+  const [error, setError] = useState('')
+
+  const commit = () => {
+    if (draft === cacheKey) return
+    if (!/^[A-Za-z0-9_-]+$/.test(draft) || draft === '.' || draft === '..') {
+      setError("Use letters, numbers, '_' or '-'.")
+      return
+    }
+    if (cacheKeys.includes(draft)) {
+      setError('A cache with this name already exists.')
+      return
+    }
+    setError('')
+    onRename(draft)
+  }
+
+  return (
+    <div className="relative min-w-0">
+      <input
+        aria-label={`Cache name for ${cacheKey}`}
+        aria-invalid={error !== ''}
+        aria-describedby={error ? `cache-key-error-${cacheKey}` : undefined}
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          setError('')
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit()
+          } else if (e.key === 'Escape') {
+            setDraft(cacheKey)
+            setError('')
+          }
+        }}
+        placeholder="cache_key"
+        spellCheck={false}
+        className={`${LIST_ROW_TEXT} ${LIST_ROW_CHROME} ${LIST_ROW_PLACEHOLDER} w-full min-w-0 pr-9 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 aria-invalid:border-red-400 dark:aria-invalid:border-red-600`}
+      />
+      {error && (
+        <Tooltip content={error} className="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 dark:text-red-400">
+          <span
+            id={`cache-key-error-${cacheKey}`}
+            role="alert"
+            tabIndex={0}
+            aria-label={`Cache name error: ${error}`}
+            className="inline-flex outline-none"
+          >
+            <TriangleAlert className="w-4 h-4" />
+          </span>
+        </Tooltip>
+      )}
     </div>
   )
 }
@@ -411,8 +480,8 @@ export function ConfigForm({
     const next: SandboxConfig = { ...sandbox, ...patch }
     const empty =
       !next.writable_paths?.length &&
+      !next.readable_paths?.length &&
       !next.masked_paths?.length &&
-      !next.restore_ro?.length &&
       !next.cow_paths?.length &&
       !Object.keys(next.cache ?? {}).length &&
       !next.inherit_env?.length &&
@@ -665,25 +734,25 @@ export function ConfigForm({
         />
 
         <SandboxPathSection
+          icon={<Eye className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />}
+          label="Readable paths"
+          tooltipTitle="Readable paths"
+          tooltip={<p>Extra host paths the agent may read. The worktree, system runtimes, developer toolchains, and writable paths are already included. Credential masks always take precedence.</p>}
+          paths={sandbox.readable_paths ?? []}
+          inheritedPaths={inheritedSandbox?.readable_paths ?? undefined}
+          onChange={(readable_paths) => updateSandbox({ readable_paths })}
+          placeholder="e.g. ~/.config/go"
+        />
+
+        <SandboxPathSection
           icon={<EyeOff className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />}
-          label="Masked Paths"
-          tooltipTitle="Masked Paths"
-          tooltip={<p>Paths hidden from the agent entirely (e.g. extra credential locations beyond the defaults like <code className="text-blue-300">~/.ssh</code>, <code className="text-blue-300">~/.aws</code>).</p>}
+          label="Masked paths"
+          tooltipTitle="Masked paths"
+          tooltip={<p>Defense-in-depth denies for credential or secret paths. Masks are applied after every read and write allowance, so they always win.</p>}
           paths={sandbox.masked_paths ?? []}
           inheritedPaths={inheritedSandbox?.masked_paths ?? undefined}
           onChange={(masked_paths) => updateSandbox({ masked_paths })}
           placeholder="e.g. ~/.vault-token"
-        />
-
-        <SandboxPathSection
-          icon={<Eye className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />}
-          label="Restore Read-Only"
-          tooltipTitle="Restore Read-Only"
-          tooltip={<p>Re-expose specific paths read-only after their parent has been masked (e.g. <code className="text-blue-300">~/.config/git</code> when <code className="text-blue-300">~/.config</code> is masked).</p>}
-          paths={sandbox.restore_ro ?? []}
-          inheritedPaths={inheritedSandbox?.restore_ro ?? undefined}
-          onChange={(restore_ro) => updateSandbox({ restore_ro })}
-          placeholder="e.g. ~/.config/git"
         />
 
         <SandboxPathSection
@@ -712,6 +781,7 @@ export function ConfigForm({
             <InfoTooltip title="Shared caches">
               <p>Project-scoped writable caches reused by all heads and sandboxed runners. Each key maps to a stable directory in Hydra's project state.</p>
               <p className="mt-1.5"><strong>Env</strong> redirects a cache environment variable such as <code className="text-blue-300">GOCACHE</code>. <strong>Path</strong> links a worktree-relative, gitignored path to the cache.</p>
+              <p className="mt-1.5">A cache with the same name replaces the inherited definition at this layer. Removing that override reveals the inherited definition again.</p>
               <p className="mt-1.5 text-amber-300">Caches are mutable shared state. Use them only for disposable data, never credentials, source files, <code className="text-blue-300">GOBIN</code>, or <code className="text-blue-300">node_modules</code>.</p>
             </InfoTooltip>
           </div>

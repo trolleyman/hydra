@@ -275,7 +275,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, agentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
-	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(agentType))
+	writable, readable, masked, _, net, _ := cfg.ResolveSandboxOptions(string(agentType))
 
 	// Read-only git, with no host-mediated way around it. resolveGitIsolation is
 	// deliberately bypassed: it falls back to "off" when an agent type lacks the
@@ -313,8 +313,8 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		Caches:                cfg.ResolveSharedCaches(string(agentType)),
 		MaterializeCachePaths: true,
 		WritablePaths:         append(writable, seed.WritablePaths...),
-		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:             restore,
+		ReadablePaths:         readable,
+		MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, id, masked),
 		Network:               net,
 		Binds:                 seed.Binds,
 		ImmutablePaths:        seed.ImmutablePaths,

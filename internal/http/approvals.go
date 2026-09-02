@@ -2,7 +2,11 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -11,6 +15,7 @@ import (
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
 // ListAgentApprovals returns the security-gate approval requests a head has
@@ -44,6 +49,17 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 
 	out := make([]api.ApprovalRequest, 0, len(reqs))
 	for _, r := range reqs {
+		// Resolve filesystem requests on the host before showing them. The agent
+		// cannot inspect an unmounted path from inside its sandbox, and the echoed
+		// canonical target is what the decision handler trusts and mounts.
+		if r.Kind == "filesystem_read" {
+			canonical, resolveErr := canonicalReadablePath(r.Target)
+			if resolveErr != nil {
+				r.Reason = resolveErr.Error()
+			} else {
+				r.Target = canonical
+			}
+		}
 		reason, ts := r.Reason, r.TS
 		req := api.ApprovalRequest{
 			Reqid:   r.ReqID,
@@ -145,16 +161,37 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 
 	// Persist a remembered "always allow" to the trusted config BEFORE writing the
 	// decision file, so the allow-list update can't be lost if the next launch
-	// races the agent unblocking. Best-effort: a persistence failure still lets
-	// the one-shot decision through.
+	// races the agent unblocking. A failure leaves the request pending.
+	var restartSandbox bool   // a filesystem grant changes the outer sandbox mounts
 	var grantedMCPKind string // "mcp"/"mcp_tool" when a remembered MCP grant was persisted
 	var grantedHost string    // webfetch/egress host this session grant now covers
+	var grantedReadable string
 	var approvedReq gate.Request
 	var haveApprovedReq bool
 	if allow {
 		approvedReq, haveApprovedReq, _ = gate.ReadRequest(dir, request.Reqid)
 		if haveApprovedReq && (approvedReq.Kind == "webfetch" || approvedReq.Kind == "egress") {
 			grantedHost = approvedReq.Target
+		}
+		if haveApprovedReq && approvedReq.Kind == "filesystem_read" {
+			if request.Body.Path == nil {
+				return approvalDecisionError("filesystem approval is missing the displayed path"), nil
+			}
+			canonical, pathErr := canonicalReadablePath(*request.Body.Path)
+			if pathErr != nil {
+				return approvalDecisionError(pathErr.Error()), nil
+			}
+			// Trust the path echoed by the UI, not the agent-writable request file.
+			approvedReq.Target = canonical
+			cfg, _ := config.Load(projectRoot)
+			_, _, masked, _, _, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
+			for _, hidden := range sandbox.ResolveMaskedPaths(projectRoot, head.WorkingDir(), masked) {
+				if pathWithin(canonical, hidden) {
+					return approvalDecisionError(fmt.Sprintf("host path %q is hidden by masked_paths and cannot be granted", canonical)), nil
+				}
+			}
+			grantedReadable = canonical
+			restartSandbox = true
 		}
 	}
 	if allow && remember {
@@ -170,6 +207,11 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 			case "mcp", "mcp_tool":
 				grantedMCPKind = approvedReq.Kind
 			}
+		}
+	}
+	if grantedReadable != "" {
+		if err := gate.AddGrantedReadablePath(dir, grantedReadable); err != nil {
+			return approvalDecisionError("grant read access: " + err.Error()), nil
 		}
 	}
 
@@ -197,17 +239,23 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	// head leaves its policy_approval wait, and the parked request drops off the list.
 	s.Events.AgentsChanged(projectRoot)
 
-	// A remembered MCP grant only takes effect at launch (MCP servers load then),
-	// so relaunch the head with --continue to make it available immediately. Async
-	// + slightly delayed so the gate reads the Allow decision and the tool call
-	// returns cleanly before the session is recycled; the conversation is restored.
-	if grantedMCPKind != "" {
+	// MCP servers and filesystem mounts only change at launch, so relaunch the head
+	// with --continue to apply either capability immediately. A filesystem grant
+	// also tears down the namespace host because mounts live in that outer sandbox.
+	// Delay slightly so the tool call can observe Allow before it is recycled.
+	if grantedMCPKind != "" || restartSandbox {
 		headCopy := *head
 		go func() {
 			time.Sleep(1500 * time.Millisecond)
 			rows, cols := heads.LoadResumeSize(s.DB, projectRoot, headCopy.ID)
-			if err := heads.RestartHead(s.Sessions, s.DB, projectRoot, headCopy, rows, cols); err != nil {
-				log.Printf("hydra: auto-restart after MCP approval for %s: %v", headCopy.ID, err)
+			var restartErr error
+			if restartSandbox {
+				restartErr = heads.RestartHeadSandbox(s.Sessions, s.DB, projectRoot, headCopy, rows, cols)
+			} else {
+				restartErr = heads.RestartHead(s.Sessions, s.DB, projectRoot, headCopy, rows, cols)
+			}
+			if restartErr != nil {
+				log.Printf("hydra: auto-restart after capability approval for %s: %v", headCopy.ID, restartErr)
 			} else {
 				s.Events.AgentsChanged(projectRoot)
 			}
@@ -242,10 +290,11 @@ func resolveSiblingHostApprovals(dir, exceptReqID, host string) {
 	}
 }
 
-// rememberApproval appends an approved MCP server / MCP tool / host to the trusted
-// PROJECT config (never the merged user/default config), so it takes effect on the
-// head's next launch. MCP grants are agent-specific and go to the per-agent
-// [<agent>.policy]. A WebFetch or egress host both go to the DEFAULTS-level
+// rememberApproval appends an approved MCP server / MCP tool / host / readable
+// path to the trusted PROJECT config (never the merged user/default config), so
+// it takes effect on the head's next launch. MCP grants are agent-specific and
+// go to [<agent>.policy], while filesystem paths go to [<agent>.sandbox]. A WebFetch or
+// egress host both go to the DEFAULTS-level
 // [sandbox.network] allowed_hosts - one shared list applied to every agent, since
 // the egress allow-list is a project-wide posture, not a per-agent capability. An
 // egress host also goes live for the current session in the running proxy's
@@ -264,14 +313,16 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 		cfg = &config.Config{}
 	}
 	switch kind {
-	case "mcp", "mcp_tool":
-		// MCP grants stay per-agent: which servers/tools an agent may reach is an
-		// agent-specific capability, so they land in [<agent>.policy].
+	case "mcp", "mcp_tool", "filesystem_read":
+		// MCP and filesystem grants stay per-agent. MCP entries land in policy;
+		// readable paths land in that agent's sandbox settings.
 		ac := cfg.Agents[agentType]
 		if kind == "mcp" {
 			ensurePolicy(&ac).MCPAllowed = appendUnique(ensurePolicy(&ac).MCPAllowed, target)
-		} else {
+		} else if kind == "mcp_tool" {
 			ensurePolicy(&ac).MCPToolsAllowed = appendUnique(ensurePolicy(&ac).MCPToolsAllowed, target)
+		} else {
+			ensureSandbox(&ac).ReadablePaths = appendUnique(ensureSandbox(&ac).ReadablePaths, target)
 		}
 		if cfg.Agents == nil {
 			cfg.Agents = map[string]config.AgentConfig{}
@@ -288,6 +339,51 @@ func rememberApproval(projectRoot, agentType, kind, target string) error {
 		return nil // not a rememberable kind
 	}
 	return errtrace.Wrap(config.Save(projectRoot, *cfg))
+}
+
+func ensureSandbox(ac *config.AgentConfig) *config.SandboxConfig {
+	if ac.Sandbox == nil {
+		ac.Sandbox = &config.SandboxConfig{}
+	}
+	return ac.Sandbox
+}
+
+func approvalDecisionError(details string) api.DecideAgentApproval500JSONResponse {
+	return api.DecideAgentApproval500JSONResponse{Code: 500, Error: api.ErrorResponseErrorInternalError, Details: details}
+}
+
+// canonicalReadablePath turns the path the user sees into the exact existing
+// host file/directory the sandbox backend will receive. Symlinks are resolved so
+// an innocuous alias cannot silently mount a different target after approval.
+func canonicalReadablePath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "~" || strings.HasPrefix(path, "~/") || (os.PathSeparator == '\\' && strings.HasPrefix(path, `~\`)) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", errtrace.Wrap(fmt.Errorf("resolve home directory: %w", err))
+		}
+		path = filepath.Join(home, strings.TrimLeft(strings.TrimPrefix(path, "~"), `/\`))
+	}
+	if !filepath.IsAbs(path) {
+		return "", errtrace.Wrap(fmt.Errorf("read access requires an absolute host path or a path beginning with ~/"))
+	}
+	canonical, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("cannot resolve host path %q: %w", path, err))
+	}
+	info, err := os.Stat(canonical)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("cannot inspect host path %q: %w", canonical, err))
+	}
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		return "", errtrace.Wrap(fmt.Errorf("host path %q is not a regular file or directory", canonical))
+	}
+	return canonical, nil
+}
+
+func pathWithin(path, parent string) bool {
+	rel, err := filepath.Rel(filepath.Clean(parent), filepath.Clean(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // ensurePolicy lazily allocates the agent config's policy section.

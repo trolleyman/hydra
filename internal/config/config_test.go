@@ -24,7 +24,7 @@ func TestDefaultPrePromptRequiresStructuredQuestions(t *testing.T) {
 
 func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 	prompt := BuildFinalPrePrompt(Config{}, string(sandbox.AgentTypeClaude))
-	for _, command := range []string{"--- <text> ---", "--- [file] <path> ---", "--- [dir] <path> ---"} {
+	for _, command := range []string{"echo '--- <text> ---'", "echo '--- [file] <path> ---'", "echo '--- [dir] <path> ---'"} {
 		if !strings.Contains(prompt, command) {
 			t.Errorf("final pre-prompt does not document %q", command)
 		}
@@ -32,13 +32,16 @@ func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 	if strings.Contains(prompt, "--- [text]") {
 		t.Error("final pre-prompt still asks agents to tag ordinary text headings")
 	}
-	for _, guidance := range []string{"immediately before every command", "including the first", "adjacent bounded `sed` ranges", "exact path"} {
+	for _, guidance := range []string{"immediately before every section-producing command", "including the first", "bounded reads of different files", "exact path"} {
 		if !strings.Contains(prompt, guidance) {
 			t.Errorf("final pre-prompt does not document output-section guidance %q", guidance)
 		}
 	}
 	if !strings.Contains(prompt, "`git diff`") {
 		t.Error("final pre-prompt does not tell agents that unified diffs need no marker")
+	}
+	if strings.Contains(shellSectionPrompt, "printf '%s") {
+		t.Error("final pre-prompt still recommends printf for output-section markers")
 	}
 }
 
@@ -177,8 +180,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			PrePrompt: ptr(prePrompt),
 			Sandbox: &SandboxConfig{
 				WritablePaths: []string{"~/.cache", "/tmp"},
+				ReadablePaths: []string{"~/.config/git"},
 				MaskedPaths:   []string{"~/.ssh"},
-				RestoreRO:     []string{"~/.config/git"},
 				CowPaths:      []string{"pipeline/out", "pipeline/build/input"},
 				Network:       &NetworkConfig{Enabled: &enabled, AllowedHosts: []string{"example.com"}},
 			},
@@ -206,6 +209,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.Defaults.Sandbox == nil {
 		t.Fatal("sandbox config not round-tripped")
+	}
+	if got := loaded.Defaults.Sandbox.ReadablePaths; len(got) != 1 || got[0] != "~/.config/git" {
+		t.Errorf("ReadablePaths mismatch: %v", got)
 	}
 	if len(loaded.Defaults.Sandbox.MaskedPaths) != 1 || loaded.Defaults.Sandbox.MaskedPaths[0] != "~/.ssh" {
 		t.Errorf("MaskedPaths mismatch: %v", loaded.Defaults.Sandbox.MaskedPaths)
@@ -1461,15 +1467,15 @@ func splitLines(s string) []string {
 func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 	base := SandboxConfig{
 		WritablePaths: []string{"~/.cache", "~/.npm"},
+		ReadablePaths: []string{"~/.config/git"},
 		MaskedPaths:   []string{"~/.ssh"},
-		RestoreRO:     []string{"~/.config/git"},
 		CowPaths:      []string{"pipeline/out"},
 		InheritEnv:    []string{"ANDROID_HOME"},
 	}
 	base.Merge(SandboxConfig{
 		WritablePaths: []string{"~/.npm", "~/.gradle"}, // ~/.npm is a duplicate
+		ReadablePaths: []string{"~/.config/gh"},
 		MaskedPaths:   []string{"~/.aws"},
-		RestoreRO:     []string{"~/.config/gh"},
 		CowPaths:      []string{"~/.gradle"},
 		InheritEnv:    []string{"ANDROID_HOME", "SSH_AUTH_SOCK"},
 	})
@@ -1480,8 +1486,8 @@ func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 		}
 	}
 	eq("WritablePaths", base.WritablePaths, []string{"~/.cache", "~/.npm", "~/.gradle"})
+	eq("ReadablePaths", base.ReadablePaths, []string{"~/.config/git", "~/.config/gh"})
 	eq("MaskedPaths", base.MaskedPaths, []string{"~/.ssh", "~/.aws"})
-	eq("RestoreRO", base.RestoreRO, []string{"~/.config/git", "~/.config/gh"})
 	eq("CowPaths", base.CowPaths, []string{"pipeline/out", "~/.gradle"})
 	eq("InheritEnv", base.InheritEnv, []string{"ANDROID_HOME", "SSH_AUTH_SOCK"})
 }
@@ -1526,5 +1532,14 @@ func TestAgentConfigMergePrePromptUnions(t *testing.T) {
 	a.Merge(AgentConfig{PrePrompt: str("same")})
 	if got := get(a); got != "same" {
 		t.Errorf("identical = %q", got)
+	}
+}
+
+func TestReadablePathsDocNamesEveryBuiltInPath(t *testing.T) {
+	doc := readablePathsDoc()
+	for _, path := range sandbox.Defaults().ReadablePaths {
+		if !strings.Contains(doc, path) {
+			t.Errorf("readable_paths generated comment omits built-in path %q", path)
+		}
 	}
 }

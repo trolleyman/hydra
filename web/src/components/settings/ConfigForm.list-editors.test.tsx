@@ -32,6 +32,34 @@ describe('settings list editors', () => {
     expect(onChange).toHaveBeenLastCalledWith({ go_build: { path: 'GOCACHE' } })
   })
 
+  it('keeps a cache-name edit focused until the rename is committed', () => {
+    const onChange = vi.fn()
+    render(<CacheListEditor caches={{ go_build: { env: 'GOCACHE' } }} onChange={onChange} />)
+
+    const input = screen.getByLabelText('Cache name for go_build')
+    input.focus()
+    fireEvent.change(input, { target: { value: 'go_cache' } })
+
+    expect(input).toHaveFocus()
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.blur(input)
+    expect(onChange).toHaveBeenCalledWith({ go_cache: { env: 'GOCACHE' } })
+  })
+
+  it('does not overwrite an existing cache when names collide', () => {
+    const onChange = vi.fn()
+    render(<CacheListEditor caches={{ go_build: { env: 'GOCACHE' }, npm: { env: 'npm_config_cache' } }} onChange={onChange} />)
+
+    const input = screen.getByLabelText('Cache name for go_build')
+    fireEvent.change(input, { target: { value: 'npm' } })
+    fireEvent.blur(input)
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveAccessibleName('Cache name error: A cache with this name already exists.')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+  })
+
   it('adds and removes cache rows', () => {
     const onChange = vi.fn()
     render(<CacheListEditor caches={{ go_build: { env: 'GOCACHE' } }} onChange={onChange} />)
