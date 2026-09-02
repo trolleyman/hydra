@@ -206,10 +206,12 @@ and `web/src/DiffViewer.tsx`):
   Unified diffs derive sticky file headers from each surviving `diff --git`
   boundary, so agents do not print redundant file markers around `git diff`.
 - Bash command cards render commands relative to the head's worktree or a review
-  agent's detached checkout. A command that ran elsewhere gets a reproducible
-  `cd` preamble; when the script starts with a description comment, that comment
-  stays first and the preamble follows it. Home-relative preambles keep `~`
-  outside quotes so the shell expands it.
+  agent's detached checkout. Provider launch wrappers spelled as `bash`,
+  `/bin/bash`, `/usr/bin/bash`, or `/usr/local/bin/bash` are omitted so the card
+  shows the script itself. A command that ran elsewhere gets a reproducible `cd`
+  preamble; when the script starts with a description comment, that comment stays
+  first and the preamble follows it. Home-relative preambles keep `~` outside
+  quotes so the shell expands it.
 - The spawn composer uploads attachments against its selected project. A
   desktop-native image paste that arrives before any project is selected is
   ignored; when selection restoration and paste overlap, the current project
