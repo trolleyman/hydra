@@ -697,8 +697,14 @@ const GIT_QUIET = /^(-q|--quiet)$/
 //
 // `--graph` and `-p` are not among them: the first only puts the topology in the
 // left margin and then prints the same lines, and the second prints a patch,
-// which lib/gitOutput now reads.
+// which lib/gitOutput now reads. Git's named pretty presets are also known
+// shapes; only a caller-authored format string is arbitrary.
 const GIT_REFUSED = /^(--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
+const GIT_NAMED_FORMAT = /^--(?:pretty|format)=(?:oneline|short|medium|full|fuller|reference|email|raw)$/
+// An empty format on `git show` suppresses the commit header but leaves its
+// patch intact. That is still one of lib/gitOutput's known shapes, unlike a
+// caller-authored format string whose lines can contain anything.
+const GIT_EMPTY_SHOW_FORMAT = /^--(?:pretty|format)=$/
 
 // parseGitReport says what a git call prints: one of the reports lib/gitOutput
 // colours - a status, a commit header, a diffstat, a patch, an ignore rule -
@@ -720,7 +726,9 @@ function parseGitReport(words: Word[]): 'report' | 'quiet' | null {
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return null
   const args = words.slice(i + 1).filter((w) => !w.quoted)
   if (args.some((w) => GIT_QUIET.test(w.text))) return 'quiet'
-  if (args.some((w) => GIT_REFUSED.test(w.text))) return null
+  if (args.some((w) => GIT_REFUSED.test(w.text) &&
+    !GIT_NAMED_FORMAT.test(w.text) &&
+    !(sub.text === 'show' && GIT_EMPTY_SHOW_FORMAT.test(w.text)))) return null
   const readonly = GIT_READONLY[sub.text]
   return !readonly || readonly(args) ? 'report' : null
 }
@@ -1058,8 +1066,16 @@ function classifyKind(p: Pipeline): ScriptStep {
   if (echo !== null && !trimmedFrom && !filtered && !sliced) {
     if (echo.trim().length < MIN_MARKER_LEN) return { kind: 'echo', text: echo }
     const typed = /^--- \[(text|file|dir)\] (.+) ---$/.exec(echo)
-    return typed
-      ? { kind: 'marker', text: echo, section: { kind: typed[1] as OutputSectionKind, label: typed[2] } }
+    if (typed) {
+      return { kind: 'marker', text: echo, section: { kind: typed[1] as OutputSectionKind, label: typed[2] } }
+    }
+    // Text is the default section kind, so its canonical spelling needs no
+    // `[text]` tag. Give it the same structural identity and ambiguity checks
+    // as the explicitly typed file/dir forms; `[text]` remains accepted above
+    // for old prompts and transcripts.
+    const text = /^--- (.+) ---$/.exec(echo)
+    return text
+      ? { kind: 'marker', text: echo, section: { kind: 'text', label: text[1] } }
       : { kind: 'marker', text: echo }
   }
 
@@ -1706,6 +1722,29 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   }
 }
 
+// plausibleMarkerBoundary reports whether the producers before a structural
+// marker could all have ended at this candidate without any bounded producer
+// swallowing more lines than its command can print. This distinguishes repeated
+// headings when the surrounding commands prove one occurrence - for example a
+// `wc -l` row followed by exactly 220 lines from `sed -n '1,220p'`. It does not
+// make an unbounded file read guess which copy of a marker-shaped source line
+// came from printf; every such candidate remains plausible and therefore
+// ambiguous.
+function plausibleMarkerBoundary(
+  pending: ScriptStep[],
+  slice: string[],
+  failed: ReadonlySet<ScriptStep>,
+): boolean {
+  const candidateFailed = new Set(failed)
+  const producers = mergeProducers(pending, candidateFailed)
+  const split = distribute(producers, slice, candidateFailed)
+  if (!split) return false
+  return producers.every((producer, i) => {
+    const limit = stepLimit(producer, candidateFailed)
+    return limit == null || split.parts[i].length <= limit
+  })
+}
+
 // splitScriptOutput cuts a command's output into one section per step that
 // printed it. Null when nothing came back worth sectioning.
 //
@@ -1843,14 +1882,19 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     }, 0)
     let at = total != null && matchesAt(lines, pos + total, expected) ? pos + total : -1
     if (at < 0 && step.section) {
-      // A typed marker is structural only when it has one possible origin. If
+      // A section marker is structural only when it has one possible origin. If
       // file content contains the same canonical line, keep the whole stretch
-      // literal instead of guessing which occurrence printf printed.
+      // literal instead of guessing which occurrence printf printed. Bounded
+      // producers can rule candidates out without guessing: a 220-line sed
+      // cannot own 441 lines merely to reach the second identical marker.
       const candidates: number[] = []
       for (let j = pos; j + expected.length <= lines.length; j++) {
         if (matchesAt(lines, j, expected)) candidates.push(j)
       }
-      if (candidates.length === 1) at = candidates[0]
+      const plausible = candidates.filter((candidate) => (
+        plausibleMarkerBoundary(pending, lines.slice(pos, candidate), failed)
+      ))
+      if (plausible.length === 1) at = plausible[0]
     }
     for (let j = pos; at < 0 && !step.section && j + expected.length <= lines.length; j++) {
       if (matchesAt(lines, j, expected)) at = j

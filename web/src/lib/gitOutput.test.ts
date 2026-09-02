@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { gitOutputSpans, parseBlameLine } from './gitOutput'
+import { gitDiffPath, gitOutputSpans, parseBlameLine } from './gitOutput'
 
 // The colour a span carries, named rather than spelled, so a case reads as the
 // line it is about rather than as a list of Tailwind classes.
@@ -59,6 +59,22 @@ describe('gitOutputSpans', () => {
       [['commit ', 'dim'], ['a7401035', 'sha'], [' (HEAD -> main)', 'ref']],
       [['Merge:', 'dim'], [' ', ''], ['5d671ab0 a7401035', 'sha']],
       [['Date:', 'dim'], ['   ', ''], ['Wed Jul 29 12:00:47 2026 +0100', '']],
+    ])
+  })
+
+  it('colours the fields in Git fuller format', () => {
+    expect(spans(
+      'commit f5c8c282d6a45373941fa5de42879b1576a46459',
+      'Author:     Callum Tolley <cgtrolley@gmail.com>',
+      'AuthorDate: Wed Sep 2 01:25:04 2026 +0100',
+      'Commit:     Callum Tolley <cgtrolley@gmail.com>',
+      'CommitDate: Wed Sep 2 01:25:04 2026 +0100',
+    )).toEqual([
+      [['commit ', 'dim'], ['f5c8c282d6a45373941fa5de42879b1576a46459', 'sha']],
+      [['Author:', 'dim'], ['     ', ''], ['Callum Tolley', ''], [' <cgtrolley@gmail.com>', 'dim']],
+      [['AuthorDate:', 'dim'], [' ', ''], ['Wed Sep 2 01:25:04 2026 +0100', '']],
+      [['Commit:', 'dim'], ['     ', ''], ['Callum Tolley', ''], [' <cgtrolley@gmail.com>', 'dim']],
+      [['CommitDate:', 'dim'], [' ', ''], ['Wed Sep 2 01:25:04 2026 +0100', '']],
     ])
   })
 
@@ -224,6 +240,20 @@ describe('gitOutputSpans', () => {
   it('leaves a line it has no shape for alone', () => {
     // A commit message body, indented four spaces by `git show`.
     expect(spans('    Merge branch \'main\'', '')).toEqual([[["    Merge branch 'main'", '']], []])
+  })
+})
+
+describe('gitDiffPath', () => {
+  it('reads ordinary, renamed and quoted destination paths', () => {
+    expect(gitDiffPath('diff --git a/internal/a.go b/internal/a.go')).toBe('internal/a.go')
+    expect(gitDiffPath('diff --git a/old.go b/new.go')).toBe('new.go')
+    expect(gitDiffPath('diff --git "a/old name.go" "b/new name.go"')).toBe('new name.go')
+    expect(gitDiffPath('diff --git "a/caf\\303\\251.go" "b/caf\\303\\251.go"')).toBe('café.go')
+  })
+
+  it('does not invent a path for a fragment inside a patch', () => {
+    expect(gitDiffPath('+++ b/internal/a.go')).toBeNull()
+    expect(gitDiffPath('@@ -1 +1 @@')).toBeNull()
   })
 })
 

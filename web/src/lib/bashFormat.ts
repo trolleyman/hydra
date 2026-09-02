@@ -464,9 +464,10 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
 // `/usr/bin/bash -lc '<script>'`. The wrapper is implementation detail, so show
 // the script itself while retaining the untouched item behind the tool card's
 // Raw toggle. App-server also reports the equivalent `-c` form and, depending
-// on platform/launch path, spells the executable as bash, /bin/bash, or
-// /usr/bin/bash. Unquoted remainders are accepted because this is a display
-// formatter for the provider's command string, not an argv parser.
+// on platform/launch path, spells the executable as bash, /bin/bash,
+// /usr/bin/bash, or /usr/local/bin/bash. Unquoted remainders are accepted
+// because this is a display formatter for the provider's command string, not
+// an argv parser.
 function parseOneShellWord(source: string): string | null {
   let out = ''
   let quote: "'" | '"' | null = null
@@ -514,7 +515,7 @@ function unwrapOneShellCommand(command: string): string {
   // /bin/zsh -lc rather than /bin/bash -lc. Both carry the same one-string
   // script shape for the renderer; other shells stay untouched until their
   // quoting behavior is explicitly supported here.
-  const match = command.match(/^(?:\/usr\/bin\/|\/bin\/)?(?:bash|zsh)\s+-(?:l)?c\s+([\s\S]+)$/)
+  const match = command.match(/^(?:\/usr\/local\/bin\/|\/usr\/bin\/|\/bin\/)?(?:bash|zsh)\s+-(?:l)?c\s+([\s\S]+)$/)
   if (!match) return command
   const arg = match[1].trim()
   if (!arg) return command

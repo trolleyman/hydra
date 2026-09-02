@@ -258,7 +258,32 @@ describe('sectioned search output', () => {
     expect(headings).toHaveLength(3)
     for (const heading of headings) {
       expect(heading).toHaveClass('top-0', 'z-10', 'bg-[#fdfcf9]', 'dark:bg-[#1d1c1a]')
+      expect(heading.children[1]).toHaveClass('py-1')
     }
+  })
+
+  it('wraps every output heading kind like an ordinary output line', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'text', label: 'diagnostics-with-one-very-long-unbroken-label' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'file', label: 'deep/path/to/a-very-long-file-name.txt' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'dir', label: 'deep/path/to/a-very-long-directory-name/' }, lines: ['marker'] },
+    ])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    const textLabel = screen.getByText('diagnostics-with-one-very-long-unbroken-label')
+    const fileLabel = screen.getByText('a-very-long-file-name.txt').parentElement
+    const directoryLabel = screen.getAllByText('deep/path/to/a-very-long-directory-name/')[0]
+
+    expect(textLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(fileLabel).toHaveClass('whitespace-normal', 'break-words')
+    expect(fileLabel).not.toHaveClass('truncate')
+    expect(directoryLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(directoryLabel).not.toHaveClass('truncate')
+
+    const headings = container.querySelectorAll('[data-copy-skip].sticky')
+    expect(headings).toHaveLength(3)
+    expect(headings[1].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
+    expect(headings[2].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
   })
 
   it('highlights marked Markdown and Go sections by their file headings', () => {
@@ -286,7 +311,29 @@ describe('sectioned search output', () => {
     ])
   })
 
-  it('renders one inset rule between nonconsecutive matches in the same file', () => {
+  it('derives file headings from unified diff boundaries', () => {
+    const rows = scriptOutputRows([{
+      kind: 'git',
+      command: 'git diff main',
+      lines: [
+        'diff --git a/internal/a.go b/internal/a.go',
+        '--- a/internal/a.go',
+        '+++ b/internal/a.go',
+        '@@ -1 +1 @@',
+        '-old',
+        '+new',
+        'diff --git a/docs/old.md b/docs/new.md',
+        '--- a/docs/old.md',
+        '+++ b/docs/new.md',
+      ],
+    }])
+
+    expect(rows.filter((row) => row.header).map((row) => row.header?.label)).toEqual([
+      'internal/a.go', 'docs/new.md',
+    ])
+  })
+
+  it('renders one full-width rule between nonconsecutive matches in the same file', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',
       command: 'rg -n value a.ts',
@@ -297,7 +344,28 @@ describe('sectioned search output', () => {
 
     expect(rows.filter((row) => row.divider)).toHaveLength(1)
     const divider = container.querySelector('[data-copy-skip].border-t')
-    expect(divider).toHaveClass('mx-2.5')
+    expect(divider).toHaveClass('col-span-2')
+    expect(divider).not.toHaveClass('mx-2.5')
+  })
+
+  it('turns an rg context separator into a rule only within the same file', () => {
+    const same = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value a.go',
+      match: { paths: ['a.go'], numbered: true },
+      lines: ['29:first', '30:second', '--', '67:later'],
+    }])
+    expect(same.filter((row) => row.divider)).toHaveLength(1)
+    expect(same.filter((row) => !row.header && !row.divider).map((row) => row.num)).toEqual(['29', '30', '67'])
+
+    const different = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value src',
+      match: { paths: [], numbered: true },
+      lines: ['src/a.go:29:first', '--', 'src/b.go:67:later'],
+    }])
+    expect(different.filter((row) => row.divider)).toHaveLength(0)
+    expect(different.filter((row) => row.header).map((row) => row.header?.label)).toEqual(['src/a.go', 'src/b.go'])
   })
 })
 
@@ -1402,6 +1470,9 @@ describe('a message sent after a commit lands under it', () => {
     )
     const chip = await screen.findByText('Teach the loader about overlays')
     const row = chip.closest('[role="button"]')
+    expect(chip).toHaveClass('min-w-0', 'flex-1', 'whitespace-normal', 'break-words')
+    expect(chip).not.toHaveClass('truncate')
+    expect(row?.parentElement).toHaveClass('min-w-0', 'max-w-full')
     expect(screen.getByLabelText('36 lines added, 5 lines removed')).toHaveClass('top-px')
     expect(row?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[16px]')
     expect(row?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(1)
@@ -1447,9 +1518,14 @@ describe('a message sent after a commit lands under it', () => {
     )
 
     const pill = await screen.findByRole('button', { name: /Merged main - 2 commits/ })
+    const mergeLabel = screen.getByText('Merged main - 2 commits')
+    expect(mergeLabel).toHaveClass('whitespace-normal', 'break-words')
+    expect(mergeLabel).not.toHaveClass('truncate')
     expect(screen.getByLabelText('10 lines added, 2 lines removed')).toHaveClass('top-px')
     fireEvent.click(pill)
     const subject = await screen.findByText('The merged change')
+    expect(subject).toHaveClass('whitespace-normal', 'break-words')
+    expect(subject).not.toHaveClass('truncate')
     expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('top-px')
     expect(pill).toHaveClass('z-10', 'rounded-b-none', 'border-b-0')
     expect(subject.parentElement).toHaveClass('items-baseline')

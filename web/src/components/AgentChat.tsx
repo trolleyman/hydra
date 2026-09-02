@@ -54,7 +54,7 @@ import { buildOutputSpans, diagnosticSpans } from '../lib/buildOutput'
 import { isJsonOutput } from '../lib/jsonOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
-import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
+import { blamePrefixSpans, gitDiffPath, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
 import type { OutputSpan } from '../lib/outputSpan'
 import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
@@ -247,7 +247,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
-        <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
+        <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{label}</span>
         <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
       </button>
       <Expandable open={expanded && shown > 0} className="-mt-px w-full">
@@ -273,7 +273,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
                   </span>
                   <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className="shrink-0 font-mono">{m.shortSha}</span>
-                    <span className="min-w-0 flex-1 truncate">{m.subject}</span>
+                    <span className="min-w-0 flex-1 whitespace-normal break-words">{m.subject}</span>
                   </span>
                   <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px ml-auto shrink-0" />
                 </div>
@@ -2797,6 +2797,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   let run: MatchLine[] = []
   let runLang = ''
   let previous: MatchLine | null = null
+  let separatedFrom: MatchLine | null = null
   let headerPath = ''
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
@@ -2820,16 +2821,21 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
+      separatedFrom ??= previous
       previous = null
-      rows.push({ num: '', html: '', tone: 'plain' })
       continue
+    }
+    const nextPath = line.path || onlyPath
+    if (separatedFrom) {
+      const previousPath = separatedFrom.path || onlyPath
+      if (previousPath && previousPath === nextPath) rows.push(scriptDivider())
+      separatedFrom = null
     }
     const lang = line.path ? langFromPath(line.path) : only
     const discontinuous = previous && !consecutiveMatchLines(previous, line)
     if (lang !== runLang || discontinuous) {
       flush()
       const previousPath = previous?.path || onlyPath
-      const nextPath = line.path || onlyPath
       if (discontinuous && previousPath && previousPath === nextPath) rows.push(scriptDivider())
     }
     runLang = lang
@@ -2932,7 +2938,12 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'git') {
-      for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
+      const highlighted = gitOutputSpans(section.lines)
+      section.lines.forEach((line, i) => {
+        const path = gitDiffPath(line)
+        if (path) add([scriptHeader('file', path)])
+        rows.push({ num: '', html: '', spans: highlighted[i], tone: 'code' })
+      })
       continue
     }
     if (section.kind === 'summary') {
@@ -3144,27 +3155,31 @@ function ScriptOutputHeader({ header, gutter }: {
 }) {
   const label = header.kind === 'file'
     ? (
-        <Tooltip content={<FilePathLabel path={header.label} nativeTitle={false} />} align="left">
-          <FilePathLabel path={header.label} nativeTitle={false} className="font-sans" />
+        <Tooltip
+          content={<FilePathLabel path={header.label} nativeTitle={false} />}
+          align="left"
+          className="min-w-0 flex-1"
+        >
+          <FilePathLabel path={header.label} nativeTitle={false} wrap className="min-w-0 flex-1 font-sans" />
         </Tooltip>
       )
     : header.kind === 'dir'
       ? (
-          <DirectoryTooltip path={header.label}>
-            <span className="inline-flex min-w-0 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
+          <DirectoryTooltip path={header.label} className="min-w-0 flex-1">
+            <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
               <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
-              <span className="truncate">{header.label}</span>
+              <span className="min-w-0 whitespace-pre-wrap break-words">{header.label}</span>
             </span>
           </DirectoryTooltip>
         )
-      : <span className="text-stone-600 dark:text-stone-300">{header.label}</span>
+      : <span className="min-w-0 whitespace-pre-wrap break-words text-stone-600 dark:text-stone-300">{header.label}</span>
   return (
     <div
       data-copy-skip
       className={`${gutter ? 'col-span-2' : 'col-span-1'} sticky top-0 z-10 min-w-0 select-none bg-[#fdfcf9] dark:bg-[#1d1c1a]`}
     >
       <div className="mx-2.5 border-t border-stone-200 dark:border-white/[0.06]" />
-      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-0.5">{label}</div>
+      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-1">{label}</div>
       <div className="mx-2.5 border-b border-stone-200 dark:border-white/[0.06]" />
     </div>
   )
@@ -3174,7 +3189,7 @@ function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
   return (
     <div
       data-copy-skip
-      className={`${gutter ? 'col-span-2' : 'col-span-1'} mx-2.5 border-t border-stone-200 dark:border-white/[0.06]`}
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} border-t border-stone-200 dark:border-white/[0.06]`}
     />
   )
 }
@@ -10755,6 +10770,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           <div className="flex justify-center">
             <Tooltip
               align="left"
+              className="min-w-0 max-w-full"
               content={
                 <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
               }
@@ -10764,7 +10780,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 tabIndex={clickable ? 0 : undefined}
                 onClick={clickable ? activate : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-                className={`${COMMIT_PILL} relative max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
+                className={`${COMMIT_PILL} relative min-w-0 max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
               >
                 <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[16px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
                 <span className="relative flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
@@ -10773,7 +10789,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 {/* The sha is monospace and the subject is not, so their line boxes
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
-                <span className="truncate optical-center">{item.subject}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{item.subject}</span>
                 <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
               </div>
             </Tooltip>

@@ -127,7 +127,7 @@ func (m *Manager) SetConcurrency(n int) {
 // CleanCheckouts tears the slot pool down to empty (call on boot) and wipes any
 // ephemeral per-run cow_paths layers a crashed run left behind.
 func (m *Manager) CleanCheckouts() {
-	_ = os.RemoveAll(m.cowDir())
+	checkout.RemoveAllDetached(m.cowDir())
 	m.pool.Clean()
 }
 
