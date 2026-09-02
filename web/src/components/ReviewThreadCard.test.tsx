@@ -13,6 +13,8 @@ function actions(applySuggestion = vi.fn(async () => {})): ReviewThreadActions {
     commentOnLine: vi.fn(async () => {}),
     resolveWithAgent: vi.fn(async () => {}),
     applySuggestion,
+    suggestionsInBatch: new Set(),
+    toggleSuggestionBatch: vi.fn(),
     draft: { load: () => '', save: () => {}, clear: () => {} },
   }
 }
@@ -36,6 +38,15 @@ describe('ReviewThreadCard suggestions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply suggestion' }))
 
     await waitFor(() => expect(apply).toHaveBeenCalledWith(7))
+  })
+
+  it('adds a suggestion to an explicit batch', () => {
+    const base = actions()
+    render(<ReviewThreadCard thread={thread(false)} actions={base} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to batch' }))
+
+    expect(base.toggleSuggestionBatch).toHaveBeenCalledWith(7)
   })
 
   it('shows an applied suggestion without another apply control', () => {

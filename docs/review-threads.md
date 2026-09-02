@@ -5,8 +5,8 @@ conversations inline in Hydra's diff viewer, anchored to the file and line they
 were written against, next to your own local comments. You can reply on the pull
 request, keep a reply local to Hydra, hand a thread to the agent, or start a new
 thread on a line. Code suggestions can be applied individually from their
-comment or together from the Changes toolbar. The publish/forge machinery
-underneath is
+comment or added to an explicit batch and applied together from the Changes
+toolbar. The publish/forge machinery underneath is
 [non-local-integration.md](non-local-integration.md); adopting someone's PR as a
 head is [pr-adoption.md](pr-adoption.md).
 
@@ -51,9 +51,10 @@ me to this on GitHub" move costs one click and needs no menu entry.
   so nothing is snapshotted at click time.
 - **Copy link to thread** (the `...` menu) - opening it is the icon's job.
 - **Apply suggestion** - writes that comment's fenced replacement directly into
-  the head's worktree. When two or more unapplied suggestions are visible, the
-  Changes toolbar offers **Apply all** and validates the entire batch before it
-  changes a file.
+  the head's worktree. **Add to batch** selects a suggestion without applying it;
+  once the batch is non-empty, the Changes toolbar offers **Apply batch** for
+  exactly those selections. Hydra validates the entire batch before it changes a
+  file.
 - **Comment on GitHub / GitLab** (in the new-comment box on any new-side line) -
   starts a new review thread instead of writing to the agent.
 
