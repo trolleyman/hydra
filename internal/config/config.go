@@ -478,7 +478,7 @@ func ValidateSharedCache(key string, entry sandbox.SharedCache) error {
 	}
 	if entry.Path != "" {
 		clean := filepath.Clean(entry.Path)
-		if filepath.IsAbs(entry.Path) || strings.HasPrefix(entry.Path, "~") || strings.Contains(entry.Path, "$") || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		if filepath.IsAbs(entry.Path) || strings.Contains(entry.Path, `\`) || strings.HasPrefix(entry.Path, "~") || strings.Contains(entry.Path, "$") || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 			return errtrace.Errorf("cache %q path must be worktree-relative without ~, $ variables, or parent traversal", key)
 		}
 	}

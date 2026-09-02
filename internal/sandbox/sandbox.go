@@ -9,13 +9,16 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"braces.dev/errtrace"
 )
@@ -322,7 +325,8 @@ type Options struct {
 	CacheRoot string
 	Caches    map[string]SharedCache
 	// MaterializeCachePaths creates worktree-relative path cache symlinks. It is
-	// false for runners using the live project root or a read-only directory.
+	// false for runners that must not change their working directory. A read-only
+	// project directory also suppresses materialization through WorkingDirReadOnly.
 	MaterializeCachePaths bool
 
 	// WritablePaths, MaskedPaths and RestoreRO come from config + baked-in
@@ -566,11 +570,17 @@ func RuntimeEnv(env []string, hostTmpDir string, inherited ...string) []string {
 // PrepareSharedCaches creates project-owned cache backing directories and any
 // requested worktree links. It mutates opts.WritablePaths so platform policy
 // builders expose the cache directories read-write.
+var sharedCacheMu sync.Mutex
+
 func PrepareSharedCaches(opts *Options) error {
 	if opts.CacheRoot == "" || len(opts.Caches) == 0 {
 		return nil
 	}
+	sharedCacheMu.Lock()
+	defer sharedCacheMu.Unlock()
+
 	keys := make([]string, 0, len(opts.Caches))
+	cachePaths := make(map[string]string)
 	for key := range opts.Caches {
 		keys = append(keys, key)
 	}
@@ -582,9 +592,13 @@ func PrepareSharedCaches(opts *Options) error {
 		}
 		if entry.Path != "" {
 			clean := filepath.Clean(entry.Path)
-			if filepath.IsAbs(entry.Path) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			if filepath.IsAbs(entry.Path) || strings.Contains(entry.Path, `\`) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 				return errtrace.Errorf("shared cache %q path must stay inside the worktree", key)
 			}
+			if previous, exists := cachePaths[clean]; exists {
+				return errtrace.Errorf("shared caches %q and %q use the same worktree path %q", previous, key, entry.Path)
+			}
+			cachePaths[clean] = key
 		}
 		backing := filepath.Join(opts.CacheRoot, key)
 		if err := os.MkdirAll(backing, 0o755); err != nil {
@@ -594,8 +608,8 @@ func PrepareSharedCaches(opts *Options) error {
 		if entry.Path == "" || !opts.MaterializeCachePaths || opts.WorkingDirReadOnly {
 			continue
 		}
-		target := filepath.Join(opts.WorktreePath, filepath.FromSlash(entry.Path))
-		if err := ensureCacheLink(target, backing); err != nil {
+		target := filepath.FromSlash(entry.Path)
+		if err := ensureCacheLink(opts.WorktreePath, target, backing, opts.CacheRoot); err != nil {
 			return errtrace.Wrap(fmt.Errorf("materialize shared cache %q: %w", key, err))
 		}
 	}
@@ -622,22 +636,108 @@ func SharedCacheEnv(env []string, root string, caches map[string]SharedCache) []
 	return env
 }
 
-func ensureCacheLink(target, backing string) error {
-	if info, err := os.Lstat(target); err == nil {
+func ensureCacheLink(worktree, target, backing, cacheRoot string) error {
+	root, err := os.OpenRoot(worktree)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
+
+	if err := checkCacheLinkParents(root, target, false); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := checkCachePathIgnored(worktree, target); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	if info, err := root.Lstat(target); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
-			got, readErr := os.Readlink(target)
-			if readErr == nil && filepath.Clean(got) == filepath.Clean(backing) {
+			got, readErr := root.Readlink(target)
+			if readErr != nil {
+				return errtrace.Wrap(readErr)
+			}
+			resolved := got
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(worktree, filepath.Dir(target), resolved)
+			}
+			resolved = filepath.Clean(resolved)
+			if resolved == filepath.Clean(backing) {
 				return nil
 			}
+			if !isCacheBacking(resolved, cacheRoot) {
+				return errtrace.Errorf("%s already exists and is not a Hydra cache link", filepath.Join(worktree, target))
+			}
+			if err := root.Remove(target); err != nil {
+				return errtrace.Wrap(err)
+			}
+		} else {
+			return errtrace.Errorf("%s already exists; path caches require an absent path or Hydra's existing symlink", filepath.Join(worktree, target))
 		}
-		return errtrace.Errorf("%s already exists; path caches require an absent path or Hydra's existing symlink", target)
 	} else if !os.IsNotExist(err) {
 		return errtrace.Wrap(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := checkCacheLinkParents(root, target, true); err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(os.Symlink(backing, target))
+	return errtrace.Wrap(root.Symlink(backing, target))
+}
+
+// checkCacheLinkParents walks each parent relative to an anchored os.Root. It
+// rejects symlinks even when they happen to resolve back inside the worktree:
+// the configured path names the directory tree itself, not an alias into it.
+func checkCacheLinkParents(root *os.Root, target string, create bool) error {
+	parent := filepath.Dir(target)
+	if parent == "." {
+		return nil
+	}
+	current := ""
+	for _, part := range strings.Split(parent, string(filepath.Separator)) {
+		if current == "" {
+			current = part
+		} else {
+			current = filepath.Join(current, part)
+		}
+		info, err := root.Lstat(current)
+		if os.IsNotExist(err) && create {
+			if err := root.Mkdir(current, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+				return errtrace.Wrap(err)
+			}
+			info, err = root.Lstat(current)
+		}
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errtrace.Errorf("cache path parent %s is a symlink", filepath.Join(root.Name(), current))
+		}
+		if !info.IsDir() {
+			return errtrace.Errorf("cache path parent %s is not a directory", filepath.Join(root.Name(), current))
+		}
+	}
+	return nil
+}
+
+func checkCachePathIgnored(worktree, target string) error {
+	output, err := exec.Command("git", "-C", worktree, "check-ignore", "--quiet", "--", filepath.ToSlash(target)).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return errtrace.Errorf("%s is not ignored by Git; add %q without a trailing slash to a Git ignore file before using it as a path cache", filepath.Join(worktree, target), filepath.ToSlash(target))
+	}
+	if detail := strings.TrimSpace(string(output)); detail != "" {
+		return errtrace.Errorf("check whether cache path %s is ignored by Git: %s", filepath.Join(worktree, target), detail)
+	}
+	return errtrace.Wrap(fmt.Errorf("check whether cache path %s is ignored by Git: %w", filepath.Join(worktree, target), err))
+}
+
+func isCacheBacking(target, cacheRoot string) bool {
+	rel, err := filepath.Rel(filepath.Clean(cacheRoot), filepath.Clean(target))
+	return err == nil && rel != "." && rel != ".." && filepath.Base(rel) == rel
 }
 
 func lookupEnvValue(env []string, key string) string {

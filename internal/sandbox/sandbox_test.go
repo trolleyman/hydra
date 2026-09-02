@@ -3,6 +3,7 @@ package sandbox
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -164,10 +165,7 @@ func TestRuntimeEnvHonorsInheritedApplicationPaths(t *testing.T) {
 
 func TestPrepareSharedCachesCreatesBackingAndWorktreeLink(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "cache")
-	worktree := filepath.Join(t.TempDir(), "worktree")
-	if err := os.MkdirAll(worktree, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	worktree := cacheTestWorktree(t, "web/cache\n")
 	opts := Options{
 		WorktreePath: worktree,
 		CacheRoot:    root,
@@ -193,6 +191,120 @@ func TestPrepareSharedCachesCreatesBackingAndWorktreeLink(t *testing.T) {
 	if !slices.Contains(env, "GOCACHE="+filepath.Join(root, "go_build")) {
 		t.Fatalf("shared cache did not override private GOCACHE: %v", env)
 	}
+}
+
+func TestPrepareSharedCachesRejectsUnignoredPath(t *testing.T) {
+	worktree := cacheTestWorktree(t, "")
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"web": {Path: "web/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "is not ignored by Git") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want Git-ignore error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, "web", "cache")); !os.IsNotExist(err) {
+		t.Fatalf("unignored cache path was materialized: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesDoesNotLinkReadOnlyWorkingDirectory(t *testing.T) {
+	worktree := t.TempDir()
+	opts := Options{
+		WorktreePath:          worktree,
+		WorkingDirReadOnly:    true,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"web": {Path: "web/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, "web", "cache")); !os.IsNotExist(err) {
+		t.Fatalf("read-only cache path was materialized: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesRejectsSymlinkParent(t *testing.T) {
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(worktree, "build")); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"generated": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "parent") || !strings.Contains(err.Error(), "is a symlink") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want symlink-parent error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "cache")); !os.IsNotExist(err) {
+		t.Fatalf("cache link escaped through parent symlink: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesUpdatesHydraCacheLink(t *testing.T) {
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             cacheRoot,
+		Caches:                map[string]SharedCache{"old": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.Caches = map[string]SharedCache{"new": {Path: "build/cache"}}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.Readlink(filepath.Join(worktree, "build", "cache"))
+	if err != nil || got != filepath.Join(cacheRoot, "new") {
+		t.Fatalf("updated cache link = %q, %v", got, err)
+	}
+}
+
+func TestPrepareSharedCachesPreservesUnownedSymlink(t *testing.T) {
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(worktree, "build", "cache")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"generated": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "is not a Hydra cache link") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want unowned-link error", err)
+	}
+	if got, err := os.Readlink(link); err != nil || got != outside {
+		t.Fatalf("unowned link changed to %q, %v", got, err)
+	}
+}
+
+func cacheTestWorktree(t *testing.T, ignore string) string {
+	t.Helper()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "init", "--quiet", worktree).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".gitignore"), []byte(ignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return worktree
 }
 
 // claudeArgv is the fixed head of every Claude argv - the skip-permissions flag

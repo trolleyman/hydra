@@ -69,9 +69,17 @@ generated = { path = "build/cache" }
 ```
 
 An `env` entry replaces Hydra's private default for that variable. A `path`
-entry creates a symlink at the worktree-relative path; the path must be ignored
-by Git and must not already contain project data. Cache keys merge across config
-layers, with a later entry replacing the same key.
+entry creates a symlink at the worktree-relative path in a worktree or writable
+project-directory workspace. The backing directory is already outside Git under
+Hydra's local project state; the configured symlink path inside the repository
+must also be ignored by Git. Since the repository entry is a symlink, a direct
+ignore rule names it without a trailing slash (`build/cache`, not
+`build/cache/`). Hydra checks that rule before creating the link,
+rejects symlinked parent directories, and never replaces a file, directory, or
+non-Hydra symlink at the target. If a cache key changes while retaining the same
+path, Hydra updates the existing Hydra cache link. Read-only project-directory
+workspaces do not materialize path caches. Cache keys merge across config layers,
+with a later entry replacing the same key.
 
 These directories are writable shared state. They are suitable for reproducible,
 disposable caches, but not credentials, source-of-truth files, mutable executable
