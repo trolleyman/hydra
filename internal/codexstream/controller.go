@@ -20,6 +20,7 @@ type SendFunc func([]byte) error
 type Options struct {
 	CWD            string
 	Model          string
+	Effort         string
 	ConversationID string
 	InitialPrompt  string
 	Send           SendFunc
@@ -54,6 +55,7 @@ type Controller struct {
 	rollbackID      uint64
 	recoveryInput   json.RawMessage
 	model           string
+	effort          string
 }
 
 type pendingRequest struct {
@@ -63,7 +65,7 @@ type pendingRequest struct {
 }
 
 func New(opts Options) *Controller {
-	return &Controller{opts: opts, threadID: opts.ConversationID, initialPrompt: opts.InitialPrompt, model: opts.Model, requests: map[string]pendingRequest{}}
+	return &Controller{opts: opts, threadID: opts.ConversationID, initialPrompt: opts.InitialPrompt, model: opts.Model, effort: opts.Effort, requests: map[string]pendingRequest{}}
 }
 
 func (c *Controller) nextID() uint64 { return c.seq.Add(1) }
@@ -704,7 +706,7 @@ func (c *Controller) SendText(text string) error {
 // rather than disappearing silently.
 func (c *Controller) SendUser(content json.RawMessage) error {
 	c.mu.Lock()
-	threadID, turnID, ready, model := c.threadID, c.turnID, c.threadReady, c.model
+	threadID, turnID, ready, model, effort := c.threadID, c.turnID, c.threadReady, c.model, c.effort
 	if threadID == "" || !ready {
 		c.pending = append(c.pending, append(json.RawMessage(nil), content...))
 		c.mu.Unlock()
@@ -742,6 +744,9 @@ func (c *Controller) SendUser(content json.RawMessage) error {
 	params := map[string]any{"threadId": threadID, "input": input}
 	if model != "" {
 		params["model"] = model
+	}
+	if effort != "" {
+		params["effort"] = effort
 	}
 	_, err := c.send("turn/start", params)
 	return errtrace.Wrap(err)

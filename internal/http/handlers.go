@@ -1873,6 +1873,22 @@ func spawnTermSize(rows, cols *int) (uint16, uint16) {
 	return clamp(rows), clamp(cols)
 }
 
+func spawnEffort(agentType sandbox.AgentType, value *api.SpawnAgentRequestEffort) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	effort := strings.TrimSpace(string(*value))
+	switch effort {
+	case string(api.Low), string(api.Medium), string(api.High), string(api.Xhigh), string(api.Max):
+	default:
+		return "", errtrace.Wrap(fmt.Errorf("unknown effort %q; supported: low, medium, high, xhigh, max", effort))
+	}
+	if agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeCodex {
+		return "", errtrace.Wrap(fmt.Errorf("effort is only supported for claude and codex agents"))
+	}
+	return effort, nil
+}
+
 func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {
 	if request.Body == nil {
 		return api.SpawnAgent400JSONResponse{
@@ -1936,6 +1952,14 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	var model string
 	if request.Body.Model != nil {
 		model = strings.TrimSpace(*request.Body.Model)
+	}
+	effort, err := spawnEffort(agentType, request.Body.Effort)
+	if err != nil {
+		return api.SpawnAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: err.Error(),
+		}, nil
 	}
 
 	// Chat mode defaults on for the agent types that support it (claude, codex);
@@ -2041,6 +2065,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		Prompt:         prompt,
 		AgentType:      agentType,
 		Model:          model,
+		Effort:         effort,
 		BaseBranch:     baseBranch,
 		Adopt:          adopt,
 		Ephemeral:      ephemeral,

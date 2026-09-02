@@ -65,6 +65,27 @@ func TestControllerModelChangeAppliesToNextTurn(t *testing.T) {
 	}
 }
 
+func TestControllerEffortAppliesToTurns(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{Model: "gpt-test", Effort: "high", Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"gpt-test","model":"gpt-test"}]}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr"}}}`))
+	if err := c.SendText("hello"); err != nil {
+		t.Fatal(err)
+	}
+	params := sent[len(sent)-1]["params"].(map[string]any)
+	if params["effort"] != "high" {
+		t.Fatalf("turn params = %+v", params)
+	}
+}
+
 func TestControllerResolvesAccountDefaultAndAliasFromModelList(t *testing.T) {
 	var sent []map[string]any
 	resolved := ""

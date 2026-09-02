@@ -209,6 +209,13 @@ so a head that ran unwatched - or predates the event log - still backfills.
 Claude keeps its stream-json `set_model` control request, issued through the
 same registry operation Codex's model selection uses.
 
+The agent and model picker's **Thinking effort** choice is shared by Claude and Codex
+and remembered separately for each provider. `Default` omits the API field so
+the selected provider and model keep their own default. A fresh Claude session
+receives `--effort`; a fresh terminal-mode Codex session receives
+`model_reasoning_effort` through its config override. Resume does not reapply
+either launch override, so the saved conversation remains authoritative.
+
 ## The Codex driver
 
 For a fresh head the controller launches `codex app-server --listen stdio://`
@@ -228,6 +235,9 @@ explicitly selected the selector reads `Default`: an omitted app-server model
 deliberately uses the user's own Codex configuration, and the thread lifecycle
 never echoes a concrete replacement id. A model change is held by the controller
 and applied to the next `turn/start`; an active turn is not mutated.
+An explicitly selected thinking effort is also applied to every new
+`turn/start`. Codex owns it as a subsequent-turn override, so it remains in
+effect after the initial spawn turn without being resent on `thread/resume`.
 
 Resume repeats initialization, calls `thread/resume` with the persisted thread
 id, reads back through `thread/read`, translates the returned items with the

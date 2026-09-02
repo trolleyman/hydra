@@ -700,8 +700,8 @@ func ListCodexMCPServers(data []byte) []MCPServer {
 // --append-system-prompt (applied on resume too). Gemini, Copilot and Codex have
 // no such flag, so for them the instructions are seeded as context files (see
 // seedHead, which also runs on resume) and systemPrompt is ignored here.
-// AgentArgv builds the command line for an agent CLI. model, when non-empty, is
-// passed as the CLI's --model flag but ONLY on a fresh spawn (resume == false):
+// AgentArgv builds the command line for an agent CLI. model and effort, when
+// non-empty, are passed through only on a fresh spawn (resume == false):
 // on resume the flag is omitted so the agent restores whatever model its
 // transcript was saved with and honours any in-session model change (e.g.
 // Claude's /model). Forcing --model on resume would override that and, because
@@ -728,7 +728,7 @@ func ListCodexMCPServers(data []byte) []MCPServer {
 // claudeSettingSources optionally limits the settings scopes Claude loads.
 // Darwin passes "user" because its immutable generated user settings substitute
 // for the root-owned managed tier and project/local disableAllHooks must not win.
-func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID, strictMCPConfigPath, claudeSettingSources string) ([]string, error) {
+func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model, effort string, chatMode bool, resumeSessionID, strictMCPConfigPath, claudeSettingSources string) ([]string, error) {
 	if chatMode && agentType != AgentTypeClaude && agentType != AgentTypeCodex {
 		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude and codex agents, not %q", agentType))
 	}
@@ -752,6 +752,9 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		}
 		if !resume && model != "" {
 			argv = append(argv, "--model", model)
+		}
+		if !resume && effort != "" {
+			argv = append(argv, "--effort", effort)
 		}
 		resumeArgs := func() []string {
 			if resumeSessionID != "" {
@@ -839,6 +842,9 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		argv := []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"}
 		if !resume && model != "" {
 			argv = append(argv, "--model", model)
+		}
+		if !resume && effort != "" {
+			argv = append(argv, "--config", fmt.Sprintf("model_reasoning_effort=%q", effort))
 		}
 		if resume {
 			if resumeSessionID != "" {

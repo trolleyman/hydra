@@ -460,6 +460,15 @@ const (
 	ShellCwd ShellCwdEventType = "shell_cwd"
 )
 
+// Defines values for SpawnAgentRequestEffort.
+const (
+	High   SpawnAgentRequestEffort = "high"
+	Low    SpawnAgentRequestEffort = "low"
+	Max    SpawnAgentRequestEffort = "max"
+	Medium SpawnAgentRequestEffort = "medium"
+	Xhigh  SpawnAgentRequestEffort = "xhigh"
+)
+
 // Defines values for StatusResponseBackendLifetime.
 const (
 	CommandOwned StatusResponseBackendLifetime = "command-owned"
@@ -3755,6 +3764,9 @@ type SpawnAgentRequest struct {
 	// Cols Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
 	Cols *int `json:"cols,omitempty"`
 
+	// Effort Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+	Effort *SpawnAgentRequestEffort `json:"effort,omitempty"`
+
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
@@ -3782,6 +3794,9 @@ type SpawnAgentRequest struct {
 	// WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
 	WorkspaceKind *WorkspaceKind `json:"workspace_kind,omitempty"`
 }
+
+// SpawnAgentRequestEffort Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+type SpawnAgentRequestEffort string
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
