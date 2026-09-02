@@ -47,8 +47,8 @@ func TestBuildSpecLinux(t *testing.T) {
 		WorktreePath:  work,
 		Home:          home,
 		WritablePaths: []string{"~/.cache", "~/.created-on-demand", "/hydra-nonexistent-abs"},
-		MaskedPaths:   []string{"~/.ssh", "~/.config"},
-		RestoreRO:     []string{"~/.config/git"},
+		ReadablePaths: []string{"~", "~/.config/git"},
+		MaskedPaths:   []string{"~/.ssh"},
 		Network:       NetworkPolicy{Enabled: false},
 		HardenGUI:     true,
 		Seccomp:       false,
@@ -65,8 +65,8 @@ func TestBuildSpecLinux(t *testing.T) {
 	if !strings.HasSuffix(spec.Path, "bwrap") {
 		t.Errorf("Path = %q, want .../bwrap", spec.Path)
 	}
-	if !hasPair(args, "--ro-bind", "/", "/") {
-		t.Error("missing --ro-bind / /")
+	if hasPair(args, "--ro-bind", "/", "/") {
+		t.Error("host root must not be exposed wholesale")
 	}
 	// Worktree must be writable.
 	if !hasPair(args, "--bind", work, work) {
@@ -96,14 +96,13 @@ func TestBuildSpecLinux(t *testing.T) {
 	if !hasPair2(args, "--tmpfs", secret) {
 		t.Error("~/.ssh not masked with tmpfs")
 	}
-	// Restore RO applied after mask.
-	maskIdx := pairIndex(args, "--tmpfs", filepath.Join(home, ".config"))
-	restoreIdx := pairIndex(args, "--ro-bind", gitcfg)
-	if maskIdx == -1 || restoreIdx == -1 {
-		t.Fatalf("expected mask(%d) and restore(%d) present", maskIdx, restoreIdx)
+	if !hasPair(args, "--ro-bind", gitcfg, gitcfg) {
+		t.Error("configured readable path not bound read-only")
 	}
-	if restoreIdx < maskIdx {
-		t.Error("restore must come after mask")
+	readHomeIdx := pairIndex(args, "--ro-bind", home)
+	maskSecretIdx := pairIndex(args, "--tmpfs", secret)
+	if readHomeIdx == -1 || maskSecretIdx == -1 || maskSecretIdx < readHomeIdx {
+		t.Errorf("credential mask must follow broad read allowance: read=%d mask=%d", readHomeIdx, maskSecretIdx)
 	}
 	// Network disabled.
 	if argIndex(args, "--unshare-net") == -1 {

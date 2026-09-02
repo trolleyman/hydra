@@ -308,12 +308,13 @@ export function useAgentNotifications(
       decision: ApprovalDecisionRequest.decision,
       remember: boolean,
       command?: string,
+      path?: string,
     ) => {
       // Drop it from the shared pending set first, so the in-chat card's buttons
       // disappear the instant you click rather than on the next poll.
       useApprovalStore.getState().resolve(agentId, reqid)
       await runWithToast(
-        () => api.default.decideAgentApproval(currentProjectId, agentId, reqid, { decision, remember, command }),
+        () => api.default.decideAgentApproval(currentProjectId, agentId, reqid, { decision, remember, command, path }),
         { errorPrefix: decision === ApprovalDecisionRequest.decision.ALLOW ? 'Failed to allow request' : 'Failed to deny request' },
       )
     }
@@ -422,11 +423,12 @@ export function useAgentNotifications(
           // Notify only for a call we haven't already surfaced, so a re-fetch of
           // the same still-parked request doesn't re-alert.
           const isNewApproval = !reqMap.has(a.reqid)
-          // mcp / mcp_tool / webfetch / egress persist an "always allow"; bash
+          // mcp / mcp_tool / webfetch / egress / filesystem_read persist an
+          // "always allow"; bash
           // (e.g. git push) and tool (an unrecognized tool - the permanent fix is
           // registering it in Hydra's known-tools list, not a per-call grant) are
           // one-shot only.
-          const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress'
+          const canRemember = a.kind === 'mcp' || a.kind === 'mcp_tool' || a.kind === 'webfetch' || a.kind === 'egress' || a.kind === 'filesystem_read'
           // A webfetch/egress allow is a session-wide host grant - it covers every
           // later request to that host until the head is killed - so its button
           // says "Allow", not "Allow once". Other kinds are genuinely one-shot.
@@ -434,12 +436,13 @@ export function useAgentNotifications(
           // host_command echoes the displayed command back on allow (the TOCTOU
           // guard); every other kind sends no command.
           const echoCommand = a.kind === 'host_command' ? a.target : undefined
+          const echoPath = a.kind === 'filesystem_read' ? a.target : undefined
           const actions = [
             {
               label: sessionHostGrant ? 'Allow' : 'Allow once',
               variant: 'primary' as const,
               onClick: (toastId: number) => {
-                void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false, echoCommand)
+                void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, false, echoCommand, echoPath)
                 reqMap!.delete(a.reqid)
                 toast.dismiss(toastId, { silent: true })
               },
@@ -450,7 +453,7 @@ export function useAgentNotifications(
                     label: 'Always allow',
                     variant: 'primary' as const,
                     onClick: (toastId: number) => {
-                      void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, true)
+                      void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.ALLOW, true, undefined, echoPath)
                       reqMap!.delete(a.reqid)
                       toast.dismiss(toastId, { silent: true })
                     },

@@ -321,7 +321,23 @@ function RootLayout() {
     const a = selectLiveAgent(s, selectedAgentId)
     return a ? a.title || a.id : undefined
   })
-  const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
+  const currentProjectUnread = useAgentStore((s) => currentProjectId
+    ? s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0)
+    : 0)
+  const currentProjectNeedsInput = useAgentStore((s) => currentProjectId
+    ? s.agents.reduce((n, a) => n + (a.agent_status?.status === 'needs_input' ? 1 : 0), 0)
+    : 0)
+  // The favicon and installed-app badge report attention across Hydra, not only
+  // the open project. Use live agent state for the current project so optimistic
+  // reads clear immediately, and server summaries for every background project.
+  const otherProjectsUnread = projects
+    .filter((p) => p.id !== currentProjectId)
+    .reduce((n, p) => n + (p.unread_count ?? 0), 0)
+  const otherProjectsNeedsInput = projects
+    .filter((p) => p.id !== currentProjectId)
+    .reduce((n, p) => n + (p.needs_input_count ?? 0), 0)
+  const anyUnread = currentProjectUnread + otherProjectsUnread > 0
+  const anyNeedsInput = currentProjectNeedsInput + otherProjectsNeedsInput > 0
   const selectedAgentActiveTurn = useAgentStore((s) =>
     selectedAgentId ? agentHasActiveTurn(selectLiveAgent(s, selectedAgentId)) : false,
   )
@@ -481,9 +497,9 @@ function RootLayout() {
   const { pushStatus, syncing, handleSync, committing, handleCommit, refetchPushStatus } = usePushStatus(currentProjectId)
   const { sentinelRef: archivedSentinelRef } = useArchivedAgents(currentProjectId)
   useAgentNotifications(currentProjectId, pageActive, selectedAgentId)
-  // Paint the selected project's icon into the tab, so one-tab-per-project
-  // setups are tellable apart (matches the OS notification icon).
-  useProjectFavicon(currentProjectId)
+  // Paint the selected project's icon into the tab, with global attention
+  // overlaid in the same red-over-blue priority as project navigation.
+  useProjectFavicon(currentProjectId, anyNeedsInput ? 'needs_input' : anyUnread ? 'unread' : null)
   const { refetchStatus, canRestart, canUpdate, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the
@@ -517,10 +533,6 @@ function RootLayout() {
   // We count the live (optimistically-cleared) agents for the current project
   // and trust the backend per-project counts for the others - so the dot tracks
   // the same state as the in-app indicators and clears the moment they do.
-  const otherProjectsUnread = projects
-    .filter((p) => p.id !== currentProjectId)
-    .reduce((n, p) => n + (p.unread_count ?? 0), 0)
-  const anyUnread = currentProjectUnread + otherProjectsUnread > 0
   // Build the rest of the title from the current view: project, then the open
   // agent (its title, falling back to id) or the repository browser. Computed as
   // primitive strings so the effect only fires when the displayed text changes.

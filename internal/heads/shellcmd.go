@@ -172,14 +172,14 @@ func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sa
 		Argv:         []string{"bash", "-c", command},
 	}
 
-	writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+	writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 	cfg.ApplySharedCaches(&opts, projectRoot, "", true)
 	if gcd, err := git.GetCommonDir(projectRoot); err == nil {
 		opts.GitCommonDir = gcd
 	}
 	opts.WritablePaths = writable
+	opts.ReadablePaths = readable
 	opts.MaskedPaths = sandbox.ResolveMaskedPaths(projectRoot, worktree, masked)
-	opts.RestoreRO = restore
 
 	var cowLayerDir string
 	if len(cow) > 0 {

@@ -7,6 +7,27 @@ started with `mage run` does not pass the launching terminal's unrelated
 credentials, language runtime options, CI state, or Hydra daemon settings into
 heads.
 
+The filesystem follows the same default-deny model. Heads see their worktree,
+private temporary and provider state, generated immutable inputs, Git metadata,
+the system runtime/toolchain inventory, directories on their trusted `PATH`, and
+the built-in or configured `readable_paths`. Linux constructs that view from an
+empty bubblewrap namespace. macOS denies file reads in Seatbelt and appends the
+same categories as explicit grants. Writable paths are inherently readable.
+
+`masked_paths` remains a defense-in-depth deny list for known credential and
+secret locations. Masks apply after every read and write grant, so allowing a
+parent such as `~` does not expose a masked child. Project-relative masks and
+`.hydraignore` continue to protect secrets inside otherwise readable worktrees.
+
+An agent that needs one existing host file or directory outside this view can
+call `mcp__hydra__request_read_access` with the path and a reason. Hydra resolves
+the path on the host and shows the canonical target in an approval card. Allow
+once records a per-head read-only grant; Always allow also adds the path to that
+agent type's `readable_paths` in the trusted project config. Applying either
+choice automatically rebuilds and resumes the sandbox. The per-head grant is
+removed when the head is killed or archived, and `masked_paths` still wins over
+both forms of grant.
+
 ## Policy
 
 Head processes use an allow-list instead of inheriting the daemon environment.
@@ -152,6 +173,10 @@ cross the head boundary.
   `/tmp`; macOS uses the protected real per-head or per-command directory.
 - `sandbox.cache` selectively redirects cache variables or worktree paths to
   project-owned shared directories after those private defaults are applied.
+- `SandboxConfig.ReadablePaths` merges additively across trusted config layers.
+  The Linux and macOS backends combine it with their explicit system inventory;
+  the shared option is path-based rather than mount-based so a Windows backend
+  can enforce it with sandbox-principal ACL grants.
 - Config decoding and saving reject Hydra-managed names before a head launches. The
   launch builder repeats that check defensively for programmatically assembled
   config values.

@@ -1175,14 +1175,14 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
 		cfg.ApplySharedCaches(&opts, m.projectRoot, "", true)
-		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+		writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		writable = append(writable, outputDir)
 		if gcd, err := git.GetCommonDir(m.projectRoot); err == nil {
 			opts.GitCommonDir = gcd
 		}
 		opts.WritablePaths = writable
+		opts.ReadablePaths = readable
 		opts.MaskedPaths = sandbox.ResolveMaskedPaths(m.projectRoot, runDir, masked)
-		opts.RestoreRO = restore
 		// Apply cow_paths so a shared host cache the project isolates per-head
 		// (e.g. ~/.gradle) is writable for the test run too - otherwise a
 		// Gradle-based suite runs with it READ-ONLY and can't write its lock/build

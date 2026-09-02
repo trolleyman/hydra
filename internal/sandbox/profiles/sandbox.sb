@@ -1,87 +1,21 @@
-;; Sandbox profile: Restrict file writes to current directory and developer caches.
-;; Restricts read/write access to sensitive credential locations.
+;; Sandbox profile: default-deny filesystem access, with launch-specific
+;; readable/writable paths appended by Hydra.
 
 (version 1)
 (allow default)
 
-;; --------------------------------------------------------------------
-;; Absolute Blocklist (Read & Write Denial)
-;; --------------------------------------------------------------------
-
-;; High-priority denials targeting sensitive credentials and systemic user data
-(deny file-read* file-write*
-    ;; SSH, GPG, cloud credentials
-    (subpath (string-append (param "HOME_DIR") "/.ssh"))
-    (subpath (string-append (param "HOME_DIR") "/.aws"))
-    (subpath (string-append (param "HOME_DIR") "/.azure"))
-    (subpath (string-append (param "HOME_DIR") "/.gnupg"))
-    (subpath (string-append (param "HOME_DIR") "/.config"))
-    (subpath (string-append (param "HOME_DIR") "/.docker"))
-    (subpath (string-append (param "HOME_DIR") "/.kube"))
-
-    ;; Password managers
-    (subpath (string-append (param "HOME_DIR") "/.password-store"))
-
-    ;; Shell history
-    (literal (string-append (param "HOME_DIR") "/.zsh_history"))
-    (literal (string-append (param "HOME_DIR") "/.bash_history"))
-    (literal (string-append (param "HOME_DIR") "/.sh_history"))
-
-    ;; Package manager auth tokens
-    (literal (string-append (param "HOME_DIR") "/.netrc"))
-    (literal (string-append (param "HOME_DIR") "/.git-credentials"))
-    (literal (string-append (param "HOME_DIR") "/.npmrc"))
-    (literal (string-append (param "HOME_DIR") "/.pypirc"))
-
-    ;; Mise secrets
-    (literal (string-append (param "HOME_DIR") "/.dotfiles/mise/config.local.toml"))
-    (literal (string-append (param "HOME_DIR") "/.config/mise/config.local.toml"))
-
-
-    ;; macOS sensitive data
-    (subpath (string-append (param "HOME_DIR") "/Library/Messages"))
-    (subpath (string-append (param "HOME_DIR") "/Library/Mail"))
-
-    (subpath "/Volumes"))
-
-;; --------------------------------------------------------------------
-;; File System Isolation (Write Rules)
-;; --------------------------------------------------------------------
-
-;; Lock down modifications across the rest of the system by default
+;; Files are default-deny. Hydra appends explicit system, tool, worktree and
+;; per-head state allowances for each launch.
+(deny file-read*)
 (deny file-write*)
 
-;; Allow modifications within your immediate workspace root
-(allow file-write* (subpath (param "WORK_DIR")))
+;; Allow access within the immediate workspace root. A project-directory
+;; read-only session receives a later write denial from the generated rules.
+(allow file-read* file-write* (subpath (param "WORK_DIR")))
 
-;; Allow dev tools to read their configs from ~/.config (overrides the subpath denial above).
-;; ~/.config/gh is deliberately absent: it holds the gh CLI's live token (see
-;; sandbox.Defaults RestoreRO); opt back in per-project via restore_ro.
-(allow file-read* (subpath (string-append (param "HOME_DIR") "/.config/git")))
-
-;; Allow Claude to preserve its configuration, credentials, and conversation logs
-(allow file-write* (subpath (string-append (param "HOME_DIR") "/.claude")))
-(allow file-write* (subpath (string-append (param "HOME_DIR") "/Library/Keychains")))
-(allow file-write* (regex (string-append "^" (param "HOME_DIR") "/\\.claude\\.json")))
-(allow file-write* (subpath (string-append (param "HOME_DIR") "/Library/Caches/claude-cli-nodejs")))
-(allow file-write* (subpath (string-append (param "HOME_DIR") "/Library/Application Support/Code/logs")))
-
-;; Essential temporary folders required by macOS and compiler execution models
-(allow file-write* (subpath "/tmp")
-    (subpath "/private/tmp")
-    (subpath "/private/var/folders") ; Handles user-specific temporary file paths ($TMPDIR)
+;; Essential device writes. Private temporary storage and provider state are
+;; granted per launch by the generated rules.
+(allow file-write*
     (literal "/dev/null")
     (literal "/dev/tty")
-    (literal "/dev/dtracehelper")) ; DTrace profiling device - every process attempts this, deny is harmless but noisy
-
-;; Shared runtime developer caches to prevent build tools from throwing errors
-(allow file-write*
-    (subpath (string-append (param "HOME_DIR") "/.cache"))                       ; Global tool caching
-    (subpath (string-append (param "HOME_DIR") "/.npm"))                         ; Node package manager cache
-    (subpath (string-append (param "HOME_DIR") "/.cargo"))                       ; Rust toolchain registry cache
-    (subpath (string-append (param "HOME_DIR") "/.gradle"))                      ; Gradle build cache and state
-    (subpath (string-append (param "HOME_DIR") "/.local/share/mise"))            ; Mise version manager
-    (subpath (string-append (param "HOME_DIR") "/.local/share/JetBrains"))       ; JetBrains toolbox
-    (subpath (string-append (param "HOME_DIR") "/.local/share/korlin"))          ; Kotlin compiler cache
-    (subpath (string-append (param "HOME_DIR") "/.local/state"))                 ; XDG state (logs, history for some tools)
-)
+    (literal "/dev/dtracehelper"))

@@ -5,7 +5,7 @@
 // place. Every key shares the `hydra-` prefix; keys with dynamic segments are
 // exposed as builder functions so their prefix lives in exactly one spot.
 
-import { hasDesktopBridge, postDesktopMessage } from './desktopBridge'
+import { hasDesktopBridge, postDesktopMessage } from './desktopBridge.ts'
 
 const pendingDesktopWrites = new Map<string, string | null>()
 let desktopWriteTimer: number | undefined
@@ -160,6 +160,9 @@ export const StorageKeys = {
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',
   // Whether to tint the exact changed words within a modified line (default on).
   diffWordHighlight: 'hydra-diff-word-highlight',
+  // Number of unchanged lines shown around each change. Shared by the agent
+  // and repository diff viewers; absent or invalid = 3.
+  diffContextLines: 'hydra-diff-context-lines',
   diffSingleFile: 'hydra-diff-single-file',
   diffFileView: 'hydra-diff-file-view',
   diffSidebarWidth: 'hydra-diff-sidebar-width',

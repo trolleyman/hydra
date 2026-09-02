@@ -52,6 +52,10 @@ and `web/src/DiffViewer.tsx`):
   set (each set's files in a masonry grid). The agent-page
   `ArtifactsPanel` is two-sided (base+head refs); `RepositoryArtifactsView` is the
   single-ref sibling used by the repository browser.
+- The Files settings choose 3, 5, 7, or 10 unchanged context lines around each
+  change, defaulting to 3. The browser-wide preference is shared with repository
+  branch comparisons and drives both the server's windowed diff context and the
+  client-side whole-file collapse model.
 - The commit range selectors keep every right-side commit selectable. Choosing a
   right endpoint that is not newer than the current left endpoint moves left to
   that commit's first parent, producing a one-commit diff; an already-valid

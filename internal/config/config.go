@@ -57,8 +57,8 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"## What the user can change for you\n" +
 	"The user controls your sandbox through Hydra's config (the per-agent `[<agent>.sandbox]` and `[<agent>.policy]` sections of config.toml, editable in the web UI). When you need an environment change, edit the relevant setting in config.toml and tell the user what you changed and why:\n" +
 	"- `writable_paths` - extra paths made writable inside the sandbox.\n" +
-	"- `masked_paths` - extra paths hidden inside the sandbox: home/absolute entries (`~/.ssh`) or project-relative globs (`.env*`, `secrets/`). A `.hydraignore` file at the project root is the .gitignore-style spelling of the same.\n" +
-	"- `restore_ro` - paths re-exposed read-only after a parent was masked.\n" +
+	"- `readable_paths` - extra host paths exposed read-only inside the sandbox.\n" +
+	"- `masked_paths` - extra paths hidden inside the sandbox: home/absolute entries (`~/.ssh`) or project-relative globs (`.env*`, `secrets/`). A `.hydraignore` file at the project root is the .gitignore-style spelling of the same. Masks override readable and writable paths.\n" +
 	"- `cow_paths` - paths mounted copy-on-write (you can read and overwrite them; writes stay per-head and never touch the real files). A worktree-relative entry (`pipeline/out`) is mirrored from the project root into your worktree; a home/absolute entry (`~/.gradle`, `/opt/cache`) is overlaid in place, so you share the real dir read-only but keep your writes and lock files private.\n" +
 	"- `cache` - named project-scoped writable caches shared between heads and sandboxed runners. Each entry sets exactly one of `env` (redirect a cache variable) or `path` (link a worktree-relative, gitignored path). Use only for disposable cache data, never credentials, source-of-truth files, or executable output.\n" +
 	"- `inherit_env` - names of additional daemon environment variables passed into the head. The default environment is allow-listed; values stay out of config and logs. Hydra-owned names, including all `HYDRA_*`, cannot be inherited.\n" +
@@ -307,10 +307,10 @@ func (p *PolicyConfig) Merge(other PolicyConfig) {
 type SandboxConfig struct {
 	// WritablePaths are extra paths made writable inside the sandbox.
 	WritablePaths []string `toml:"writable_paths"`
+	// ReadablePaths are extra host paths exposed read-only inside the sandbox.
+	ReadablePaths []string `toml:"readable_paths"`
 	// MaskedPaths are extra paths hidden inside the sandbox.
 	MaskedPaths []string `toml:"masked_paths"`
-	// RestoreRO re-exposes paths read-only after masking their parent.
-	RestoreRO []string `toml:"restore_ro"`
 	// CowPaths are paths mounted copy-on-write: the agent reads the source
 	// (read-only) and may overwrite it, but writes land in a per-head layer and
 	// never touch the real files. A worktree-relative entry ("pipeline/out")
@@ -1937,11 +1937,11 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	if other.WritablePaths != nil {
 		s.WritablePaths = unionStrings(s.WritablePaths, other.WritablePaths)
 	}
+	if other.ReadablePaths != nil {
+		s.ReadablePaths = unionStrings(s.ReadablePaths, other.ReadablePaths)
+	}
 	if other.MaskedPaths != nil {
 		s.MaskedPaths = unionStrings(s.MaskedPaths, other.MaskedPaths)
-	}
-	if other.RestoreRO != nil {
-		s.RestoreRO = unionStrings(s.RestoreRO, other.RestoreRO)
 	}
 	if other.CowPaths != nil {
 		s.CowPaths = unionStrings(s.CowPaths, other.CowPaths)
@@ -2351,17 +2351,17 @@ func (c Config) GetResolvedConfig(agentType string) AgentConfig {
 // ResolveSandboxOptions merges the baked-in sandbox defaults with the resolved
 // per-agent config into concrete path lists + network policy. User config is
 // additive for the path lists.
-func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, restore, cow []string, net sandbox.NetworkPolicy, preSpawn string) {
+func (c Config) ResolveSandboxOptions(agentType string) (writable, readable, masked, cow []string, net sandbox.NetworkPolicy, preSpawn string) {
 	def := sandbox.Defaults()
 	writable = append([]string{}, def.WritablePaths...)
+	readable = append([]string{}, def.ReadablePaths...)
 	masked = append([]string{}, def.MaskedPaths...)
-	restore = append([]string{}, def.RestoreRO...)
 	resolved := c.GetResolvedConfig(agentType)
 	var nc *NetworkConfig
 	if sb := resolved.Sandbox; sb != nil {
 		writable = append(writable, sb.WritablePaths...)
+		readable = append(readable, sb.ReadablePaths...)
 		masked = append(masked, sb.MaskedPaths...)
-		restore = append(restore, sb.RestoreRO...)
 		cow = append(cow, sb.CowPaths...)
 		nc = sb.Network
 		if sb.PreSpawnScript != nil {
@@ -2369,7 +2369,7 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 		}
 	}
 	net = resolveNetworkPolicy(nc)
-	return writable, masked, restore, cow, net, preSpawn
+	return writable, readable, masked, cow, net, preSpawn
 }
 
 // ResolveInheritedEnv returns the daemon environment-variable names explicitly
@@ -2741,16 +2741,16 @@ func defaultsSpec() []specEntry {
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.WritablePaths }),
 		},
 		{
-			table: "sandbox", key: "masked_paths",
-			doc: "extra paths hidden in the sandbox (added to the built-in defaults).",
-			def: func() string { return tomlStringArray(sandbox.Defaults().MaskedPaths) },
-			get: sandboxSlice(func(s *SandboxConfig) []string { return s.MaskedPaths }),
+			table: "sandbox", key: "readable_paths",
+			doc: readablePathsDoc(),
+			def: func() string { return tomlStringArray(sandbox.Defaults().ReadablePaths) },
+			get: sandboxSlice(func(s *SandboxConfig) []string { return s.ReadablePaths }),
 		},
 		{
-			table: "sandbox", key: "restore_ro",
-			doc: "paths re-exposed read-only after a masked parent (added to the built-in defaults).",
-			def: func() string { return tomlStringArray(sandbox.Defaults().RestoreRO) },
-			get: sandboxSlice(func(s *SandboxConfig) []string { return s.RestoreRO }),
+			table: "sandbox", key: "masked_paths",
+			doc: "extra paths hidden in the sandbox (added to the built-in defense-in-depth defaults and applied after every read/write allowance).",
+			def: func() string { return tomlStringArray(sandbox.Defaults().MaskedPaths) },
+			get: sandboxSlice(func(s *SandboxConfig) []string { return s.MaskedPaths }),
 		},
 		{
 			table: "sandbox", key: "cow_paths",
@@ -2938,6 +2938,17 @@ func defaultsSpec() []specEntry {
 			get: policySlice(func(p *PolicyConfig) []string { return p.KnownTools }),
 		},
 	}
+}
+
+func readablePathsDoc() string {
+	paths := sandbox.Defaults().ReadablePaths
+	lines := make([]string, 0, (len(paths)+4)/5)
+	for len(paths) > 0 {
+		n := min(5, len(paths))
+		lines = append(lines, "    "+strings.Join(paths[:n], ", "))
+		paths = paths[n:]
+	}
+	return "extra host paths exposed read-only in the sandbox, unioned on top of the built-in developer/tool allow-list and across config layers. A path can be ~ (HOME), absolute, or a $VAR. Known credential paths remain masked even when they sit below an allowed parent.\nBuilt-in readable paths (writable paths are also readable):\n" + strings.Join(lines, "\n")
 }
 
 // managedKeySet returns the set of setting keys the renderer owns. A commented
@@ -4579,8 +4590,8 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 	}
 	*out = append(*out, "["+name+".sandbox]")
 	emitSetField(out, name+".sandbox", "writable_paths", tomlStringArray(sb.WritablePaths), len(sb.WritablePaths) > 0, keyComments)
+	emitSetField(out, name+".sandbox", "readable_paths", tomlStringArray(sb.ReadablePaths), len(sb.ReadablePaths) > 0, keyComments)
 	emitSetField(out, name+".sandbox", "masked_paths", tomlStringArray(sb.MaskedPaths), len(sb.MaskedPaths) > 0, keyComments)
-	emitSetField(out, name+".sandbox", "restore_ro", tomlStringArray(sb.RestoreRO), len(sb.RestoreRO) > 0, keyComments)
 	emitSetField(out, name+".sandbox", "cow_paths", tomlStringArray(sb.CowPaths), len(sb.CowPaths) > 0, keyComments)
 	emitSetField(out, name+".sandbox", "inherit_env", tomlStringArray(sb.InheritEnv), len(sb.InheritEnv) > 0, keyComments)
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
@@ -4729,7 +4740,7 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 	if sb == nil {
 		return false
 	}
-	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 || len(sb.CowPaths) > 0 || len(sb.Cache) > 0 || len(sb.InheritEnv) > 0 {
+	if len(sb.WritablePaths) > 0 || len(sb.ReadablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.CowPaths) > 0 || len(sb.Cache) > 0 || len(sb.InheritEnv) > 0 {
 		return true
 	}
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {

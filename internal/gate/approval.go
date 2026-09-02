@@ -34,6 +34,12 @@ const (
 	// lives in the per-head approvals dir and is removed with it when the head is
 	// killed (RemoveAgentStatusFiles).
 	grantedHostsFile = "granted-hosts.json"
+	// grantedReadablePathsFile holds exact, host-canonical paths approved for this
+	// head's current lifetime. Unlike network grants, a filesystem grant cannot be
+	// applied live: the daemon reads this overlay while rebuilding the sandbox.
+	// The approvals directory is removed when the head is killed or archived, so
+	// an "allow once" grant does not leak into a later head.
+	grantedReadablePathsFile = "granted-readable-paths.json"
 )
 
 // LoadGrantedHosts returns the hosts granted live for this session (see
@@ -74,13 +80,73 @@ func AddGrantedHost(dir, host string) error {
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, grantedHostsFile), data, 0644))
 }
 
+// LoadGrantedReadablePaths returns host paths approved for this head's current
+// lifetime. A missing or malformed file yields no paths.
+func LoadGrantedReadablePaths(dir string) []string {
+	data, err := os.ReadFile(GrantedReadablePathsPath(dir))
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	if json.Unmarshal(data, &paths) != nil {
+		return nil
+	}
+	return paths
+}
+
+// GrantedReadablePathsPath returns the host-side grant store path. Sandboxes
+// mask this exact file after binding the otherwise writable approval directory,
+// so only the daemon can add capabilities to it.
+func GrantedReadablePathsPath(dir string) string {
+	return filepath.Join(dir, grantedReadablePathsFile)
+}
+
+// EnsureGrantedReadablePathsFile creates the host-only grant store before the
+// sandbox is built, allowing the sandbox policy to mask a concrete file.
+func EnsureGrantedReadablePathsFile(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	path := GrantedReadablePathsPath(dir)
+	if _, err := os.Stat(path); err == nil {
+		return errtrace.Wrap(os.Chmod(path, 0600))
+	} else if !os.IsNotExist(err) {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(path, []byte("[]\n"), 0600))
+}
+
+// AddGrantedReadablePath appends a canonical host path to the current head's
+// live grant overlay, deduplicating with the host platform's path spelling.
+func AddGrantedReadablePath(dir, path string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." || path == "" {
+		return nil
+	}
+	paths := LoadGrantedReadablePaths(dir)
+	for _, existing := range paths {
+		if filepath.Clean(existing) == path {
+			return nil
+		}
+	}
+	paths = append(paths, path)
+	data, err := json.MarshalIndent(paths, "", "  ")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(GrantedReadablePathsPath(dir), data, 0600))
+}
+
 // Request is one pending approval the gate parked. It is surfaced in the web UI
 // approval card and carries what a remembered approval needs to persist.
 type Request struct {
 	ReqID   string `json:"reqid"`
 	Tool    string `json:"tool"`
-	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | egress | bash | host_command
-	Target  string `json:"target"` // server name / "<server>__<tool>" / host / command text
+	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | egress | bash | host_command | filesystem_read
+	Target  string `json:"target"` // server / "<server>__<tool>" / host / command / host path
 	Reason  string `json:"reason"`
 	Summary string `json:"summary"`
 	// RW is the read/write classification of an mcp_tool request ("read"/"write"/""),

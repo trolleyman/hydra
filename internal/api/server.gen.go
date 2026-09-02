@@ -817,7 +817,10 @@ type ApprovalDecisionRequest struct {
 	// Decision The user's verdict for the parked tool call
 	Decision ApprovalDecisionRequestDecision `json:"decision"`
 
-	// Remember When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again
+	// Path For a filesystem_read approval only: the canonical host path the UI displayed and the user approved. The daemon grants this echoed path, never the target in the agent-writable request file.
+	Path *string `json:"path,omitempty"`
+
+	// Remember When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again
 	Remember *bool `json:"remember,omitempty"`
 }
 
@@ -837,7 +840,7 @@ type ApprovalRequest struct {
 	// Description The agent's own explanation of what it is asking for and why it needs to happen outside the sandbox (`hydra host-run --why`). Shown above the command in the approval card, so the user judges a stated intent rather than reverse-engineering one from a shell script.
 	Description *string `json:"description"`
 
-	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)
+	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', 'host_command' (run a command on the host, outside the sandbox), or 'filesystem_read' (mount a host path read-only)
 	Kind string `json:"kind"`
 
 	// Reason One-line explanation of why the gate parked the call
@@ -3517,7 +3520,9 @@ type SandboxConfig struct {
 	CowPaths *[]string `json:"cow_paths"`
 
 	// InheritEnv Additional daemon environment variable names passed into heads. Additive across config layers; values are resolved at launch and are never stored. Hydra-owned names, including every HYDRA_* variable, cannot be inherited.
-	InheritEnv  *[]string      `json:"inherit_env"`
+	InheritEnv *[]string `json:"inherit_env"`
+
+	// MaskedPaths Defense-in-depth denied paths. Additive across config layers and applied after every read/write allowance.
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
@@ -3525,9 +3530,11 @@ type SandboxConfig struct {
 	PreExitScript *string `json:"pre_exit_script"`
 
 	// PreSpawnScript Bash script run inside the sandbox before every agent launch - both spawn and resume - so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
-	PreSpawnScript *string   `json:"pre_spawn_script"`
-	RestoreRo      *[]string `json:"restore_ro"`
-	WritablePaths  *[]string `json:"writable_paths"`
+	PreSpawnScript *string `json:"pre_spawn_script"`
+
+	// ReadablePaths Extra host paths exposed read-only. Additive across config layers and always narrowed by masked_paths.
+	ReadablePaths *[]string `json:"readable_paths"`
+	WritablePaths *[]string `json:"writable_paths"`
 }
 
 // SandboxedScriptDefinition defines model for SandboxedScriptDefinition.

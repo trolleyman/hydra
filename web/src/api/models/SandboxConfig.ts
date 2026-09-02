@@ -9,8 +9,14 @@ import type { SandboxCacheConfig } from './SandboxCacheConfig';
  */
 export type SandboxConfig = {
     writable_paths?: Array<string> | null;
+    /**
+     * Extra host paths exposed read-only. Additive across config layers and always narrowed by masked_paths.
+     */
+    readable_paths?: Array<string> | null;
+    /**
+     * Defense-in-depth denied paths. Additive across config layers and applied after every read/write allowance.
+     */
     masked_paths?: Array<string> | null;
-    restore_ro?: Array<string> | null;
     /**
      * Paths mounted copy-on-write. The agent reads the real files and may overwrite them, but writes are kept per-head and never touch the source. A worktree-relative entry (pipeline/out) is mirrored from the project root into the worktree; a home/absolute entry (~/.gradle, /opt/cache), resolved against HOME, is overlaid in place and supersedes any default writable bind on it. For large gitignored build dirs or shared tool caches too big to copy. On Linux needs an overlay-capable bwrap.
      */

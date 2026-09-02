@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,7 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	// ever fail, so hide it rather than advertise a tool that cannot work.
 	if os.Getenv(gate.EnvApprovalDir) != "" {
 		deps.HostRun = hostRunFromMCP
+		deps.RequestReadAccess = requestReadAccess
 	}
 	// Wire the review tools only when this head has a review file (HYDRA_REVIEW_PATH
 	// is seeded for every head; the file reports linked=false until published).
@@ -526,6 +528,47 @@ func requestMCPAccess(agentType, name string) (bool, string) {
 		}
 		if time.Now().After(deadline) {
 			return false, fmt.Sprintf("The request for MCP server %q timed out without a decision.", name)
+		}
+		time.Sleep(askPollInterval)
+	}
+}
+
+// requestReadAccess parks a host-filesystem approval. The daemon canonicalizes
+// the displayed path before the user sees it, records a per-head grant, and
+// rebuilds the sandbox after approval; this process may be recycled before the
+// success text is observed, so the resumed conversation is the durable result.
+func requestReadAccess(path, why string) (bool, string) {
+	if strings.ContainsAny(path, "$*?[") {
+		return false, "Use an absolute path or ~/ path; environment variables and globs are not accepted."
+	}
+	homeRelative := path == "~" || strings.HasPrefix(path, "~/") || (os.PathSeparator == '\\' && strings.HasPrefix(path, `~\`))
+	if !filepath.IsAbs(path) && !homeRelative {
+		return false, "request_read_access requires an absolute host path or a path beginning with ~/."
+	}
+	dir := os.Getenv(gate.EnvApprovalDir)
+	if dir == "" {
+		return false, "No approval channel is available, so read access can't be requested right now."
+	}
+	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
+	summary := "wants read access to host path " + strconv.Quote(path)
+	if err := gate.WriteRequest(dir, gate.Request{
+		ReqID: reqid, Tool: "mcp__hydra__request_read_access", Kind: "filesystem_read",
+		Target: path, Reason: "the path is outside the sandbox's readable allow-list",
+		Summary: summary, Description: why, TS: time.Now().Format(time.RFC3339Nano),
+	}); err != nil {
+		return false, "Failed to submit the read-access request: " + err.Error()
+	}
+	deadline := time.Now().Add(askTimeout)
+	for {
+		writeApprovalStatus(summary)
+		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
+			if d.Decision == gate.Allow {
+				return true, "Read access was approved. Hydra is rebuilding and resuming this sandbox with the approved path mounted read-only."
+			}
+			return false, "Read access was denied by the user."
+		}
+		if time.Now().After(deadline) {
+			return false, "The read-access request timed out without a decision."
 		}
 		time.Sleep(askPollInterval)
 	}

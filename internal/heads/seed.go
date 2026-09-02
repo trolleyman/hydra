@@ -86,8 +86,8 @@ type seedResult struct {
 // conversation history (~/.claude, ~/.gemini, ...) come from the host (made
 // writable by the sandbox defaults). The status files stay at their real host
 // paths (made writable + pointed at via HYDRA_STATUS_PATH) so reporting works on
-// both Linux and macOS. Hooks invoke the hydra binary at its real path, visible
-// inside the sandbox via the read-only root bind.
+// both Linux and macOS. Hooks invoke the Hydra binary through an explicit
+// read-only sandbox input.
 //
 // prePrompt holds the standing Hydra instructions delivered as a system prompt.
 // Claude receives them via --append-system-prompt (see sandbox.AgentArgv), but
@@ -553,12 +553,20 @@ func seedGatePolicy(res *seedResult, _ string, id, projectRoot, worktreePath, ho
 	res.Env = append(res.Env, gate.EnvPolicyPath+"="+visiblePath)
 
 	approvalDir := paths.GetApprovalsDirFromProjectRoot(projectRoot, id)
-	if err := os.MkdirAll(approvalDir, 0755); err != nil {
+	if err := gate.EnsureGrantedReadablePathsFile(approvalDir); err != nil {
 		return errtrace.Wrap(err)
 	}
 	res.WritablePaths = append(res.WritablePaths, approvalDir)
 	res.Env = append(res.Env, gate.EnvApprovalDir+"="+approvalDir)
 	return nil
+}
+
+// resolvedSandboxMasks adds the daemon-owned read-grant store to the configured
+// masks. The rest of the approvals directory is intentionally writable so an
+// agent can ask; this one file is the capability and must never be agent-writable.
+func resolvedSandboxMasks(projectRoot, worktreePath, id string, masked []string) []string {
+	resolved := sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked)
+	return append(resolved, gate.GrantedReadablePathsPath(paths.GetApprovalsDirFromProjectRoot(projectRoot, id)))
 }
 
 // seedGeminiPrePrompt delivers the pre-prompt to Gemini, which has no

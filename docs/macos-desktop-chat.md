@@ -391,7 +391,7 @@ Required invariants:
   the provider's filesystem permissions.
 - Project `.hydra/config.toml` remains configuration input; an edit-mode agent
   must not be able to change its own effective policy during the running session.
-- Existing masked paths, restore rules, CoW paths, MCP controls, GUI hardening,
+- Existing readable paths, masked paths, CoW paths, MCP controls, GUI hardening,
   private temporary storage and network policy still apply.
 - Symlinks inside the project must not expand the writable boundary outside it.
 - Mode restart/resume must not briefly launch the replacement process with the

@@ -1,5 +1,5 @@
 // Package sandbox launches agent processes inside an OS-level sandbox that
-// confines filesystem writes to an allow-list and masks credential locations,
+// confines filesystem reads and writes to allow-lists and masks credential locations,
 // mirroring the approach used by Codex (https://developers.openai.com/codex/concepts/sandboxing).
 //
 // The concrete mechanism is platform-specific: bubblewrap (bwrap) on Linux,
@@ -329,11 +329,12 @@ type Options struct {
 	// project directory also suppresses materialization through WorkingDirReadOnly.
 	MaterializeCachePaths bool
 
-	// WritablePaths, MaskedPaths and RestoreRO come from config + baked-in
-	// defaults (see DefaultSandboxConfig). Masks are applied before restores.
+	// WritablePaths, ReadablePaths, and MaskedPaths come from config + baked-in
+	// defaults (see DefaultSandboxConfig). Masks are applied last and can only
+	// narrow the two allow-lists.
 	WritablePaths []string
+	ReadablePaths []string
 	MaskedPaths   []string
-	RestoreRO     []string
 
 	Network NetworkPolicy
 
@@ -408,6 +409,18 @@ type Options struct {
 	// host access). Used only for the user-opted-in "regular shell"; never for
 	// agents. All other sandbox fields are ignored when set.
 	NoSandbox bool
+}
+
+// envPathDirs returns the last PATH value from an explicit process
+// environment. Sandbox backends admit these directories read-only so a trusted
+// PATH entry stays usable without exposing its parent tree.
+func envPathDirs(env []string) []string {
+	for i := len(env) - 1; i >= 0; i-- {
+		if value, ok := strings.CutPrefix(env[i], "PATH="); ok {
+			return filepath.SplitList(value)
+		}
+	}
+	return nil
 }
 
 // StrictShellPreamble makes a bash `-c` script fail-fast: errexit (`set -e`, so a
@@ -935,7 +948,7 @@ type Spec struct {
 }
 
 // ExpandPath expands a leading "~" (to home) and any $VARS in p against the
-// given HOME, exactly as the sandbox path lists (writable/masked/restore) are
+// given HOME, exactly as the sandbox path lists (writable/readable/masked) are
 // expanded. Exported so callers building mounts (see heads) can resolve
 // home/absolute config entries the same way. A result that is still relative is
 // returned unchanged.
