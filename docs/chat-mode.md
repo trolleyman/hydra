@@ -233,6 +233,15 @@ Resume repeats initialization, calls `thread/resume` with the persisted thread
 id, reads back through `thread/read`, translates the returned items with the
 live normalizer, and only then drains a queued resumed turn.
 
+If the daemon stopped while Codex was inside a tool, the persisted final turn
+can contain an `inProgress` tool item without its matching output. Hydra removes
+that one incomplete turn from Codex's model history before continuing, while
+leaving its filesystem effects and Hydra's visible tool cards intact. The
+replacement turn receives the interrupted turn's user input together with the
+queued resume message, so it continues from the current worktree without stale
+unified-exec process ids. Paginated threads use `thread/revert`; legacy threads
+use the compatible `thread/rollback` operation.
+
 Interrupt calls `turn/interrupt` with the active thread and turn ids. Cancelled,
 canceled and interrupted statuses - including failed turns whose error
 identifies a cancellation - all normalize to a durable `turn_interrupted` event,
