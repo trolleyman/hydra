@@ -6,15 +6,21 @@ This doc covers how Hydra ingests and renders a project's `[tests.<name>]` runne
 output. You only need it when touching `internal/tests`, the tests panel
 (`web/src`), or a project's test-runner config.
 
-Each runner may set `auto_run = "always"` (the default), `"settled"` (do not
-start a missing run while the agent is actively working), or `"never"` (only the
-Tests card's Refresh action starts it). Cached verdicts remain visible in every
-mode, and Refresh always runs immediately.
+Each runner may set `auto_run = "always"` (the default), `"settled"` (start when
+the agent transitions out of active work), or `"never"` (do not start
+automatically). Opening the agent or Tests card starts missing work only in
+`"always"` mode; it is a passive cache read for `"settled"` and `"never"`.
+Cached verdicts remain visible in every mode, and Refresh always runs
+immediately. A workflow that requires a current verdict - direct merge,
+merge-when-green, or publish/push-when-green - also starts missing test runs in
+every mode. Thus `"never"` means never automatically, not never when explicitly
+required by an action.
 
 The primary Merge action preflights the per-runner endpoint before opening its
-normal confirmation. This catches a missing, stale, or newly-running verdict
-before the authoritative merge gate can reject a previously confirmed action;
-the user sees the Force / Queue choice directly instead of two dialogs.
+normal confirmation. The preflight is passive for `"settled"` and `"never"`, so
+a missing verdict goes directly to the Force / Queue choice. Queuing starts the
+missing runs; a confirmed direct merge starts them in the authoritative merge
+gate and remains blocked until they settle, unless the user forces it.
 
 ## Agent test gate - warnings
 
