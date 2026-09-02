@@ -147,7 +147,9 @@ and fires only when there is genuinely nothing else (no remembered project, no
 default, no user projects).
 
 The practical entry points are therefore the project dropdown and the Ctrl+`
-switcher, not the URL. What matters is that it always *exists* and is one
+switcher, not the URL. Their project icons carry a small bottom-right attention
+dot: blue for unread agent updates and red when an agent needs input, with red
+taking priority. What matters is that the project always *exists* and is one
 click away - not that it greets you.
 
 Note step 3 had to change too: it was a bare `ps[0]`, and since the built-in is

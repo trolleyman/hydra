@@ -54,15 +54,16 @@ export function ProjectSwitcher({
                   active ? 'bg-blue-500 text-white' : 'text-gray-700 dark:text-gray-200'
                 }`}
               >
-                <span className={`shrink-0 inline-flex ${active ? '' : 'text-gray-400'}`}>
+                <span className={`relative shrink-0 inline-flex ${active ? '' : 'text-gray-400'}`}>
                   <ProjectIcon icon={p.icon} projectId={p.id} size={20} />
+                  <ProjectAttentionDot
+                    project={p}
+                    className={`absolute -right-0.5 -bottom-0.5 ring-2 ${active ? 'ring-blue-500' : 'ring-white dark:ring-gray-800'}`}
+                  />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex items-center min-w-0">
                     <span className="text-sm font-medium truncate">{p.name}</span>
-                    {/* Needs-input/unread notification dot, right of the name
-                        so "this project wants you" reads before the tally. */}
-                    <ProjectAttentionDot project={p} onAccent={active} />
                   </div>
                   {/* Built-ins have no meaningful path to show - same as the
                       project dropdown, the second line is omitted. */}
