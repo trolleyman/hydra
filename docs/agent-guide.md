@@ -105,23 +105,25 @@ scroller until the next header replaces it. A header has an inset rule
 immediately above and below it, with no outer vertical margin; file and directory
 labels use the shared path tooltip treatments. Search results are grouped by each
 path their output names. A nonconsecutive jump between matches in the same file
-gets one inset rule at the omitted-line boundary. The structural header and its
+gets one full-width rule across the gutter and source at the omitted-line
+boundary. The structural header and its
 rules carry `data-copy-skip`, leaving copied source free of presentation chrome.
 
-Agents introduce a boundary the command cannot otherwise prove by printing one
-static marker: `printf '%s\n' '--- <text> ---'`, `--- [file] <path> ---`, or
-`--- [dir] <path> ---`. The untyped form is a text heading; the older explicit
-`[text]` form remains accepted for existing transcripts. In a Bash call that
-prints several sections, the marker goes immediately before every section-producing
-command, including the first: it introduces the output that follows rather than
-terminating the output above it. Reads stay bounded so a provider cannot truncate
-the marker away from the content it identifies. The value is displayed exactly
-as written. A constant `echo` is accepted, but `printf` is the canonical
-cross-shell spelling. The parser correlates the marker with that constant-printing
-command; a marker-shaped line read from a file is source, and an ambiguous
-duplicate marker is left as ordinary output rather than guessed.
-Output that already carries file boundaries, including `rg -n` and unified
-`git diff` output, needs no marker.
+Agents introduce only a boundary the commands and output cannot otherwise prove
+by printing one static marker: `printf '%s\n' '--- <text> ---'`, `--- [file]
+<path> ---`, or `--- [dir] <path> ---`. The untyped form is a text heading; the
+older explicit `[text]` form remains accepted for existing transcripts. In a
+Bash call with several unbounded sections, the marker goes immediately before
+every section-producing command, including the first: it introduces the output
+that follows rather than terminating the output above it. Reads stay bounded
+where possible so a provider cannot truncate away the evidence that identifies
+their boundaries. File and directory marker values are exact paths, without
+annotations such as `(continued)`. A constant `echo` is accepted, but `printf`
+is the canonical cross-shell spelling. The parser correlates the marker with
+that constant-printing command; a marker-shaped line read from a file is source,
+and an ambiguous duplicate marker is left as ordinary output rather than
+guessed. Adjacent bounded `sed` ranges, `rg -n`, and unified `git diff` output
+already identify their output and need no marker.
 
 ### Test status wording: three layers, three vocabularies
 

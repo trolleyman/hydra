@@ -840,6 +840,35 @@ describe('splitScriptOutput', () => {
     expect(sections?.[1]).toMatchObject({ view: { path: 'docs/macos-desktop-chat.md', start: 164, end: 182 } })
   })
 
+  it('keeps line numbers across marked continuation reads of one file', () => {
+    const path = 'docs/security-audit.md'
+    const script = [
+      `wc -l ${path}`,
+      `sed -n '1,220p' ${path}`,
+      `printf '%s\\n' '--- [file] ${path} (continued) ---'`,
+      `sed -n '221,440p' ${path}`,
+      `printf '%s\\n' '--- [file] ${path} (continued) ---'`,
+      `sed -n '441,700p' ${path}`,
+    ].join('\n')
+    const source = Array.from({ length: 700 }, (_, i) => `line ${i + 1}`)
+    const marker = `--- [file] ${path} (continued) ---`
+    const output = [
+      `700 ${path}`,
+      ...source.slice(0, 220),
+      marker,
+      ...source.slice(220, 440),
+      marker,
+      ...source.slice(440),
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    const views = sections?.filter((section) => section.kind === 'view') ?? []
+
+    expect(sections?.map((section) => section.kind)).toEqual([
+      'disk', 'view', 'section', 'view', 'section', 'view',
+    ])
+    expect(views.map((section) => section.view.start)).toEqual([1, 221, 441])
+  })
+
   it('uses a typed file heading as an exact boundary between short reads', () => {
     const script = [
       "sed -n '1,4p' file1.txt",

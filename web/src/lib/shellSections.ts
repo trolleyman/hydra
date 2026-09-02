@@ -1716,6 +1716,29 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   }
 }
 
+// plausibleMarkerBoundary reports whether the producers before a structural
+// marker could all have ended at this candidate without any bounded producer
+// swallowing more lines than its command can print. This distinguishes repeated
+// headings when the surrounding commands prove one occurrence - for example a
+// `wc -l` row followed by exactly 220 lines from `sed -n '1,220p'`. It does not
+// make an unbounded file read guess which copy of a marker-shaped source line
+// came from printf; every such candidate remains plausible and therefore
+// ambiguous.
+function plausibleMarkerBoundary(
+  pending: ScriptStep[],
+  slice: string[],
+  failed: ReadonlySet<ScriptStep>,
+): boolean {
+  const candidateFailed = new Set(failed)
+  const producers = mergeProducers(pending, candidateFailed)
+  const split = distribute(producers, slice, candidateFailed)
+  if (!split) return false
+  return producers.every((producer, i) => {
+    const limit = stepLimit(producer, candidateFailed)
+    return limit == null || split.parts[i].length <= limit
+  })
+}
+
 // splitScriptOutput cuts a command's output into one section per step that
 // printed it. Null when nothing came back worth sectioning.
 //
@@ -1855,12 +1878,17 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     if (at < 0 && step.section) {
       // A section marker is structural only when it has one possible origin. If
       // file content contains the same canonical line, keep the whole stretch
-      // literal instead of guessing which occurrence printf printed.
+      // literal instead of guessing which occurrence printf printed. Bounded
+      // producers can rule candidates out without guessing: a 220-line sed
+      // cannot own 441 lines merely to reach the second identical marker.
       const candidates: number[] = []
       for (let j = pos; j + expected.length <= lines.length; j++) {
         if (matchesAt(lines, j, expected)) candidates.push(j)
       }
-      if (candidates.length === 1) at = candidates[0]
+      const plausible = candidates.filter((candidate) => (
+        plausibleMarkerBoundary(pending, lines.slice(pos, candidate), failed)
+      ))
+      if (plausible.length === 1) at = plausible[0]
     }
     for (let j = pos; at < 0 && !step.section && j + expected.length <= lines.length; j++) {
       if (matchesAt(lines, j, expected)) at = j

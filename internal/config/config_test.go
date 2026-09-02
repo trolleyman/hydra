@@ -32,7 +32,7 @@ func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 	if strings.Contains(prompt, "--- [text]") {
 		t.Error("final pre-prompt still asks agents to tag ordinary text headings")
 	}
-	for _, guidance := range []string{"immediately before every command", "including the first", "Keep file reads bounded"} {
+	for _, guidance := range []string{"immediately before every command", "including the first", "adjacent bounded `sed` ranges", "exact path"} {
 		if !strings.Contains(prompt, guidance) {
 			t.Errorf("final pre-prompt does not document output-section guidance %q", guidance)
 		}

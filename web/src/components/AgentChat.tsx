@@ -2797,6 +2797,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   let run: MatchLine[] = []
   let runLang = ''
   let previous: MatchLine | null = null
+  let separatedFrom: MatchLine | null = null
   let headerPath = ''
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
@@ -2820,16 +2821,21 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
+      separatedFrom ??= previous
       previous = null
-      rows.push({ num: '', html: '', tone: 'plain' })
       continue
+    }
+    const nextPath = line.path || onlyPath
+    if (separatedFrom) {
+      const previousPath = separatedFrom.path || onlyPath
+      if (previousPath && previousPath === nextPath) rows.push(scriptDivider())
+      separatedFrom = null
     }
     const lang = line.path ? langFromPath(line.path) : only
     const discontinuous = previous && !consecutiveMatchLines(previous, line)
     if (lang !== runLang || discontinuous) {
       flush()
       const previousPath = previous?.path || onlyPath
-      const nextPath = line.path || onlyPath
       if (discontinuous && previousPath && previousPath === nextPath) rows.push(scriptDivider())
     }
     runLang = lang
@@ -3179,7 +3185,7 @@ function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
   return (
     <div
       data-copy-skip
-      className={`${gutter ? 'col-span-2' : 'col-span-1'} mx-2.5 border-t border-stone-200 dark:border-white/[0.06]`}
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} border-t border-stone-200 dark:border-white/[0.06]`}
     />
   )
 }
