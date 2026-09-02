@@ -3681,7 +3681,14 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	switch err := s.sendAgentInput(ctx, projectRoot, request.AgentId, request.Body.Text, derefOr(request.Body.Origin, "")); {
+	switch err := s.sendAgentInput(
+		ctx,
+		projectRoot,
+		request.AgentId,
+		request.Body.Text,
+		derefOr(request.Body.Origin, api.MessageOrigin("")),
+		derefOr(request.Body.Reason, api.MessageReason("")),
+	); {
 	case errors.Is(err, errAgentNotRunning):
 		return api.SendAgentInput404JSONResponse{
 			Code:    404,
@@ -3711,10 +3718,10 @@ var errAgentNotRunning = errors.New("agent not found or not running")
 // handler's request object carries the project ID from the URL. Calling the
 // handler with a root in the ID field type-checks perfectly and then 404s inside
 // resolveProjectRoot ("project not found: /home/callum/code/hydra"), which is
-// exactly how review-comment, review-resolved and test-failure notices all went
+// exactly how review-comment and test-failure notices can go
 // quietly undelivered. The root is the honest signature for those callers; the
 // one ID -> root lookup stays at the HTTP edge where the ID actually comes from.
-func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text, origin string) error {
+func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text string, origin api.MessageOrigin, reason api.MessageReason) error {
 	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -3746,6 +3753,7 @@ func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text, 
 			ID:      id,
 			Content: claudestream.TextUserContent(text),
 			Origin:  origin,
+			Reason:  reason,
 		}, false)
 		return nil
 	}
