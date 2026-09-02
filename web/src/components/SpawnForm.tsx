@@ -67,12 +67,12 @@ const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
 ]
 
 const THINKING_EFFORTS = [
-  { id: '', label: 'Default', desc: 'Use the provider and model default.' },
-  { id: 'low', label: 'Low', desc: 'Faster responses with less thinking.' },
-  { id: 'medium', label: 'Medium', desc: 'Balance response time and depth.' },
-  { id: 'high', label: 'High', desc: 'Spend more time on difficult tasks.' },
-  { id: 'xhigh', label: 'Extra high', desc: 'Use extended reasoning when supported.' },
-  { id: 'max', label: 'Maximum', desc: 'Use the model\'s highest reasoning budget.' },
+  { id: '', label: 'Auto' },
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Extra high' },
+  { id: 'max', label: 'Maximum' },
 ]
 
 // Short label for the currently-selected model, shown next to the brand icon on
@@ -133,8 +133,8 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const placeEffort = useCallback(() => {
     const r = effortBtnRef.current?.getBoundingClientRect()
     if (!r) return
-    const width = 248
-    const height = 306
+    const width = 144
+    const height = 196
     const left = r.right + 6 + width <= window.innerWidth - 8
       ? r.right + 6
       : Math.max(8, r.left - width - 6)
@@ -179,17 +179,22 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const iconWrap = size === 'sm' ? 'w-5 h-5' : 'w-6 h-6'
   const iconCls = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'
 
-  // One selectable row: an agent + a specific model (or Default when model '').
-  const Row = ({ a, m }: { a: AgentTypeOption; m: AgentModel }) => {
+  // One selectable row: a provider itself selects its default model, while the
+  // indented rows select an explicit model.
+  const Row = ({ a, m, provider = false }: { a: AgentTypeOption; m: AgentModel; provider?: boolean }) => {
     const selected = agent === a && model === m.id
+    const providerMeta = AGENT_TYPES.find((option) => option.id === a)
     return (
       <div data-selected-model-row={selected || undefined} className={`flex items-center ${selected ? 'bg-gray-50/70 dark:bg-gray-700/20' : ''}`}>
         <button
           type="button"
           onClick={() => { onChange(a, m.id); setOpen(false); setEffortOpen(false) }}
-          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-8 pr-2 text-left text-xs text-gray-700 transition-colors cursor-pointer hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700/60"
+          className={`flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left text-xs transition-colors cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/60 ${
+            provider ? 'pl-3 font-semibold text-gray-600 dark:text-gray-300' : 'pl-8 text-gray-700 dark:text-gray-200'
+          }`}
         >
-          <span className={`truncate ${m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}`}>{m.label}</span>
+          {provider && providerMeta && <AgentTypeIcon name={a} className={`h-3.5 w-3.5 shrink-0 ${providerMeta.color}`} />}
+          <span className="truncate">{m.label}</span>
           {selected && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
         </button>
         {selected && supportsEffort && (
@@ -257,11 +262,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
             {orderedAgents.map((a, i) => (
               <div key={a.id}>
                 {i > 0 && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
-                <div className="flex items-center gap-2 px-3 py-1 text-2xs font-semibold text-gray-500 dark:text-gray-400">
-                  <AgentTypeIcon name={a.id} className={`w-3.5 h-3.5 shrink-0 ${a.color}`} />
-                  <span>{a.label}</span>
-                </div>
-                <Row a={a.id} m={{ id: '', label: 'Default' }} />
+                <Row a={a.id} m={{ id: '', label: a.label }} provider />
                 {AGENT_MODELS[a.id].map((m) => <Row key={m.id} a={a.id} m={m} />)}
               </div>
             ))}
@@ -270,12 +271,8 @@ const AgentModelPicker = memo(function AgentModelPicker({
             <div
               ref={effortMenuRef}
               style={{ position: 'fixed', left: effortCoords.left, top: effortCoords.top }}
-              className="z-[101] w-[248px] rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800"
+              className="z-[101] w-36 rounded-lg border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-800"
             >
-              <div className="px-2 pb-2 pt-1">
-                <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">Thinking effort</div>
-                <div className="mt-0.5 text-3xs text-gray-400 dark:text-gray-500">For {active.label} with {label || 'Default model'}</div>
-              </div>
               <div role="radiogroup" aria-label="Thinking effort" className="space-y-0.5">
                 {THINKING_EFFORTS.map((option) => (
                   <button
@@ -285,16 +282,13 @@ const AgentModelPicker = memo(function AgentModelPicker({
                     aria-label={option.label}
                     aria-checked={effort === option.id}
                     onClick={() => { onEffortChange(option.id); setEffortOpen(false); setOpen(false) }}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors cursor-pointer ${
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors cursor-pointer ${
                       effort === option.id
                         ? 'bg-violet-50 dark:bg-violet-500/15'
                         : 'hover:bg-gray-50 dark:hover:bg-gray-700/60'
                     }`}
                   >
-                    <span className="min-w-0 flex-1">
-                      <span className={`block text-xs font-medium ${effort === option.id ? 'text-violet-700 dark:text-violet-200' : 'text-gray-700 dark:text-gray-200'}`}>{option.label}</span>
-                      <span className="block text-[9px] leading-snug text-gray-400 dark:text-gray-500">{option.desc}</span>
-                    </span>
+                    <span className={`min-w-0 flex-1 font-medium ${effort === option.id ? 'text-violet-700 dark:text-violet-200' : 'text-gray-700 dark:text-gray-200'}`}>{option.label}</span>
                     {effort === option.id && <Check className="h-3.5 w-3.5 shrink-0 text-violet-500" />}
                   </button>
                 ))}

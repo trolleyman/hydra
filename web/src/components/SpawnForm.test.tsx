@@ -100,12 +100,14 @@ describe('SpawnForm desktop attachments', () => {
     render(<SpawnForm projectId="proj" />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Agent and model: Claude' }))
+    expect(screen.getByRole('button', { name: 'Claude' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Default' })).not.toBeInTheDocument()
     const selectedModel = document.querySelector('[data-selected-model-row="true"]')
-    const effortButton = screen.getByRole('button', { name: 'Thinking effort: Default' })
+    const effortButton = screen.getByRole('button', { name: 'Thinking effort: Auto' })
     expect(selectedModel).toContainElement(effortButton)
     fireEvent.click(effortButton)
     const effortChoices = await screen.findByRole('radiogroup', { name: 'Thinking effort' })
-    expect(effortChoices).toContainElement(screen.getByRole('radio', { name: 'Default' }))
+    expect(effortChoices).toContainElement(screen.getByRole('radio', { name: 'Auto' }))
 
     fireEvent.click(screen.getByRole('radio', { name: 'High' }))
 
