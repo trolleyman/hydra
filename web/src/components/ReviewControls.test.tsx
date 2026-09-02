@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
-import { MRStateChip } from './ReviewControls'
+import { MRStateChip, ReviewTooltipContent } from './ReviewControls'
 import type { AgentResponse } from '../api'
 
 // A minimal linked head. Only the fields MRStateChip reads matter.
@@ -55,5 +55,35 @@ describe('MRStateChip ahead/behind', () => {
     )
     expect(getByText('4')).toBeInTheDocument()
     expect(queryByLabelText(/^Push/)).toBeNull()
+  })
+})
+
+describe('ReviewTooltipContent', () => {
+  it('uses PR wording and keeps the GitHub source branch in the hover summary', () => {
+    const agent = linked({
+      provider: 'github',
+      id: '5',
+      target_branch: 'main',
+      state: { state: 'draft', ci_status: 'running', approvals: 1, approvals_required: 2, unresolved_discussions: 3 },
+    })
+    agent.downstream_branch = 'feat/close-pr'
+    const { getByText, queryByText } = render(<ReviewTooltipContent agent={agent} />)
+
+    expect(getByText('GitHub PR #5')).toBeInTheDocument()
+    expect(getByText('PR branch')).toBeInTheDocument()
+    expect(getByText('feat/close-pr')).toBeInTheDocument()
+    expect(getByText('1/2')).toBeInTheDocument()
+    expect(getByText('3 unresolved')).toBeInTheDocument()
+    expect(queryByText('MR branch')).toBeNull()
+  })
+
+  it('uses MR wording for GitLab', () => {
+    const agent = linked({ id: '42' })
+    agent.downstream_branch = 'feat/gitlab'
+    const { getByText, queryByText } = render(<ReviewTooltipContent agent={agent} />)
+
+    expect(getByText('GitLab MR #42')).toBeInTheDocument()
+    expect(getByText('MR branch')).toBeInTheDocument()
+    expect(queryByText('PR branch')).toBeNull()
   })
 })

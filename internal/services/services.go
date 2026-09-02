@@ -597,6 +597,7 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	var egressSess *egress.Session
 	if !sv.spec.Host {
 		cfg, _ := config.Load(root)
+		cfg.ApplySharedCaches(&opts, root, "", false)
 		writable, masked, restore, _, netPol, _ := cfg.ResolveSandboxOptions("")
 		if gcd, err := git.GetCommonDir(root); err == nil {
 			opts.GitCommonDir = gcd

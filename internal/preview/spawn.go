@@ -462,6 +462,7 @@ func (in *instance) buildSpec(spec config.PreviewScript, childPort int) (*sandbo
 	hardMode := false
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(in.root)
+		cfg.ApplySharedCaches(&opts, in.root, "", true)
 		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		hardMode = netPol.Mode == sandbox.NetHard
 		if gcd, err := git.GetCommonDir(in.root); err == nil {

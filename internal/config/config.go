@@ -60,6 +60,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `masked_paths` - extra paths hidden inside the sandbox: home/absolute entries (`~/.ssh`) or project-relative globs (`.env*`, `secrets/`). A `.hydraignore` file at the project root is the .gitignore-style spelling of the same.\n" +
 	"- `restore_ro` - paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` - paths mounted copy-on-write (you can read and overwrite them; writes stay per-head and never touch the real files). A worktree-relative entry (`pipeline/out`) is mirrored from the project root into your worktree; a home/absolute entry (`~/.gradle`, `/opt/cache`) is overlaid in place, so you share the real dir read-only but keep your writes and lock files private.\n" +
+	"- `cache` - named project-scoped writable caches shared between heads and sandboxed runners. Each entry sets exactly one of `env` (redirect a cache variable) or `path` (link a worktree-relative, gitignored path). Use only for disposable cache data, never credentials, source-of-truth files, or executable output.\n" +
 	"- `inherit_env` - names of additional daemon environment variables passed into the head. The default environment is allow-listed; values stay out of config and logs. Hydra-owned names, including all `HYDRA_*`, cannot be inherited.\n" +
 	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` - the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
 	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` - MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server; `policy.mcp_blocked` / `policy.mcp_tools_blocked` deny a server or tool outright (block overrides allow). A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop - ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume). `policy.strict_mcp` (on by default) decides how that allow-list is applied: on, the allow-listed servers are the ONLY ones you get, and the user's claude.ai connectors (Gmail/Calendar/Drive) are unavailable to you - if you need one, ask the user to set `strict_mcp = false` for this agent.\n" +
@@ -71,6 +72,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"Two sections are the exception - `[tests.<name>]` and `[artifacts.<name>]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
 	"\n" +
 	"## Workflow\n" +
+	"- Hydra has a single user, and its client and server update together. Do not add backward-compatibility shims, legacy aliases, deprecation paths, or dual-format handling unless the user explicitly asks for them; replace the old behavior outright.\n" +
 	"- When you need to ask the user a question, use the agent's native structured question tool (for example, `AskUserQuestion` or `request_user_input`) when one is available. Do not ask the question only in a plain chat message. If no structured question tool is available, ask in chat instead.\n" +
 	"- As you work, commit your progress at logical points. If you have the `mcp__hydra__git_commit` tool, commit with it (raw `git commit` in the shell is blocked for you): it stages and commits your changes onto your own branch inside your worktree, so a commit can never land on the main repo or another branch. Read-only git (`status`/`diff`/`log`) and `git add` still work.\n" +
 	"- Once you have finished the task, make a final commit capturing all remaining changes (via `mcp__hydra__git_commit` if you have it).\n" +
@@ -102,6 +104,9 @@ const claudeShellCwdPrompt = "## The Bash shell's working directory\n" +
 // provider-neutral tool input that the shared Bash card already renders.
 const codexBashDescriptionPrompt = "## Bash tool descriptions\n" +
 	"- Start each non-trivial shell command with a concise comment describing its purpose, on its own first line: `# Inspect the usage handlers`. Hydra shows that comment as the Bash tool card description.\n"
+
+const codexSandboxCleanupPrompt = "## Recursive cleanup inside Hydra\n" +
+	"- Codex may reject raw `rm -rf` before it reaches Hydra's outer OS sandbox. To recursively remove generated scratch data, use `$HYDRA_BIN sandbox-remove -- \"$HYDRA_WORKTREE/<path>\"` or a path beneath `$TMPDIR`. The helper accepts only absolute descendants of this head's worktree or private temporary directory; it refuses either root itself and every outside path.\n"
 
 const shellSectionPrompt = "## Bash output sections\n" +
 	"- Hydra renders a constant `printf '%s\\n' '--- <text> ---'`, `printf '%s\\n' '--- [file] <path> ---'`, or `printf '%s\\n' '--- [dir] <path> ---'` as a compact ruled heading. A constant `echo` with the same marker is accepted, but `printf` is the predictable spelling across shells.\n" +
@@ -311,12 +316,16 @@ type SandboxConfig struct {
 	// never touch the real files. A worktree-relative entry ("pipeline/out")
 	// mirrors that path from the project root into the worktree; a home/absolute
 	// entry ("~/.gradle", "/opt/cache") - resolved against HOME like the other
-	// path lists - is overlaid in place and supersedes any default writable bind
-	// on it (so per-head builds share the real cache read-only but keep their
-	// writes and lock files private). Useful for large gitignored build
-	// inputs/outputs or shared tool caches too big to copy. See sandbox.CowMount;
-	// on Linux this needs an overlay-capable bwrap.
+	// path lists - is overlaid in place on Linux and supersedes a writable bind.
+	// macOS can clone only worktree-relative paths into a distinct destination;
+	// an in-place home/absolute writable CoW request fails explicitly. Useful for
+	// large gitignored build inputs/outputs or shared tool caches too big to copy.
+	// See sandbox.CowMount; Linux needs an overlay-capable bwrap.
 	CowPaths []string `toml:"cow_paths"`
+	// Cache names project-scoped writable caches shared by heads and sandboxed
+	// runners. Each value selects either an environment variable to redirect or
+	// a worktree-relative path to link to the cache backing directory.
+	Cache map[string]sandbox.SharedCache `toml:"cache"`
 	// InheritEnv names additional variables copied from the Hydra daemon's
 	// environment into this agent. The head otherwise receives only Hydra's
 	// baseline and the selected provider's authentication variables. Names union
@@ -355,6 +364,11 @@ var inheritedEnvReserved = map[string]bool{
 	"HOME": true, "USER": true, "LOGNAME": true, "PATH": true, "SHELL": true,
 	"LANG": true, "LC_ALL": true, "TERM": true, "COLORTERM": true,
 	"TMPDIR": true, "TMP": true, "TEMP": true,
+	"XDG_CACHE_HOME": true, "XDG_STATE_HOME": true,
+	"GOCACHE": true, "GOMODCACHE": true, "GOPATH": true, "GOBIN": true,
+	"MAGEFILE_CACHE": true, "NPM_CONFIG_CACHE": true, "AUBE_CACHE_DIR": true, "AUBE_STORE_DIR": true,
+	"PLAYWRIGHT_BROWSERS_PATH": true, "MISE_CACHE_DIR": true, "MISE_DATA_DIR": true,
+	"MISE_STATE_DIR": true, "MISE_SHARED_INSTALL_DIRS": true,
 	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
 	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
 	"CLAUDE_CONFIG_DIR": true, "CODEX_HOME": true,
@@ -406,6 +420,75 @@ func (c Config) validateInheritedEnv() error {
 	sort.Strings(names)
 	for _, name := range names {
 		if err := validate(name, c.Agents[name]); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	return nil
+}
+
+var cacheEnvReserved = map[string]bool{
+	"HOME": true, "USER": true, "LOGNAME": true, "PATH": true, "SHELL": true,
+	"TMPDIR": true, "TMP": true, "TEMP": true, "GOPATH": true, "GOBIN": true,
+	"XDG_STATE_HOME": true, "MISE_DATA_DIR": true, "MISE_STATE_DIR": true,
+}
+
+// ValidateSharedCache checks a named sandbox.cache entry. Cache keys are also
+// directory names below Hydra's project state root, so they stay bare and flat.
+func ValidateSharedCache(key string, entry sandbox.SharedCache) error {
+	if !isBareTOMLKey(key) || key == "." || key == ".." {
+		return errtrace.Errorf("invalid cache key %q (use letters, numbers, '_' or '-')", key)
+	}
+	if (entry.Env == "") == (entry.Path == "") {
+		return errtrace.Errorf("cache %q must set exactly one of env or path", key)
+	}
+	if entry.Env != "" {
+		if err := validateEnvNameSyntax(entry.Env); err != nil {
+			return errtrace.Wrap(fmt.Errorf("cache %q: %w", key, err))
+		}
+		upper := strings.ToUpper(entry.Env)
+		if strings.HasPrefix(upper, "HYDRA_") || cacheEnvReserved[upper] {
+			return errtrace.Errorf("cache %q cannot redirect Hydra-managed environment variable %q", key, entry.Env)
+		}
+	}
+	if entry.Path != "" {
+		clean := filepath.Clean(entry.Path)
+		if filepath.IsAbs(entry.Path) || strings.HasPrefix(entry.Path, "~") || strings.Contains(entry.Path, "$") || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return errtrace.Errorf("cache %q path must be worktree-relative without ~, $ variables, or parent traversal", key)
+		}
+	}
+	return nil
+}
+
+func validateEnvNameSyntax(name string) error {
+	if name == "" {
+		return errtrace.Errorf("environment variable name is empty")
+	}
+	for i, r := range name {
+		valid := r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || i > 0 && r >= '0' && r <= '9'
+		if !valid {
+			return errtrace.Errorf("invalid environment variable name %q", name)
+		}
+	}
+	return nil
+}
+
+func (c Config) validateSharedCaches() error {
+	validate := func(scope string, a AgentConfig) error {
+		if a.Sandbox == nil {
+			return nil
+		}
+		for key, entry := range a.Sandbox.Cache {
+			if err := ValidateSharedCache(key, entry); err != nil {
+				return errtrace.Wrap(fmt.Errorf("%s.sandbox.cache: %w", scope, err))
+			}
+		}
+		return nil
+	}
+	if err := validate("defaults", c.Defaults); err != nil {
+		return errtrace.Wrap(err)
+	}
+	for name, agent := range c.Agents {
+		if err := validate(name, agent); err != nil {
 			return errtrace.Wrap(err)
 		}
 	}
@@ -553,9 +636,10 @@ type ArtifactScript struct {
 	// guaranteed-pristine tree. Default false.
 	CleanIgnored bool `toml:"clean_ignored"`
 	// AutoRun controls when a missing artifact generation starts automatically:
-	// "always" (or empty) preserves the historical behavior, "settled" waits
-	// until the agent is no longer actively working, and "never" requires an
-	// explicit refresh. Cached generations are returned in every mode.
+	// "always" (or empty) may start on view, "settled" starts on the transition
+	// out of active work, and "never" requires an explicit refresh/retry. Viewing
+	// is passive in the latter two modes. Cached generations are returned in every
+	// mode.
 	AutoRun AutoRunMode `toml:"auto_run"`
 	// Enabled gates whether the diff viewer runs this script. nil or true means
 	// active; false means it is skipped entirely. nil is the default so configs
@@ -1033,7 +1117,8 @@ type Config struct {
 	// working tree stops changing, so they are ready the instant the user opens the
 	// panel. Turn it off for a project whose generators are too heavy to run
 	// speculatively: foreground generation (on open) and the concurrency cap above
-	// still apply. nil/absent = enabled.
+	// still apply for "always" scripts, while other policies require an explicit
+	// retry. nil/absent = enabled.
 	ArtifactPrefetch *bool `toml:"artifact_prefetch"`
 	// TestConcurrency caps how many test-runner generations run at once, like
 	// ArtifactConcurrency. nil/absent = DefaultTestConcurrency; 0 = unlimited.
@@ -1051,8 +1136,9 @@ type Config struct {
 	// internal/http/tests_prefetch.go). When on (the default) a head's verdict is
 	// kept fresh in the background so it is ready the instant the user opens the
 	// tests panel or the merge gate runs. Turn it off for a project whose suites are
-	// too heavy to run speculatively: foreground runs (on open / at merge) and the
-	// concurrency cap above still apply. nil/absent = enabled.
+	// too heavy to run speculatively: "always" may still run on open, and explicit
+	// refresh/merge/publish workflows may run any mode. The concurrency cap above
+	// still applies. nil/absent = enabled.
 	TestPrefetch *bool `toml:"test_prefetch"`
 	// Review configures how Hydra talks to a forge (GitHub/GitLab) and supplies
 	// defaults for the Create MR dialog (docs/non-local-integration.md). nil = unset
@@ -1345,7 +1431,7 @@ func LoadInternalDefaults() Config {
 func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	parts := []string{DefaultPrePrompt, shellSectionPrompt}
 	if agentType == string(sandbox.AgentTypeCodex) {
-		parts = append(parts, codexBashDescriptionPrompt)
+		parts = append(parts, codexBashDescriptionPrompt, codexSandboxCleanupPrompt)
 	}
 	if agentType == string(sandbox.AgentTypeClaude) {
 		parts = append(parts, claudeShellCwdPrompt)
@@ -1535,6 +1621,9 @@ func decodeConfig(data []byte) (Config, error) {
 		cfg.Agents[name] = ac
 	}
 	if err := cfg.validateInheritedEnv(); err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+	if err := cfg.validateSharedCaches(); err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
 
@@ -1757,6 +1846,12 @@ func (a AgentConfig) clone() AgentConfig {
 	out := a
 	if a.Sandbox != nil {
 		sb := *a.Sandbox
+		if a.Sandbox.Cache != nil {
+			sb.Cache = make(map[string]sandbox.SharedCache, len(a.Sandbox.Cache))
+			for key, entry := range a.Sandbox.Cache {
+				sb.Cache[key] = entry
+			}
+		}
 		if a.Sandbox.Network != nil {
 			n := *a.Sandbox.Network
 			sb.Network = &n
@@ -1824,6 +1919,14 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	}
 	if other.CowPaths != nil {
 		s.CowPaths = unionStrings(s.CowPaths, other.CowPaths)
+	}
+	if other.Cache != nil {
+		if s.Cache == nil {
+			s.Cache = make(map[string]sandbox.SharedCache)
+		}
+		for key, entry := range other.Cache {
+			s.Cache[key] = entry
+		}
 	}
 	if other.InheritEnv != nil {
 		s.InheritEnv = unionStrings(s.InheritEnv, other.InheritEnv)
@@ -2254,6 +2357,28 @@ func (c Config) ResolveInheritedEnv(agentType string) []string {
 	return append([]string(nil), resolved.Sandbox.InheritEnv...)
 }
 
+// ResolveSharedCaches returns the project cache entries after default and
+// per-agent layers have merged. The returned map is safe for callers to mutate.
+func (c Config) ResolveSharedCaches(agentType string) map[string]sandbox.SharedCache {
+	resolved := c.GetResolvedConfig(agentType)
+	if resolved.Sandbox == nil || len(resolved.Sandbox.Cache) == 0 {
+		return nil
+	}
+	out := make(map[string]sandbox.SharedCache, len(resolved.Sandbox.Cache))
+	for key, entry := range resolved.Sandbox.Cache {
+		out[key] = entry
+	}
+	return out
+}
+
+// ApplySharedCaches attaches the resolved project cache policy to a sandbox
+// launch. The stable key directory is shared across heads and runner checkouts.
+func (c Config) ApplySharedCaches(opts *sandbox.Options, projectRoot, agentType string, materializePaths bool) {
+	opts.CacheRoot = filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox")
+	opts.Caches = c.ResolveSharedCaches(agentType)
+	opts.MaterializeCachePaths = materializePaths
+}
+
 // resolveNetworkPolicy turns the (possibly nil) config into the effective
 // sandbox.NetworkPolicy. The explicit `mode` is authoritative when set; otherwise
 // it falls back to the legacy enabled/filter_enabled booleans, and when NOTHING is
@@ -2351,6 +2476,9 @@ func Save(projectRoot string, cfg Config) error {
 // legacy-format file is migrated to the new flattened layout.
 func SaveToFile(path string, cfg Config) error {
 	if err := cfg.validateInheritedEnv(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := cfg.validateSharedCaches(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -2522,8 +2650,9 @@ func writablePathsDoc() string {
 	b.WriteString("defaults below AND across config layers (this list in ~/.config/hydra/\n")
 	b.WriteString("config.toml applies to every project; a project's own list adds to it).\n")
 	b.WriteString("A path can be ~ (HOME), absolute, or a $VAR. Secrets are hidden separately\n")
-	b.WriteString("via masked_paths, so nothing here holds credentials.\n")
-	b.WriteString("Built-in defaults, always writable (broad caches + toolchain + agent state):")
+	b.WriteString("via masked_paths, so nothing here holds credentials. Prefer sandbox.cache for a\n")
+	b.WriteString("disposable cache instead of making the user's host cache writable.\n")
+	b.WriteString("Built-in defaults, always writable (agent state only; shared caches and toolchains are read-only):")
 	for _, line := range wrapHosts(sandbox.Defaults().WritablePaths) {
 		b.WriteString("\n    ")
 		b.WriteString(line)
@@ -2599,7 +2728,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "cow_paths",
-			doc: "paths mounted copy-on-write (read source, writes kept per-head): worktree-relative (mirrored from project root) or home/absolute like ~/.gradle (overlaid in place, supersedes its writable bind).",
+			doc: "paths exposed copy-on-write (read source, writes kept per-head): worktree-relative paths are cloned/mirrored into the worktree. Linux can also overlay home/absolute paths like ~/.gradle in place; macOS cannot mount over those paths and rejects writable requests for them.",
 			def: func() string { return "[]" },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.CowPaths }),
 		},
@@ -2843,8 +2972,9 @@ func artifactsDocLines() []string {
 		docPrefix + "                a pristine checkout (git clean -fdx) instead of the default that keeps",
 		docPrefix + "                dependency/build caches warm (-fd). Slower; set true only if stale",
 		docPrefix + "                ignored output can leak between commits (default false).",
-		docPrefix + `   auto_run     "always" (default), "settled" (wait while agent works), or "never"`,
-		docPrefix + "                (Refresh only). Cached artifacts still display in every mode.",
+		docPrefix + `   auto_run     "always" (default; may start on view), "settled" (starts when the`,
+		docPrefix + `                agent rests, never on view), or "never" (no automatic start). Refresh`,
+		docPrefix + "                and explicit retries still run any mode; cached artifacts still display.",
 		docPrefix + "   strict       run the command under `set -eo pipefail` so a failing step aborts",
 		docPrefix + "                and propagates instead of being swallowed (default true; set false",
 		docPrefix + "                to run the command exactly as written).",
@@ -3189,8 +3319,9 @@ func testsDocLines() []string {
 		docPrefix + "   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;",
 		docPrefix + "                only for trusted refs (default false).",
 		docPrefix + "   clean_ignored  also delete git-ignored files before each run (default false).",
-		docPrefix + `   auto_run     "always" (default), "settled" (wait while agent works), or "never"`,
-		docPrefix + "                (Refresh only). Cached verdicts still display in every mode.",
+		docPrefix + `   auto_run     "always" (default; may start on view), "settled" (starts when the`,
+		docPrefix + `                agent rests, never on view), or "never" (no automatic start). Refresh`,
+		docPrefix + "                and merge/publish workflows still run any mode; cached verdicts display.",
 		docPrefix + "   strict       run the command under `set -eo pipefail` (default true). Note: a",
 		docPrefix + "                runner exiting non-zero because tests FAILED is a valid verdict,",
 		docPrefix + "                not a strict abort - strict only governs the shell pipeline.",
@@ -3684,7 +3815,7 @@ func isManagedCommentedArrayHeader(line string) bool {
 // managedExampleTables are the single tables whose commented-out example blocks
 // ("# [review]" followed by "# key = value" lines) Hydra regenerates on every
 // save, mirroring managedArraySections for array-of-tables examples.
-var managedExampleTables = []string{"review", "jira", "resources"}
+var managedExampleTables = []string{"review", "jira", "resources", "sandbox.cache"}
 
 // isManagedCommentedTableHeader reports whether a line is a commented-out header
 // for a managed example table (e.g. "# [review]") - the start of a regenerated
@@ -3900,6 +4031,7 @@ func renderConfig(existing []byte, cfg Config) string {
 	emitTestPrefetch(&out, testPrefetch, keyComments)
 	emitPreviewPorts(&out, previewPorts, keyComments)
 	emitSpecTable(&out, spec, "sandbox", "[sandbox]", cfg.Defaults, keyComments, tableComments)
+	emitSharedCaches(&out, "sandbox.cache", "[sandbox.cache]", sandboxCache(cfg.Defaults), keyComments, tableComments, true)
 	emitSpecTable(&out, spec, "sandbox.network", "[sandbox.network]", cfg.Defaults, keyComments, tableComments)
 	emitSpecTable(&out, spec, "policy", "[policy]", cfg.Defaults, keyComments, tableComments)
 
@@ -4256,7 +4388,7 @@ func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]st
 	if uc := keyComments["\x00test_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+` re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).`)
+	*out = append(*out, docPrefix+` re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to disable proactive work ("always" may still start on view, and merge/publish workflows may require any mode). The concurrency cap still applies (default true).`)
 	if prefetch != nil {
 		*out = append(*out, fmt.Sprintf("test_prefetch = %t", *prefetch))
 	} else {
@@ -4287,7 +4419,7 @@ func emitArtifactPrefetch(out *[]string, prefetch *bool, keyComments map[string]
 	if uc := keyComments["\x00artifact_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+` pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing - foreground generation and the concurrency cap still apply (default true).`)
+	*out = append(*out, docPrefix+` pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to disable proactive work ("always" may still start on view, while other modes require an explicit retry). The concurrency cap still applies (default true).`)
 	if prefetch != nil {
 		*out = append(*out, fmt.Sprintf("artifact_prefetch = %t", *prefetch))
 	} else {
@@ -4431,6 +4563,7 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 	if sb.PreExitScript != nil && *sb.PreExitScript != "" {
 		emitSetField(out, name+".sandbox", "pre_exit_script", tomlStringValue(*sb.PreExitScript), true, keyComments)
 	}
+	emitSharedCaches(out, name+".sandbox.cache", "["+name+".sandbox.cache]", sb.Cache, keyComments, tableComments, false)
 	if nw := sb.Network; nw != nil && networkHasContent(nw) {
 		*out = appendBlank(*out)
 		if tc := tableComments[name+".sandbox.network"]; len(tc) > 0 {
@@ -4457,6 +4590,54 @@ func networkHasContent(nw *NetworkConfig) bool {
 	return nw.Mode != nil || nw.Enabled != nil ||
 		nw.FilterEnabled != nil || len(nw.AllowedHosts) > 0 || len(nw.BlockedHosts) > 0 ||
 		len(nw.AllowedLoopbackPorts) > 0
+}
+
+func sandboxCache(a AgentConfig) map[string]sandbox.SharedCache {
+	if a.Sandbox == nil {
+		return nil
+	}
+	return a.Sandbox.Cache
+}
+
+func emitSharedCaches(out *[]string, table, header string, caches map[string]sandbox.SharedCache, keyComments, tableComments map[string][]string, document bool) {
+	if len(caches) == 0 && !document {
+		return
+	}
+	*out = appendBlank(*out)
+	if tc := tableComments[table]; len(tc) > 0 {
+		*out = append(*out, tc...)
+	}
+	if document {
+		*out = append(*out,
+			docPrefix+" project-scoped writable caches shared by every matching head and sandboxed runner.",
+			docPrefix+" Each key owns <project-state>/cache/sandbox/<key>. Set exactly one of:",
+			docPrefix+"   env  - redirect that tool's cache variable to the shared directory.",
+			docPrefix+"   path - link a worktree-relative, gitignored path to the shared directory.",
+			docPrefix+" Cache contents are mutable shared state: use them only for disposable/rebuildable data,",
+			docPrefix+" never credentials, source-of-truth state, GOPATH/GOBIN, or per-head package installs.",
+		)
+	}
+	if len(caches) == 0 {
+		*out = append(*out, "# "+header, `# go_build = { env = "GOCACHE" }`, `# example_path = { path = "build/cache" }`)
+		return
+	}
+	*out = append(*out, header)
+	keys := make([]string, 0, len(caches))
+	for key := range caches {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if uc := keyComments[table+"\x00"+key]; len(uc) > 0 {
+			*out = append(*out, uc...)
+		}
+		entry := caches[key]
+		if entry.Env != "" {
+			*out = append(*out, key+" = { env = "+tomlStringValue(entry.Env)+" }")
+		} else {
+			*out = append(*out, key+" = { path = "+tomlStringValue(entry.Path)+" }")
+		}
+	}
 }
 
 // emitAgentPolicy appends the [name.policy] subtable for the settings that are
@@ -4522,7 +4703,7 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 	if sb == nil {
 		return false
 	}
-	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 || len(sb.CowPaths) > 0 || len(sb.InheritEnv) > 0 {
+	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 || len(sb.CowPaths) > 0 || len(sb.Cache) > 0 || len(sb.InheritEnv) > 0 {
 		return true
 	}
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {

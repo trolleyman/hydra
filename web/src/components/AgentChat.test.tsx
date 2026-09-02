@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, fileChangeRows, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
@@ -165,6 +165,26 @@ describe('Bash card summary comments', () => {
   })
 })
 
+describe('Codex file-change previews', () => {
+  it('keeps real hunk offsets and computes changed-word ranges', () => {
+    const rows = fileChangeRows('@@ -585,2 +585,2 @@\n-\tfor key := range caches {\n+\tfor _, key := range keys {\n unchanged', 'update')
+
+    expect(rows.map((row) => [row.type, row.oldNum, row.newNum, row.content])).toEqual([
+      ['del', 585, null, '\tfor key := range caches {'],
+      ['add', null, 585, '\tfor _, key := range keys {'],
+      ['context', 586, 586, 'unchanged'],
+    ])
+    expect(rows[0].ranges?.length).toBeGreaterThan(0)
+    expect(rows[1].ranges?.length).toBeGreaterThan(0)
+  })
+
+  it('numbers complete added files on the new side', () => {
+    expect(fileChangeRows('package config\n\nconst enabled = true\n', 'add').map((row) => [row.oldNum, row.newNum])).toEqual([
+      [null, 1], [null, 2], [null, 3],
+    ])
+  })
+})
+
 describe('sectioned search output', () => {
   it('shares the widest gutter between a multiline command and numbered output', () => {
     const sections = [{
@@ -260,6 +280,30 @@ describe('sectioned search output', () => {
       expect(heading).toHaveClass('top-0', 'z-10', 'bg-[#fdfcf9]', 'dark:bg-[#1d1c1a]')
       expect(heading.children[1]).toHaveClass('py-1')
     }
+  })
+
+  it('wraps every output heading kind like an ordinary output line', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'text', label: 'diagnostics-with-one-very-long-unbroken-label' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'file', label: 'deep/path/to/a-very-long-file-name.txt' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'dir', label: 'deep/path/to/a-very-long-directory-name/' }, lines: ['marker'] },
+    ])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    const textLabel = screen.getByText('diagnostics-with-one-very-long-unbroken-label')
+    const fileLabel = screen.getByText('a-very-long-file-name.txt').parentElement
+    const directoryLabel = screen.getAllByText('deep/path/to/a-very-long-directory-name/')[0]
+
+    expect(textLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(fileLabel).toHaveClass('whitespace-normal', 'break-words')
+    expect(fileLabel).not.toHaveClass('truncate')
+    expect(directoryLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(directoryLabel).not.toHaveClass('truncate')
+
+    const headings = container.querySelectorAll('[data-copy-skip].sticky')
+    expect(headings).toHaveLength(3)
+    expect(headings[1].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
+    expect(headings[2].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
   })
 
   it('highlights marked Markdown and Go sections by their file headings', () => {
@@ -1446,6 +1490,9 @@ describe('a message sent after a commit lands under it', () => {
     )
     const chip = await screen.findByText('Teach the loader about overlays')
     const row = chip.closest('[role="button"]')
+    expect(chip).toHaveClass('min-w-0', 'flex-1', 'whitespace-normal', 'break-words')
+    expect(chip).not.toHaveClass('truncate')
+    expect(row?.parentElement).toHaveClass('min-w-0', 'max-w-full')
     expect(screen.getByLabelText('36 lines added, 5 lines removed')).toHaveClass('top-px')
     expect(row?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[16px]')
     expect(row?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(1)
@@ -1491,9 +1538,14 @@ describe('a message sent after a commit lands under it', () => {
     )
 
     const pill = await screen.findByRole('button', { name: /Merged main - 2 commits/ })
+    const mergeLabel = screen.getByText('Merged main - 2 commits')
+    expect(mergeLabel).toHaveClass('whitespace-normal', 'break-words')
+    expect(mergeLabel).not.toHaveClass('truncate')
     expect(screen.getByLabelText('10 lines added, 2 lines removed')).toHaveClass('top-px')
     fireEvent.click(pill)
     const subject = await screen.findByText('The merged change')
+    expect(subject).toHaveClass('whitespace-normal', 'break-words')
+    expect(subject).not.toHaveClass('truncate')
     expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('top-px')
     expect(pill).toHaveClass('z-10', 'rounded-b-none', 'border-b-0')
     expect(subject.parentElement).toHaveClass('items-baseline')

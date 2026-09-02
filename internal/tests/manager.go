@@ -127,7 +127,7 @@ func (m *Manager) SetConcurrency(n int) {
 // CleanCheckouts tears the slot pool down to empty (call on boot) and wipes any
 // ephemeral per-run cow_paths layers a crashed run left behind.
 func (m *Manager) CleanCheckouts() {
-	_ = os.RemoveAll(m.cowDir())
+	checkout.RemoveAllDetached(m.cowDir())
 	m.pool.Clean()
 }
 
@@ -1174,6 +1174,7 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
+		cfg.ApplySharedCaches(&opts, m.projectRoot, "", true)
 		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		writable = append(writable, outputDir)
 		if gcd, err := git.GetCommonDir(m.projectRoot); err == nil {

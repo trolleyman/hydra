@@ -109,6 +109,17 @@ func TestBuildSpecLinux(t *testing.T) {
 	if argIndex(args, "--unshare-net") == -1 {
 		t.Error("expected --unshare-net when network disabled")
 	}
+	for key, want := range map[string]string{
+		"TMPDIR":         "/tmp",
+		"GOCACHE":        "/tmp/cache/go-build",
+		"GOMODCACHE":     "/tmp/go/pkg/mod",
+		"GOPATH":         "/tmp/go",
+		"MISE_CACHE_DIR": "/tmp/cache/mise",
+	} {
+		if got := linuxEnvValue(spec.Env, key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
 	// chdir to worktree.
 	if !hasPair2(args, "--chdir", work) {
 		t.Error("missing --chdir worktree")
@@ -288,9 +299,60 @@ func TestBuildSpecLinuxCowSupersedesWritableBind(t *testing.T) {
 	}
 }
 
+func TestBuildSpecLinuxDefaultsKeepSharedCachesAndMiseReadOnly(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	sharedCache := filepath.Join(home, ".cache")
+	sharedMise := filepath.Join(home, ".local", "share", "mise")
+	for _, dir := range []string{work, sharedCache, sharedMise} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec, err := BuildSpec(Options{
+		AgentType:     AgentTypeBash,
+		WorktreePath:  work,
+		Home:          home,
+		WritablePaths: Defaults().WritablePaths,
+		Env:           []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+		Argv:          []string{"/usr/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	for _, path := range []string{sharedCache, sharedMise} {
+		if hasPair(spec.Args, "--bind", path, path) {
+			t.Errorf("shared persistence path %s is writable in default bwrap args", path)
+		}
+	}
+	for key, want := range map[string]string{
+		"GOCACHE":        "/tmp/cache/go-build",
+		"GOMODCACHE":     "/tmp/go/pkg/mod",
+		"GOPATH":         "/tmp/go",
+		"MISE_CACHE_DIR": "/tmp/cache/mise",
+	} {
+		if got := linuxEnvValue(spec.Env, key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 // hasPair2 reports whether args contains flag immediately followed by a.
 func hasPair2(args []string, flag, a string) bool {
 	return pairIndex(args, flag, a) != -1
+}
+
+func linuxEnvValue(entries []string, key string) string {
+	prefix := key + "="
+	for i := len(entries) - 1; i >= 0; i-- {
+		if strings.HasPrefix(entries[i], prefix) {
+			return strings.TrimPrefix(entries[i], prefix)
+		}
+	}
+	return ""
 }
 
 // pairIndex returns the index of flag where it is immediately followed by a.

@@ -33,8 +33,8 @@ from a terminal. Finder launches do not inherit shell environment variables.
   versioned random-port record. There is no fixed TCP-port probe.
 - The CLI returns a one-minute, single-use web bootstrap token; WKWebView
   redeems it for the shared HttpOnly session cookie.
-- Every window shares one backend, `WKProcessPool`, cookie store, and local
-  storage.
+- Every window shares one backend, WebKit's process model, the default cookie
+  store, and local storage.
 - Cmd+N opens a full Hydra window. Cmd+Shift+N opens the dedicated project-directory chat draft
   route, which creates its branchless session on first submit.
 - Project-directory windows expose project and live/loaded archived history controls plus

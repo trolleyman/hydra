@@ -233,6 +233,15 @@ Resume repeats initialization, calls `thread/resume` with the persisted thread
 id, reads back through `thread/read`, translates the returned items with the
 live normalizer, and only then drains a queued resumed turn.
 
+If the daemon stopped while Codex was inside a tool, the persisted final turn
+can contain an `inProgress` tool item without its matching output. Hydra removes
+that one incomplete turn from Codex's model history before continuing, while
+leaving its filesystem effects and Hydra's visible tool cards intact. The
+replacement turn receives the interrupted turn's user input together with the
+queued resume message, so it continues from the current worktree without stale
+unified-exec process ids. Paginated threads use `thread/revert`; legacy threads
+use the compatible `thread/rollback` operation.
+
 Interrupt calls `turn/interrupt` with the active thread and turn ids. Cancelled,
 canceled and interrupted statuses - including failed turns whose error
 identifies a cancellation - all normalize to a durable `turn_interrupted` event,
@@ -371,8 +380,10 @@ one expandable `Merged <base> - N commits` row. Its expanded list connects to
 the summary as one surface: the list's top border runs along the exposed
 shoulders and opens beneath the summary. It draws the commits on a continuous
 vertical graph that reaches the list edges, and uses the shared commit card for
-each row's hover details. Ordinary commit pills use the same edge-to-edge graph
-line around their single commit dot. Hydra also
+each row's hover details. Commit subjects wrap inside ordinary pills, merge
+summaries, and expanded merge rows, while their SHA and change totals remain
+visible. Ordinary commit pills use the same edge-to-edge graph line around their
+single commit dot. Hydra also
 observes every chat that owns a merge destination before merging another head
 into it, then labels the resulting fast-forward or merge commit with the
 incoming branch. This works for both managed worktree branches and a
@@ -411,7 +422,8 @@ A queued message lives only in the checkpointed queue projection and rides in
 `state_snapshot` with its stable client-generated id, enqueue sequence and
 content. It is deliberately absent from history - the provider has not received
 a turn yet. Dequeuing removes it from the projection and emits no conversation
-event.
+event. Messages not typed in the composer also retain their `origin`, `reason`,
+and `source_agent_id` provenance fields in the queue snapshot.
 
 Draining the queue is one logical transition: append a durable `user_message`
 carrying the same client id, remove that id from the queue projection, advance
@@ -487,8 +499,11 @@ scroll-back renders the same search query, plan activity and sub-agent report as
 the original live session.
 
 **Shell output.** Command strings are decoded as shell-quoted arguments,
-including concatenated quote segments and nested `bash -lc`. An interactive
-launcher such as `bash -lc bash` may receive its real command through stdin;
+including concatenated quote segments, nested `bash -lc`, and Bash or Zsh
+launchers under `/bin`, `/usr/bin`, and `/usr/local/bin`. An empty `--format=`
+on `git show` is treated as a patch with its commit header suppressed, so its
+diff keeps source-aware highlighting. An interactive launcher such as `bash -lc
+bash` may receive its real command through stdin;
 where app-server exposes that only as the first PTY echo, the UI promotes the
 echo to the command panel, labels it inferred terminal input, and renders the
 cleaned remaining transcript as output. CRLF is a newline; only a bare carriage

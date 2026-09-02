@@ -182,8 +182,9 @@ and `web/src/DiffViewer.tsx`):
   searches group consecutive results under the sans-serif path each row names;
   a full-width rule across the gutter and source marks each nonconsecutive jump
   within that file. Every text,
-  file, and directory header sticks to the output scroller's top until the next
-  header replaces it. Adjacent
+  file, and directory header wraps at the panel edge like an ordinary output
+  line and sticks to the output scroller's top until the next header replaces
+  it. Adjacent
   bounded reads keep their requested starts when their exact range lengths
   account for all returned lines. Adjacent bounded ranges of the same file do
   not need headings between them. When an unbounded boundary cannot otherwise
@@ -204,11 +205,23 @@ and `web/src/DiffViewer.tsx`):
   must agree with the corresponding line in the read before the gutter is shown.
   Unified diffs derive sticky file headers from each surviving `diff --git`
   boundary, so agents do not print redundant file markers around `git diff`.
+  Captured Vitest and Jest failures retain the runner's structure: failure
+  headings and verdicts, case file and suite hierarchy, exception names, stack
+  locations, and numbered source excerpts receive distinct treatments. Source
+  excerpts use the grammar inferred from the failed file, including TSX.
 - Bash command cards render commands relative to the head's worktree or a review
-  agent's detached checkout. A command that ran elsewhere gets a reproducible
-  `cd` preamble; when the script starts with a description comment, that comment
-  stays first and the preamble follows it. Home-relative preambles keep `~`
-  outside quotes so the shell expands it.
+  agent's detached checkout. Provider launch wrappers spelled as `bash`,
+  `/bin/bash`, `/usr/bin/bash`, or `/usr/local/bin/bash` are omitted so the card
+  shows the script itself. A command that ran elsewhere gets a reproducible `cd`
+  preamble; when the script starts with a description comment, that comment stays
+  first and the preamble follows it. Home-relative preambles keep `~` outside
+  quotes so the shell expands it.
+- Edit tool previews, including Codex multi-file edits, use the repository diff's
+  code composition and row metrics: syntax tokens, changed-word overlays,
+  whitespace marks, gutters, and the code surface palette match the
+  corresponding file diff. A preview only shows file line numbers when the
+  provider supplies a structured patch with real offsets; string fragments are
+  not numbered from an invented line 1.
 - The spawn composer uploads attachments against its selected project. A
   desktop-native image paste that arrives before any project is selected is
   ignored; when selection restoration and paste overlap, the current project

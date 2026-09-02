@@ -14,15 +14,14 @@ type DefaultConfig struct {
 // directories. Paths use "~" and are expanded per-head against the agent HOME.
 func Defaults() DefaultConfig {
 	return DefaultConfig{
-		// Writable: broad tool cache/state + toolchain + agent config. The
-		// worktree itself is always writable and added separately. This list is
-		// deliberately lean - ecosystem-specific build caches (Rust, Gradle,
-		// Node, ...) are NOT here; a project adds the ones it uses to
-		// [<agent>.sandbox] writable_paths (or cow_paths for per-head isolation).
-		// See SuggestedWritablePaths, surfaced as hints in the generated config.
+		// Writable: agent-owned state only. The worktree itself is always writable
+		// and added separately. Shared caches and toolchain installations stay
+		// read-only: RuntimeEnv redirects common mutable cache/state locations into
+		// each sandbox's private temporary directory. Ecosystem-specific caches may
+		// still be added explicitly by trusted project config when sharing them is
+		// an accepted tradeoff. See SuggestedWritablePaths, surfaced as hints in
+		// the generated config.
 		WritablePaths: []string{
-			"~/.cache",                  // broad XDG cache shared by many tools
-			"~/.local/share/mise",       // mise version manager (resolves the toolchain)
 			"~/.local/share/hydra/logs", // hydra's own log file (trigger-hook writes here)
 			"~/.claude",                 // claude config + conversation logs
 			"~/.claude.json",            // claude top-level config

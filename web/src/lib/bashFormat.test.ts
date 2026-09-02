@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from './bashFormat'
+import { formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from './bashFormat'
 
 describe('Codex bash display', () => {
   it('unwraps a login-shell command and formats its chains', () => {
@@ -68,6 +68,8 @@ describe('Codex bash display', () => {
     ["/bin/bash -c 'echo hi'", 'echo hi'],
     ['/usr/bin/bash -c "echo hi"', 'echo hi'],
     ['/usr/bin/bash -lc echo hi', 'echo hi'],
+    ['/usr/local/bin/bash -c "echo hi"', 'echo hi'],
+    ['/usr/local/bin/zsh -lc echo hi', 'echo hi'],
     ["zsh -lc 'echo hi'", 'echo hi'],
     ["/bin/zsh -c 'echo hi'", 'echo hi'],
     ['/usr/bin/zsh -lc "echo hi"', 'echo hi'],
@@ -82,6 +84,21 @@ describe('Codex bash display', () => {
   it('formats a macOS zsh wrapper as the script Codex ran', () => {
     expect(formatBashForDisplay('/bin/zsh -lc "# Read files\\nsed -n \'1,3p\' a.go\\nprintf \'%s\\\\n\' \'--- [file] a.go ---\'"')).toBe(
       "# Read files\\nsed -n '1,3p' a.go\\nprintf '%s\\n' '--- [file] a.go ---'",
+    )
+  })
+
+  it('uses the leading description inside a Homebrew Bash wrapper', () => {
+    const command = `/usr/local/bin/bash -c "# Review the committed wording
+git show HEAD"`
+    expect(formatBashForDisplay(command)).toBe('# Review the committed wording\ngit show HEAD')
+    expect(leadingBashComment(command)).toBe('Review the committed wording')
+  })
+
+  it('places the working directory after a description in a Homebrew Bash wrapper', () => {
+    const command = `/usr/local/bin/bash -c '# Typecheck and lint the updated settings UI
+npm run lint'`
+    expect(formatBashForDisplay(command, 'web')).toBe(
+      '# Typecheck and lint the updated settings UI\ncd web\nnpm run lint',
     )
   })
 

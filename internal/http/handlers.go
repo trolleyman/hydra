@@ -1542,6 +1542,20 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
 			PreExitScript:  c.Sandbox.PreExitScript,
 		}
+		if c.Sandbox.Cache != nil {
+			cache := make(map[string]api.SandboxCacheConfig, len(c.Sandbox.Cache))
+			for key, entry := range c.Sandbox.Cache {
+				apiEntry := api.SandboxCacheConfig{}
+				if entry.Env != "" {
+					apiEntry.Env = &entry.Env
+				}
+				if entry.Path != "" {
+					apiEntry.Path = &entry.Path
+				}
+				cache[key] = apiEntry
+			}
+			out.Sandbox.Cache = &cache
+		}
 		if c.Sandbox.Network != nil {
 			n := c.Sandbox.Network
 			out.Sandbox.Network = &api.NetworkConfig{
@@ -1582,6 +1596,19 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 	out := config.AgentConfig{PrePrompt: a.PrePrompt, Fullscreen: a.Fullscreen}
 	if a.Sandbox != nil {
 		sb := &config.SandboxConfig{}
+		if a.Sandbox.Cache != nil {
+			sb.Cache = make(map[string]sandbox.SharedCache, len(*a.Sandbox.Cache))
+			for key, entry := range *a.Sandbox.Cache {
+				cache := sandbox.SharedCache{}
+				if entry.Env != nil {
+					cache.Env = *entry.Env
+				}
+				if entry.Path != nil {
+					cache.Path = *entry.Path
+				}
+				sb.Cache[key] = cache
+			}
+		}
 		if a.Sandbox.WritablePaths != nil {
 			sb.WritablePaths = *a.Sandbox.WritablePaths
 		}
@@ -3681,7 +3708,14 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	switch err := s.sendAgentInput(ctx, projectRoot, request.AgentId, request.Body.Text, derefOr(request.Body.Origin, "")); {
+	switch err := s.sendAgentInput(
+		ctx,
+		projectRoot,
+		request.AgentId,
+		request.Body.Text,
+		derefOr(request.Body.Origin, api.MessageOrigin("")),
+		derefOr(request.Body.Reason, api.MessageReason("")),
+	); {
 	case errors.Is(err, errAgentNotRunning):
 		return api.SendAgentInput404JSONResponse{
 			Code:    404,
@@ -3711,10 +3745,10 @@ var errAgentNotRunning = errors.New("agent not found or not running")
 // handler's request object carries the project ID from the URL. Calling the
 // handler with a root in the ID field type-checks perfectly and then 404s inside
 // resolveProjectRoot ("project not found: /home/callum/code/hydra"), which is
-// exactly how review-comment, review-resolved and test-failure notices all went
+// exactly how review-comment and test-failure notices can go
 // quietly undelivered. The root is the honest signature for those callers; the
 // one ID -> root lookup stays at the HTTP edge where the ID actually comes from.
-func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text, origin string) error {
+func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text string, origin api.MessageOrigin, reason api.MessageReason) error {
 	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -3746,6 +3780,7 @@ func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text, 
 			ID:      id,
 			Content: claudestream.TextUserContent(text),
 			Origin:  origin,
+			Reason:  reason,
 		}, false)
 		return nil
 	}

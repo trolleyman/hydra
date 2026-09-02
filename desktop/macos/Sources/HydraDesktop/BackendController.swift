@@ -108,7 +108,7 @@ final class BackendController {
         return bootstrapToken
     }
 
-    func start(projectRoot: @escaping () -> URL?, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
+    func start(projectRoot: @escaping () -> URL?, completion: @escaping (Result<BackendStatus, BackendError>) -> Void) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard let selectedRoot = projectRoot() else {
@@ -131,7 +131,7 @@ final class BackendController {
         }
     }
 
-    private func connectThroughBundledCLI(projectRoot: URL, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
+    private func connectThroughBundledCLI(projectRoot: URL, completion: @escaping (Result<BackendStatus, BackendError>) -> Void) {
         let binary = ProcessInfo.processInfo.environment["HYDRA_DESKTOP_BACKEND"].map(URL.init(fileURLWithPath:))
             ?? Bundle.main.resourceURL?.appendingPathComponent("HydraBackend")
         guard let binary, FileManager.default.isExecutableFile(atPath: binary.path) else {
@@ -223,7 +223,7 @@ final class BackendController {
         }
     }
 
-    private func launchBundledBackend(projectRoot: URL, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
+    private func launchBundledBackend(projectRoot: URL, completion: @escaping (Result<BackendStatus, BackendError>) -> Void) {
         let binary = ProcessInfo.processInfo.environment["HYDRA_DESKTOP_BACKEND"].map(URL.init(fileURLWithPath:))
             ?? Bundle.main.resourceURL?.appendingPathComponent("HydraBackend")
         guard let binary, FileManager.default.isExecutableFile(atPath: binary.path) else {
@@ -274,7 +274,7 @@ final class BackendController {
         }
     }
 
-    private func waitForReadiness(readyFile: URL, logFile: URL, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
+    private func waitForReadiness(readyFile: URL, logFile: URL, completion: @escaping (Result<BackendStatus, BackendError>) -> Void) {
         let deadline = Date().addingTimeInterval(20)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }

@@ -172,6 +172,8 @@ type Provider interface {
 	Status(ctx context.Context, repoDir, remote, id string) (Status, error)
 	// Merge merges (or arms auto-merge for) the MR identified by id.
 	Merge(ctx context.Context, repoDir, remote, id string, o MergeOptions) error
+	// Close closes the MR/PR identified by id without deleting its source branch.
+	Close(ctx context.Context, repoDir, remote, id string) error
 	// Threads returns the MR's review conversations (resolved ones included, so
 	// the caller decides what to show), each anchored to a file/line where the
 	// forge reports one.

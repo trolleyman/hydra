@@ -1309,6 +1309,10 @@ func (s *SimulationServer) PullFromMr(w http.ResponseWriter, r *http.Request, pr
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+func (s *SimulationServer) CloseReview(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, simAgentByID(id))
+}
+
 func (s *SimulationServer) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	var body api.SetDownstreamBranchJSONBody
 	_ = json.NewDecoder(r.Body).Decode(&body)
@@ -4450,6 +4454,12 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 			InheritEnv:     ptr([]string{"ANDROID_HOME", "SSH_AUTH_SOCK"}),
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
+			Cache: ptr(map[string]api.SandboxCacheConfig{
+				"go_build":       {Env: ptr("GOCACHE")},
+				"go_modules":     {Env: ptr("GOMODCACHE")},
+				"npm":            {Env: ptr("npm_config_cache")},
+				"mise_downloads": {Env: ptr("MISE_CACHE_DIR")},
+			}),
 			// Hard egress mode with extra allow-listed hosts + a blocked host -
 			// drives the settings network screenshot (mode dropdown + allowed/blocked
 			// host editors populated).
@@ -4840,6 +4850,8 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"assistant_message", map[string]any{"message_id": "sim-codex-seed", "text": "This reply began before you attached and finished after."}},
 		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "status": "in_progress", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "_raw": map[string]any{"id": "sim-codex-bash", "item_type": "command_execution", "command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "status": "in_progress"}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-vitest", "name": "Bash", "status": "in_progress", "input": map[string]any{"command": "npm exec vitest run web/src/components/settings/ConfigForm.list-editors.test.tsx", "description": "Run the list editor tests"}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-vitest", "name": "Bash", "status": "failed", "output": " RUN  v4.1.11 /repo\n\n\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\n\n FAIL  web/src/components/settings/ConfigForm.list-editors.test.tsx > settings list editors > inserts a blank path row after the current row on Enter\nReferenceError: document is not defined\n \u276f render web/node_modules/@testing-library/react/dist/pure.js:256:5\n \u276f web/src/components/settings/ConfigForm.list-editors.test.tsx:8:5\n      6|   it('inserts a blank path row after the current row on Enter', () => {\n      7|     const onChange = vi.fn()\n      8|     render(<PathListEditor paths={['registry.npmjs.org']} onChange={onChange} />)\n       |     ^\n      9|   })\n\n\u23af\u23af\u23af\u23af[1/1]\u23af\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)"}},
 		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "docs/chat-mode.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Chat mode\n+# Chat mode internals\n"},
 			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
@@ -4919,9 +4931,11 @@ func handleSimCodexChatWS(conn *safeConn) {
 
 // simQueuedMsg is one held message in the sim's stand-in chat queue.
 type simQueuedMsg struct {
-	ID      string          `json:"id"`
-	Content json.RawMessage `json:"content"`
-	Origin  string          `json:"origin,omitempty"`
+	ID            string            `json:"id"`
+	Content       json.RawMessage   `json:"content"`
+	Origin        api.MessageOrigin `json:"origin,omitempty"`
+	Reason        api.MessageReason `json:"reason,omitempty"`
+	SourceAgentID string            `json:"source_agent_id,omitempty"`
 }
 
 // The sim's cross-connection chat message queue: a process-lifetime stand-in for
@@ -4971,7 +4985,9 @@ func sendSimQueueFrame(conn *safeConn, id string) {
 	// shape the schema forbids - an empty queue is [], never null.
 	msgs := make([]api.ChatQueuedMessage, 0, len(simQueueList(id)))
 	for _, m := range simQueueList(id) {
-		msgs = append(msgs, api.ChatQueuedMessage{Id: m.ID, Content: m.Content, Origin: m.Origin})
+		msgs = append(msgs, api.ChatQueuedMessage{
+			Id: m.ID, Content: m.Content, Origin: m.Origin, Reason: m.Reason, SourceAgentId: m.SourceAgentID,
+		})
 	}
 	writeFrame(conn, api.ChatQueueFrame{Type: api.Queue, Messages: msgs})
 }

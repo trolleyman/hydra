@@ -180,6 +180,11 @@ func (p *gitlabProvider) Merge(ctx context.Context, repoDir, _ string, id string
 	return errtrace.Wrap(err)
 }
 
+func (p *gitlabProvider) Close(ctx context.Context, repoDir, _ string, id string) error {
+	_, err := p.run(ctx, repoDir, "glab", "mr", "close", id)
+	return errtrace.Wrap(err)
+}
+
 // glabDiscussion mirrors the GitLab discussions API shape. A discussion IS the
 // thread; its notes carry the position (file/line) and resolution state.
 type glabDiscussion struct {

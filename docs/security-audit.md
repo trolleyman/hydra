@@ -162,6 +162,10 @@ and it can *record* intent (every `PreToolUse` is already logged to
   die-with-parent + namespace isolation on by default.
 - Credential masking list is broad and sensible.
 - Codex's own sandbox is bypassed **deliberately** (it's already inside Hydra's).
+- Codex's separate command classifier can still reject raw recursive `rm` before
+  Hydra's outer sandbox runs it. `$HYDRA_BIN sandbox-remove` provides bounded
+  scratch cleanup under only the head worktree and private `$TMPDIR`; it does not
+  weaken the host boundary or add a blanket `rm` allow rule.
 - The artifacts trust model (branch can't self-grant host access) is a good
   template to copy for MCP.
 - Every hook event is already captured to `status_log.jsonl` — the raw material
@@ -213,6 +217,14 @@ in the loop.
 >   **advisory** mode (proxy via `HTTP(S)_PROXY` — filters every well-behaved
 >   client but a determined process can bypass it), surfaced as a UI warning.
 >   `network.enabled=false` stays the hard off-switch.
+> - **Rec 7 (writable scope):** shared host cache and tool-installation trees are
+>   read-only by default. Hydra redirects mutable cache/state paths beneath each
+>   sandbox's private temp directory. Trusted config can opt disposable caches
+>   into project-scoped sharing with `[sandbox.cache]`; `GOPATH`, `GOBIN`, mise
+>   installation data, and mise state remain private. Linux still supports
+>   explicit home/absolute `cow_paths` through
+>   overlayfs; macOS rejects those in-place writable requests and supports APFS
+>   clones only when the destination is a distinct private directory.
 >
 > Policy lives in per-agent `[<agent>.policy]` / `[<agent>.sandbox.network]` config,
 > resolved from the trusted project root. The original audit follows unchanged.
@@ -263,10 +275,13 @@ in the loop.
    touched, network/MCP attempts) so the user has visibility into an unattended
    head without reading logs. Cheap, high trust value.
 
-7. **Tighten default writable scope (F5).** Review whether every entry in
-   `Defaults().WritablePaths` needs to be writable by every agent type, and
-   prefer per-head COW (already supported via `cow_paths`) over shared writable
-   caches where a poisoned cache could affect later runs.
+7. **Tighten default writable scope (F5).** Shared caches and toolchain
+   installations are read-only by default. Mutable cache/state paths use
+   per-sandbox private storage unless trusted config names a disposable,
+   project-scoped shared cache. Explicit `cow_paths` remain available where the
+   platform can provide a real private destination or overlay. A future
+   readable-path allow-list can replace the broad read-only host view after its
+   system/toolchain compatibility requirements are inventoried.
 
 ### Suggested priority order
 F1 hook-gate → F3 MCP allow-list + UI → F2 egress → F4 read-only policy →

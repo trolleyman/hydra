@@ -51,7 +51,17 @@ What works:
   head's own scratch directory and its random Hydra supervisor socket directory.
   Literal ancestors receive metadata-only access so path-canonicalizing tools
   such as Git and SQLite work without exposing directory listings or sibling
-  scratch data.
+  scratch data. XDG, Go, Mage, npm, aube, Playwright, and mise mutable
+  cache/state variables point beneath the same private directory. `GOBIN` is
+  added to `PATH`. An explicit `[sandbox.cache]` entry redirects only that cache
+  to a writable project-owned directory shared by heads; host cache trees stay
+  read-only. One-shot sandboxed commands receive an ephemeral protected
+  directory with the same redirects.
+- Codex can recursively clean generated scratch paths through
+  `$HYDRA_BIN sandbox-remove`. Codex may reject raw `rm -rf` before Seatbelt
+  sees it; the helper accepts only absolute descendants of the head worktree or
+  private `$TMPDIR`, refuses either root itself, and uses traversal-safe rooted
+  removal.
 - Codex uses a persistent per-head `CODEX_HOME` beneath the project state. Hydra
   writes merged `AGENTS.md`, `hooks.json`, and `config.toml` there atomically and
   Seatbelt makes those exact files immutable while leaving provider-owned state
@@ -108,9 +118,9 @@ What is broken or missing:
 - Provider-specific GUI automation is blocked by Mach-service denies and GUI
   environment removal, but still needs a real `pbpaste` / AppleScript probe.
 - Writable APFS CoW clones work when the destination can be populated as a
-  private directory; in-place overlays over existing absolute/home paths remain
-  impossible. Seccomp deliberately has no macOS port because its blocked syscall
-  surface is Linux-specific.
+  private directory. In-place overlays over existing absolute/home paths remain
+  impossible and fail sandbox construction explicitly. Seccomp deliberately has
+  no macOS port because its blocked syscall surface is Linux-specific.
 - The immutable-input and hard-egress Seatbelt probes pass on real macOS
   hardware (2026-09-02). Full head lifecycle validation remains.
 
@@ -279,9 +289,9 @@ network-off.
 - [x] Writable CoW clones: APFS clonefile copies are writable, private, retained
       across resume, and never mirrored back when Hydra can populate a distinct
       destination directory.
-- [ ] In-place overlays over real host paths (`~/.gradle`) remain impossible
-      without mounts: handle per-tool via env redirects (`GRADLE_USER_HOME`) or
-      document the limitation.
+- [x] In-place overlays over real host paths (`~/.gradle`) fail explicitly
+      because they are impossible without mounts. Tools that need writable
+      state use env redirects to per-head storage instead.
 - [ ] Seccomp: do **not** port. The Linux blocklist
       (`internal/sandbox/seccomp/seccomp-gen.c`) targets mount/userns escapes,
       `open_by_handle_at`, kernel modules, kexec, keyring, eBPF - all either

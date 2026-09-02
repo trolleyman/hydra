@@ -156,6 +156,9 @@ func trimOutput(b []byte) string {
 // the whole filesystem, a curated set of writable binds, masked credential
 // locations, optional network isolation and a seccomp syscall filter.
 func BuildSpec(opts Options) (*Spec, error) {
+	if err := PrepareSharedCaches(&opts); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if opts.NoSandbox {
 		return errtrace.Wrap2(rawSpec(opts))
 	}
@@ -459,7 +462,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	return &Spec{
 		Path:       path,
 		Args:       finalArgs,
-		Env:        opts.Env,
+		Env:        SharedCacheEnv(RuntimeEnv(opts.Env, opts.TmpDir), opts.CacheRoot, opts.Caches),
 		Dir:        opts.WorktreePath,
 		ExtraFiles: extraFiles,
 		Cleanup:    cleanup,

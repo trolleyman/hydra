@@ -38,18 +38,26 @@ Use aube when available and npm otherwise. Run TypeScript scripts under
 - `rg` is recursive by default. Never use `-r` to mean recursive; in ripgrep it
   means `--replace`.
 - Never put raw control bytes in source; use escape sequences.
+- Hydra has a single user, and its client and server update together. Do not add
+  backward-compatibility shims, legacy aliases, deprecation paths, or dual-format
+  handling unless the user explicitly asks for them; replace the old behavior
+  outright.
 - Define API changes in `api/openapi.yaml`, then run `mage generate:go`.
 - Use the shared tooltip, typography, file-path, and URL components described in
   [docs/agent-guide.md](docs/agent-guide.md) instead of recreating them.
 
 ## Verification
 
-- Run focused tests before each logical commit.
+- While iterating, run only the tests that cover the changed package, file, or
+  behavior. For example, use `go test ./internal/tests -run TestName` or
+  `cd web && aube exec vitest run src/lib/example.test.ts` instead of a full
+  repository suite.
 - Before the final commit and handoff, run `mage build` once for the complete
   change set. Repeat it earlier only at a meaningful integration checkpoint.
-- Before committing Go changes, run `mage tidy`; run the relevant Go tests and
-  finish with `go test ./...`.
-- After web changes, run `cd web && aube run lint` and fix new errors or warnings.
+- Before committing Go changes, run `mage tidy` and the relevant Go tests. Run
+  `go test ./...` once after the complete Go change, not after every commit.
+- After the complete web change, run `cd web && aube run lint` once and fix new
+  errors or warnings. During iteration, lint or test only the touched files.
 - Verify UI changes in the production simulation app with Playwright, including
   console and page errors. Show relevant light and dark 2x captures.
 - Commit in logical chunks with explanatory messages for non-trivial changes.

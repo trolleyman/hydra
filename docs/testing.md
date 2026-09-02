@@ -6,15 +6,41 @@ This doc covers how Hydra ingests and renders a project's `[tests.<name>]` runne
 output. You only need it when touching `internal/tests`, the tests panel
 (`web/src`), or a project's test-runner config.
 
-Each runner may set `auto_run = "always"` (the default), `"settled"` (do not
-start a missing run while the agent is actively working), or `"never"` (only the
-Tests card's Refresh action starts it). Cached verdicts remain visible in every
-mode, and Refresh always runs immediately.
+Each runner sets `auto_run` to one of these modes:
+
+| Mode | Automatic behavior | When viewed |
+| ---- | ------------------ | ----------- |
+| `"always"` (default) | Hydra may start a missing run proactively. | A missing run starts. |
+| `"settled"` | A missing run starts when the agent transitions out of active work. | No run starts; Hydra only reads the cache. |
+| `"never"` | No run starts automatically. | No run starts; Hydra only reads the cache. |
+
+Explicit actions apply in every mode:
+
+- Refresh starts the run immediately.
+- Direct merge starts missing runs and waits for their verdicts.
+- Merge-when-green and publish/push-when-green start missing runs because they
+  require current verdicts.
+- Cached verdicts remain visible.
+
+Commit-side runs reuse a bounded pool of warm detached worktrees under the
+project state directory. At daemon startup, stale slot and copy-on-write trees
+are renamed out of their live paths atomically; recursive disk reclamation then
+runs in the background. This keeps crash recovery from delaying the HTTP
+listener when a dependency-heavy checkout contains many thousands of files.
+
+`test_concurrency` limits the number of runner commands Hydra starts at once. It
+does not limit parallel workers created inside one command, so resource-heavy
+runners should cap both layers. On a development laptop, a practical low-load
+configuration is `test_concurrency = 1`, `go test -p 2`, and `vitest
+--maxWorkers=2`. Set `test_prefetch = false` to disable proactive verdict
+generation. Set `auto_run = "never"` when only explicit actions such as Refresh,
+merge, or publish start a runner.
 
 The primary Merge action preflights the per-runner endpoint before opening its
-normal confirmation. This catches a missing, stale, or newly-running verdict
-before the authoritative merge gate can reject a previously confirmed action;
-the user sees the Force / Queue choice directly instead of two dialogs.
+normal confirmation. The preflight is passive for `"settled"` and `"never"`, so
+a missing verdict goes directly to the Force / Queue choice. Queuing starts the
+missing runs; a confirmed direct merge starts them in the authoritative merge
+gate and remains blocked until they settle, unless the user forces it.
 
 ## Agent test gate - warnings
 

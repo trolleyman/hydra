@@ -172,6 +172,7 @@ func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sa
 	}
 
 	writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+	cfg.ApplySharedCaches(&opts, projectRoot, "", true)
 	if gcd, err := git.GetCommonDir(projectRoot); err == nil {
 		opts.GitCommonDir = gcd
 	}

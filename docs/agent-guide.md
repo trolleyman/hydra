@@ -39,15 +39,16 @@ Use `mage` for development tasks.
 
 ### Commits and verification
 
-When a logical change is coherent and the agent is confident in it, it commits
-promptly and runs focused tests against the committed tip. This allows Hydra's
-per-commit checks to begin without waiting for an additional agent turn. An
-agent tests before committing when confidence is low or a change is risky.
+When a logical change is coherent, run the smallest test that covers it and
+commit promptly. A Go package or named test and a Vitest file are the normal
+iteration units; do not repeatedly run a repository-wide suite after each
+commit.
 
-Run `mage tidy` before a Go commit. Run the relevant Go tests after the commit,
-and finish Go work with `go test ./...`. Run `cd web && aube run lint` after a
-web commit; put any corrections in a follow-up commit. Before final handoff,
-run `mage build` for the complete change set.
+Run `mage tidy` before a Go commit. Run relevant Go package tests while
+iterating, then run `go test ./...` once after the complete Go change. For web
+work, run targeted Vitest and ESLint checks while iterating, then run `cd web &&
+aube run lint` once after the complete web change. Before final handoff, run
+`mage build` once for the complete change set.
 
 ### Keyed frontend collections
 
@@ -75,6 +76,13 @@ batched turn.
 
 ## Conventions
 
+### No compatibility layers by default
+
+Hydra has a single user, and its client and server update together. Replace old
+behavior outright instead of adding backward-compatibility shims, legacy aliases,
+deprecation paths, or dual-format handling. Add compatibility behavior only when
+the user explicitly asks for it.
+
 ### ASCII punctuation only
 
 Do **not** use fancy Unicode punctuation in source, UI strings, or comments. Use
@@ -100,8 +108,9 @@ line. When the code-line-number preference hides the command gutter, output keep
 its own intrinsic width.
 
 Source-aware output groups each file beneath its shared, sans-serif file-path
-label. Every text, file, and directory header sticks to the top of the output
-scroller until the next header replaces it. A header has an inset rule
+label. Every text, file, and directory header wraps at the panel edge like an
+ordinary output line and sticks to the top of the output scroller until the next
+header replaces it. A header has an inset rule
 immediately above and below its padded label, with no outer vertical margin; file
 and directory labels use the shared path tooltip treatments. Search results are
 grouped by each path their output names. A nonconsecutive jump between matches in

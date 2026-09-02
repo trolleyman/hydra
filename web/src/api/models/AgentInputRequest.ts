@@ -2,14 +2,20 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { MessageOrigin } from './MessageOrigin';
+import type { MessageReason } from './MessageReason';
 export type AgentInputRequest = {
     /**
      * Text to send to the agent's stdin (a newline is appended automatically)
      */
     text: string;
     /**
-     * Why this message exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+     * Who caused this message when the user did not type it. Browser actions use "button"; server automation uses "hydra". Absent for composer input.
      */
-    origin?: string;
+    origin?: MessageOrigin;
+    /**
+     * Optional context for the button action or Hydra automation.
+     */
+    reason?: MessageReason;
 };
 

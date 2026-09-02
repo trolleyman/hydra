@@ -56,18 +56,13 @@ const (
 	notifyIdle
 )
 
-// notifyReason is the machine tag that rides with a notice to the UI, so the chat
-// can say WHY a message it did not type appeared. Kept short and stable; the
-// human wording lives in the client.
-type notifyReason string
-
 const (
-	reasonReviewComments notifyReason = "review_comments"
-	reasonTestsFailed    notifyReason = "tests_failed"
+	reasonReviewComments = api.MessageReasonReviewComments
+	reasonTestsFailed    = api.MessageReasonTestsFailed
 	// The reviewer's own: someone typed @review in a comment. A separate tag from
 	// review_comments because it lands in a different transcript and answers a
 	// different "why is this here?" - the reviewer was addressed by name.
-	reasonReviewMention notifyReason = "review_mention"
+	reasonReviewMention = api.MessageReasonReviewMention
 )
 
 // autoPrefix marks a message as Hydra's rather than the user's, in the TEXT.
@@ -81,7 +76,7 @@ const autoPrefix = "`[Hydra]` "
 // notifyHead delivers one line to a head, subject to its gate. Reports whether it
 // was sent, which the callers use only for logging - a notice that was gated out
 // is not a failure, it is the design.
-func (s *Server) notifyHead(ctx context.Context, projectRoot, headID string, when notifyWhen, reason notifyReason, text string) bool {
+func (s *Server) notifyHead(ctx context.Context, projectRoot, headID string, when notifyWhen, reason api.MessageReason, text string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
@@ -93,7 +88,7 @@ func (s *Server) notifyHead(ctx context.Context, projectRoot, headID string, whe
 	// funnels through, and it holds a root. Going through the HTTP handler instead
 	// meant putting a path in the id field, which resolved to nothing and made
 	// every notice a logged 404 - see sendAgentInput.
-	if err := s.sendAgentInput(ctx, projectRoot, headID, autoPrefix+text, string(reason)); err != nil {
+	if err := s.sendAgentInput(ctx, projectRoot, headID, autoPrefix+text, api.MessageOriginHydra, reason); err != nil {
 		log.Printf("warn: notify %s (%s): %v", headID, reason, err)
 		return false
 	}

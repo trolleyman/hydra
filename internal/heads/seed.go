@@ -213,6 +213,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	}
 	stableHydraBin := runtimeBin.VisiblePath
 	res.HydraBinPath = stableHydraBin
+	res.Env = append(res.Env, "HYDRA_BIN="+stableHydraBin)
 	if runtimeBin.Bind != nil {
 		res.Binds = append(res.Binds, *runtimeBin.Bind)
 	}

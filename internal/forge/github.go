@@ -241,6 +241,11 @@ func (p *githubProvider) Merge(ctx context.Context, repoDir, _ string, id string
 	return errtrace.Wrap(err)
 }
 
+func (p *githubProvider) Close(ctx context.Context, repoDir, _ string, id string) error {
+	_, err := p.run(ctx, repoDir, "gh", "pr", "close", id)
+	return errtrace.Wrap(err)
+}
+
 // ghThreadsQuery pulls the PR's review threads with their comments. Thread
 // resolution is GraphQL-only on GitHub (see ghViewFields), and fetching the
 // comments in the same query keeps a thread render to ONE round trip.
