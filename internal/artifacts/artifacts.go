@@ -1559,9 +1559,9 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 // pre-slot-pool, per-commit checkout) worktrees behind, which this wipes and
 // prunes so the pool starts clean and recreates slots on demand.
 func (m *Manager) CleanCheckouts() {
-	_ = os.RemoveAll(m.checkoutsDir()) // legacy per-commit checkouts (pre-slot-pool)
-	_ = os.RemoveAll(m.cowDir())       // ephemeral per-generation cow_paths layers
-	m.pool.Clean()                     // slot worktrees + `git worktree prune`
+	checkout.RemoveAllDetached(m.checkoutsDir()) // legacy per-commit checkouts (pre-slot-pool)
+	checkout.RemoveAllDetached(m.cowDir())       // ephemeral per-generation cow_paths layers
+	m.pool.Clean()                               // slot worktrees + `git worktree prune`
 }
 
 // legacyKeyRe matches a cache-entry dir in the old flat layout, where the kind

@@ -701,6 +701,10 @@ const GIT_QUIET = /^(-q|--quiet)$/
 // shapes; only a caller-authored format string is arbitrary.
 const GIT_REFUSED = /^(--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
 const GIT_NAMED_FORMAT = /^--(?:pretty|format)=(?:oneline|short|medium|full|fuller|reference|email|raw)$/
+// An empty format on `git show` suppresses the commit header but leaves its
+// patch intact. That is still one of lib/gitOutput's known shapes, unlike a
+// caller-authored format string whose lines can contain anything.
+const GIT_EMPTY_SHOW_FORMAT = /^--(?:pretty|format)=$/
 
 // parseGitReport says what a git call prints: one of the reports lib/gitOutput
 // colours - a status, a commit header, a diffstat, a patch, an ignore rule -
@@ -722,7 +726,9 @@ function parseGitReport(words: Word[]): 'report' | 'quiet' | null {
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return null
   const args = words.slice(i + 1).filter((w) => !w.quoted)
   if (args.some((w) => GIT_QUIET.test(w.text))) return 'quiet'
-  if (args.some((w) => GIT_REFUSED.test(w.text) && !GIT_NAMED_FORMAT.test(w.text))) return null
+  if (args.some((w) => GIT_REFUSED.test(w.text) &&
+    !GIT_NAMED_FORMAT.test(w.text) &&
+    !(sub.text === 'show' && GIT_EMPTY_SHOW_FORMAT.test(w.text)))) return null
   const readonly = GIT_READONLY[sub.text]
   return !readonly || readonly(args) ? 'report' : null
 }

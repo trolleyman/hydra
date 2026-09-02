@@ -247,7 +247,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
-        <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
+        <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{label}</span>
         <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
       </button>
       <Expandable open={expanded && shown > 0} className="-mt-px w-full">
@@ -273,7 +273,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
                   </span>
                   <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className="shrink-0 font-mono">{m.shortSha}</span>
-                    <span className="min-w-0 flex-1 truncate">{m.subject}</span>
+                    <span className="min-w-0 flex-1 whitespace-normal break-words">{m.subject}</span>
                   </span>
                   <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px ml-auto shrink-0" />
                 </div>
@@ -3170,20 +3170,24 @@ function ScriptOutputHeader({ header, gutter }: {
 }) {
   const label = header.kind === 'file'
     ? (
-        <Tooltip content={<FilePathLabel path={header.label} nativeTitle={false} />} align="left">
-          <FilePathLabel path={header.label} nativeTitle={false} className="font-sans" />
+        <Tooltip
+          content={<FilePathLabel path={header.label} nativeTitle={false} />}
+          align="left"
+          className="min-w-0 flex-1"
+        >
+          <FilePathLabel path={header.label} nativeTitle={false} wrap className="min-w-0 flex-1 font-sans" />
         </Tooltip>
       )
     : header.kind === 'dir'
       ? (
-          <DirectoryTooltip path={header.label}>
-            <span className="inline-flex min-w-0 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
+          <DirectoryTooltip path={header.label} className="min-w-0 flex-1">
+            <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
               <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
-              <span className="truncate">{header.label}</span>
+              <span className="min-w-0 whitespace-pre-wrap break-words">{header.label}</span>
             </span>
           </DirectoryTooltip>
         )
-      : <span className="text-stone-600 dark:text-stone-300">{header.label}</span>
+      : <span className="min-w-0 whitespace-pre-wrap break-words text-stone-600 dark:text-stone-300">{header.label}</span>
   return (
     <div
       data-copy-skip
@@ -10802,6 +10806,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           <div className="flex justify-center">
             <Tooltip
               align="left"
+              className="min-w-0 max-w-full"
               content={
                 <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
               }
@@ -10811,7 +10816,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 tabIndex={clickable ? 0 : undefined}
                 onClick={clickable ? activate : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-                className={`${COMMIT_PILL} relative max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
+                className={`${COMMIT_PILL} relative min-w-0 max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
               >
                 <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[16px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
                 <span className="relative flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
@@ -10820,7 +10825,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 {/* The sha is monospace and the subject is not, so their line boxes
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
-                <span className="truncate optical-center">{item.subject}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{item.subject}</span>
                 <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
               </div>
             </Tooltip>

@@ -10,6 +10,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
+	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
 // prefetchInterval is how often the daemon proactively pre-generates artifacts
@@ -22,7 +23,9 @@ import (
 // This periodic sweep is the backstop: the low-latency path is PrefetchHeadNow,
 // fired the moment a head transitions into a resting status (finished / waiting /
 // needs_input), which is a definitive "the agent stopped editing" signal and so
-// doesn't need to wait out the two-sweep stability check.
+// doesn't need to wait out the two-sweep stability check. That settle hook also
+// starts eligible test runners so their "settled" policy is event-driven rather
+// than view-driven.
 const prefetchInterval = 30 * time.Second
 
 // artifactPrefetchState is the bookkeeping shared by the periodic prefetch sweep
@@ -130,10 +133,10 @@ func (st *artifactPrefetchState) pruneTo(live map[string]struct{}) {
 func (p *artifactPlan) prefetch() {
 	for _, name := range p.names {
 		leftSpec, rightSpec := p.specsFor(name)
-		if leftSpec != nil && shouldAutoRun(leftSpec.AutoRun, p.agentRunning) {
+		if leftSpec != nil && shouldScheduleAutoRun(leftSpec.AutoRun, p.agentRunning) {
 			_, _ = p.mgr.Prefetch(*leftSpec, p.left)
 		}
-		if rightSpec != nil && shouldAutoRun(rightSpec.AutoRun, p.agentRunning) {
+		if rightSpec != nil && shouldScheduleAutoRun(rightSpec.AutoRun, p.agentRunning) {
 			_, _ = p.mgr.Prefetch(*rightSpec, p.right)
 		}
 	}
@@ -246,28 +249,19 @@ func (s *Server) prefetchHead(projectRoot string, head *heads.Head) {
 	plan.prefetch()
 }
 
-// PrefetchHeadNow kicks off background artifact generation for a single head
-// immediately, bypassing the periodic sweep's two-interval worktree-settle
-// debounce. It is meant to be fired the moment a head transitions into a resting
-// status (finished / waiting / needs_input): the agent has stopped editing, so
-// its working tree is a stable target and there's no reason to wait up to two 30s
-// sweeps to notice. Best-effort and safe to call redundantly - the Manager dedups
-// by version, so a version already cached or in-flight is a no-op. It shares the
-// sweep's bookkeeping, so a render it starts is cancellable by a later sweep if
-// the head resumes and moves on.
+// PrefetchHeadNow starts eligible artifact and test work for a single head as soon
+// as it transitions into a resting status (finished / waiting / needs_input).
+// This is the event that auto_run="settled" names: opening the page is not a
+// substitute trigger. Best-effort and safe to call redundantly - both managers
+// dedup by version. Artifact work shares the sweep's bookkeeping, so a render it
+// starts is cancellable by a later sweep if the head resumes and moves on.
 func (s *Server) PrefetchHeadNow(ctx context.Context, projectRoot, headID string) {
-	if s.Artifacts == nil {
+	if s.Artifacts == nil && s.Tests == nil {
 		return
 	}
 	cfg, err := config.Load(projectRoot)
-	if err != nil || len(cfg.Artifacts) == 0 {
-		return // no artifacts configured for this project
-	}
-	mgr := s.Artifacts.Manager(projectRoot)
-	// Keep the generation parallelism in sync even on this path (idempotent).
-	mgr.SetConcurrency(cfg.ResolveArtifactConcurrency())
-	if !cfg.IsArtifactPrefetchEnabled() {
-		return // proactive background work opted out for this project
+	if err != nil {
+		return
 	}
 	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
 	if err != nil || head == nil {
@@ -276,13 +270,32 @@ func (s *Server) PrefetchHeadNow(ctx context.Context, projectRoot, headID string
 	if head.Archived || head.Ephemeral || head.Branch == nil {
 		return
 	}
-	// Record the tree's current fingerprint as the settled state so the next sweep
-	// sees it as unchanged (it last recorded a mid-run hash) and doesn't cancel the
-	// render we're about to start as though it were stale.
-	if head.Worktree != nil {
-		if h, err := git.WorktreeStateHash(*head.Worktree); err == nil {
-			s.prefetchState().setHash(headID, h)
+
+	if s.Artifacts != nil && len(cfg.Artifacts) > 0 {
+		mgr := s.Artifacts.Manager(projectRoot)
+		// Keep the generation parallelism in sync even on this path (idempotent).
+		mgr.SetConcurrency(cfg.ResolveArtifactConcurrency())
+		if cfg.IsArtifactPrefetchEnabled() {
+			// Record the tree's current fingerprint as the settled state so the next
+			// sweep sees it as unchanged (it last recorded a mid-run hash) and doesn't
+			// cancel this render as though it were stale.
+			if head.Worktree != nil {
+				if h, err := git.WorktreeStateHash(*head.Worktree); err == nil {
+					s.prefetchState().setHash(headID, h)
+				}
+			}
+			s.prefetchHead(projectRoot, head)
 		}
 	}
-	s.prefetchHead(projectRoot, head)
+
+	if s.Tests != nil && cfg.IsTestPrefetchEnabled() {
+		mgr := s.Tests.Manager(projectRoot)
+		mgr.SetConcurrency(cfg.ResolveTestConcurrency())
+		v := hydratests.Version{Ref: *head.Branch, TotalHintRefs: headTotalHintRefs(head), Branch: *head.Branch}
+		for _, runner := range s.testRunnersFor(projectRoot, v, cfg) {
+			if shouldScheduleAutoRun(runner.AutoRun, false) {
+				_, _ = mgr.Prefetch(runner, v)
+			}
+		}
+	}
 }
