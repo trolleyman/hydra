@@ -225,9 +225,13 @@ and `web/src/DiffViewer.tsx`):
 - Edit tool previews, including Codex multi-file edits, use the repository diff's
   code composition and row metrics: syntax tokens, changed-word overlays,
   whitespace marks, gutters, and the code surface palette match the
-  corresponding file diff. A preview only shows file line numbers when the
-  provider supplies a structured patch with real offsets; string fragments are
-  not numbered from an invented line 1.
+  corresponding file diff. Command and output panels use the same Code font size
+  preference, while retaining their denser line spacing. A multi-file Edit puts
+  the shared change-type icon immediately after each file path, shows that
+  file's additions and deletions at the right, and shows their total in the tool
+  header. A preview only shows file line numbers when the provider supplies a
+  structured patch with real offsets; string fragments are not numbered from an
+  invented line 1.
 - The spawn composer uploads attachments against its selected project. A
   desktop-native image paste that arrives before any project is selected is
   ignored; when selection restoration and paste overlap, the current project

@@ -30,9 +30,6 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   Sparkles,
-  SquareDot,
-  SquareMinus,
-  SquarePlus,
   SquareTerminal,
   TriangleAlert,
   Wrench,
@@ -82,6 +79,7 @@ import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { CommitCard } from './CommitCard'
 import { ChangeStats } from './ChangeStats'
+import { ChangeTypeIcon } from './ChangeTypeIcon'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -1998,6 +1996,11 @@ function automatedOrigin(origin?: MessageOrigin, reason?: MessageReason, sourceA
 const PANEL_CLASS =
   'rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a]'
 
+// Tool-card code is denser than a repository diff, but it follows the same Code
+// size preference. Keep its 16px base leading while stepping both dimensions
+// together so a larger code font never collides with the line above it.
+const CHAT_CODE_LEADING = 'leading-[calc(1rem_+_var(--app-font-code-step,_0px))]'
+
 // The send button's terracotta accent.
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 
@@ -2135,7 +2138,7 @@ function CodePanel({ code, lang, gutterDigits }: { code: string; lang: string; g
   )
   if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} gutterDigits={gutterDigits} />
 
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   if (marked != null) {
     return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
   }
@@ -2216,7 +2219,7 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
     () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
     [html, ws],
   )
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
   if (marked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
   const plain = stripAnsi(text) || '(no output)'
   const plainMarked = markWhitespaceText(plain, ws)
@@ -2463,7 +2466,7 @@ function ReviewContextPanel({ context, lang }: { context: string; lang: string }
     [rows, lang, ws],
   )
   return (
-    <div className="border-t border-stone-200 dark:border-white/[0.06] bg-white dark:bg-[#20201e] font-mono text-2xs leading-4 max-h-64 overflow-y-auto">
+    <div className={`border-t border-stone-200 dark:border-white/[0.06] bg-white dark:bg-[#20201e] font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-y-auto`}>
       {rows.map((row, i) => (
         <div
           key={i}
@@ -2625,13 +2628,18 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
-        const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
+        const stats = fileChangeCounts(diff, kind)
+        const changeType = kind === 'add' ? 'added' : kind === 'delete' ? 'removed' : 'modified'
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
             {showFileHeaders && (
               <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-50 px-2.5 py-1.5 dark:border-gray-700 dark:bg-gray-800">
-                <FilePathLabel path={path} className="flex-1 font-medium" />
-                <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
+                <FilePathLabel
+                  path={path}
+                  className="min-w-0 flex-1 font-medium"
+                  trailing={<ChangeTypeIcon type={changeType} />}
+                />
+                <ChangeStats additions={stats.additions} deletions={stats.deletions} className="ml-auto font-medium" />
               </div>
             )}
             {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} kind={kind} />}
@@ -2666,6 +2674,20 @@ export function fileChangeRows(diff: string, kind: string): EditRow[] {
   return hunks.length ? buildEditRows('', '', hunks) : buildEditRows(body, body)
 }
 
+// Counts are derived from the rows the preview actually renders, so malformed
+// or context-only input cannot claim changes the card does not show.
+// eslint-disable-next-line react-refresh/only-export-components -- exported for the focused parser test
+export function fileChangeCounts(diff: string, kind: string): { additions: number; deletions: number } {
+  return fileChangeRows(diff, kind).reduce(
+    (counts, row) => {
+      if (row.type === 'add') counts.additions++
+      if (row.type === 'del') counts.deletions++
+      return counts
+    },
+    { additions: 0, deletions: 0 },
+  )
+}
+
 function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
   // Parse into the model ordinary Edit tools use. This gives Codex previews the
   // repository diff's word pairing rather than a second approximation of it.
@@ -2695,7 +2717,7 @@ function DiffPreview({ rows, lang, framed = false }: { rows: EditRow[]; lang: st
   }, [rows, lang])
 
   return (
-    <div className={`max-h-64 overflow-auto bg-white py-1.5 dark:bg-gray-900 ${framed ? 'rounded-md border border-gray-200 dark:border-gray-700' : ''}`} data-copy-code>
+    <div className={`max-h-64 overflow-auto bg-white dark:bg-gray-900 ${framed ? 'rounded-md border border-gray-200 dark:border-gray-700' : ''}`} data-copy-code>
       {rows.map((row, i) => (
         row.type === 'gap' ? (
           <div key={i} className={`select-none border-y border-gray-200 px-2 font-mono text-gray-400 dark:border-gray-700 dark:text-gray-600 ${CODE_TEXT} ${CODE_LEADING}`}>...</div>
@@ -2745,7 +2767,7 @@ function GutterCodePanel({ nums, code, lang, gutterDigits }: { nums: string[]; c
           on one line. See lib/copyMarkdown. */}
       <div
         data-copy-code
-        className="grid grid-cols-[auto_1fr] text-2xs leading-4 font-mono"
+        className={`grid grid-cols-[auto_1fr] font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING}`}
         style={gutterDigits == null ? undefined : { gridTemplateColumns: `calc(${gutterDigits}ch + 1rem + 1px) minmax(0, 1fr)` }}
       >
         {nums.map((n, i) => (
@@ -3155,7 +3177,7 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
           (see lib/copyMarkdown). */}
       <div
         data-copy-code
-        className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}
+        className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING}`}
         style={gutter && gutterDigits != null
           ? { gridTemplateColumns: `calc(${gutterDigits}ch + 1rem + 1px) minmax(0, 1fr)` } as CSSProperties
           : undefined}
@@ -3309,7 +3331,7 @@ function parseMemory(raw: string): { reminder: string | null; yaml: string; body
 function MemoryPanel({ text }: { text: string }) {
   const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
   const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
-  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   return (
     <div className="space-y-2">
       {reminder && (
@@ -4021,6 +4043,18 @@ const ToolCard = memo(function ToolCard({
   const changedPaths = isFileChanges
     ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
     : []
+  const fileChangeTotals = isFileChanges
+    ? (input!.changes as unknown[]).reduce<{ additions: number; deletions: number }>((totals, raw) => {
+        if (!raw || typeof raw !== 'object') return totals
+        const change = raw as Record<string, unknown>
+        const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
+        const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
+        const counts = fileChangeCounts(typeof change.diff === 'string' ? change.diff : '', kind)
+        totals.additions += counts.additions
+        totals.deletions += counts.deletions
+        return totals
+      }, { additions: 0, deletions: 0 })
+    : null
   const summary = mem
     ? `memory ${mem}`
     : toolResult
@@ -4150,6 +4184,13 @@ const ToolCard = memo(function ToolCard({
           <span className="shrink-0 self-center text-3xs text-amber-600 dark:text-amber-400/90 animate-pulse">
             {awaitingApproval ? 'needs approval' : 'running'}
           </span>
+        )}
+        {fileChangeTotals && (
+          <ChangeStats
+            additions={fileChangeTotals.additions}
+            deletions={fileChangeTotals.deletions}
+            className="ml-auto font-medium"
+          />
         )}
         {open && (
           <button
