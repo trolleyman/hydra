@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation, useRouter } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState, useCallback, memo, type WheelEvent, type RefObject } from 'react'
 import { api } from '../stores/apiClient'
 import { ensureReviewConfig, selectProject as selectProjectById, useProjectStore, visibleProjects } from '../stores/projectStore'
@@ -33,6 +33,7 @@ import { SpawnForm } from '../components/SpawnForm'
 import { ProjectDropdown } from '../components/ProjectDropdown'
 import { ProjectPathLabel } from '../components/ProjectPathLabel'
 import { ResizeGrip } from '../components/ResizeGrip'
+import { DesktopHistoryControls } from '../components/DesktopHistoryControls'
 
 import { Dialog } from '../components/Dialog'
 import { Toaster } from '../components/Toaster'
@@ -283,6 +284,7 @@ function RootLayout() {
   const patchAgentStatus = useAgentStore((s) => s.patchAgentStatus)
   const showDialog = useDialogStore((s) => s.show)
   const navigate = useNavigate()
+  const router = useRouter()
   const location = useLocation()
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
@@ -992,6 +994,7 @@ function RootLayout() {
             )}
           </button>
         </Tooltip>
+        {desktopWindow && <DesktopHistoryControls history={router.history} />}
         <ProjectDropdown
           projects={projects}
           selectedId={currentProjectId}
