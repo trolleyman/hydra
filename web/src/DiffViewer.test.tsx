@@ -128,7 +128,7 @@ describe('diff sidebar path tooltips', () => {
 })
 
 // A whole-file (expanded) diff: 40 unchanged lines, a change, 40 more. The
-// reveal model shows CTX lines either side of the change and collapses the rest
+// reveal model shows the selected context either side of the change and collapses the rest
 // behind expanders, so the rendered row count is far below the line count.
 function wholeFile(): DiffFile {
   const lines: DiffLine[] = []
@@ -186,10 +186,10 @@ function windowedFile(): DiffFile {
   })
 }
 
-function renderBody(f: DiffFile, sideBySide: boolean) {
+function renderBody(f: DiffFile, sideBySide: boolean, currentContext = 3) {
   const { container } = render(
     <FileDiff
-      file={f} sideBySide={sideBySide} currentContext={3}
+      file={f} sideBySide={sideBySide} currentContext={currentContext}
       onComment={() => {}} onExpand={() => {}}
       isCollapsed={false} onToggleCollapse={() => {}}
     />,
@@ -242,8 +242,17 @@ describe('bodyShape matches what the body renders', () => {
   it('carries the label text of each expander, so a narrow pane can be measured', () => {
     const shape = bodyShape(wholeFile(), false, false, 3)
     // Leading and trailing edge expanders: one chevron each, both counting the
-    // 37 lines they hide (40 minus the CTX shown next to the change).
+    // 37 lines they hide (40 minus the 3 context lines shown next to the change).
     expect(shape).toMatchObject({ expanders: [{ buttons: 1, hidden: 37 }, { buttons: 1, hidden: 37 }] })
+  })
+
+  it('uses the selected context for whole-file rendering and measurement', () => {
+    const f = wholeFile()
+    const shape = bodyShape(f, false, false, 10)
+    const seen = renderBody(f, false, 10)
+    expect(rows(shape)).toBe(seen.unifiedCells)
+    expect(expanders(shape)).toBe(seen.expanders)
+    expect(shape).toMatchObject({ expanders: [{ buttons: 1, hidden: 30 }, { buttons: 1, hidden: 30 }] })
   })
 
   it('describes the fixed-height bodies', () => {

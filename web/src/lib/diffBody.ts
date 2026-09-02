@@ -10,6 +10,7 @@
 import type { DiffFile, DiffHunk, DiffLine } from '../api'
 import { isImagePath } from './imageDiff'
 import type { BodyShape, ExpanderShape, SbsPair } from './diffMetrics'
+import { DEFAULT_DIFF_CONTEXT_LINES } from './diffPrefs'
 
 export interface SideBySideLine {
   oldLineNum: number | null
@@ -129,10 +130,6 @@ export function atFileEnd(hunk: DiffHunk, totalLines: number | undefined, curren
   const tail = trailingGap(hunk, totalLines)
   return tail != null ? tail === 0 : trailingContext(hunk) < currentContext
 }
-
-// Default surrounding-context lines shown around each change (mirrors the git
-// `-U3` the diff is first fetched with).
-export const CTX = 3
 
 // An unchanged run that would hide this few lines behind an expander isn't worth
 // collapsing - a "··· 1 line ···" toggle saves no vertical space and just adds a
@@ -275,12 +272,16 @@ function findContextLine(lines: DiffLine[], from: number): DiffLine | undefined 
 // buildSegments turns a fully-fetched file (every line as a diff line) plus the
 // user's per-region reveal state into a flat list of render segments: runs of
 // visible lines interleaved with collapsed-region expanders. Each unchanged run
-// between (or around) changes shows `CTX` lines next to the change by default
+// between (or around) changes shows `contextLines` next to the change by default
 // and collapses the rest behind an expander; expanders that would hide nothing
 // (short gaps, the file's true top/bottom once fully revealed) are omitted, so
 // e.g. a 1-line gap simply renders the line and the top expander vanishes at
 // line 1 / the bottom expander at EOF.
-export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
+export function buildSegments(
+  fullLines: DiffLine[],
+  reveal: RevealMap,
+  contextLines: number = DEFAULT_DIFF_CONTEXT_LINES,
+): RenderSeg[] {
   const n = fullLines.length
   const runs: { change: boolean; s: number; e: number }[] = []
   let i = 0
@@ -303,8 +304,8 @@ export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderS
     const isTrail = ri === runs.length - 1
     const id = regionKey(fullLines[run.s])
     const ov = reveal.get(id)
-    const requestedTop = ov?.top ?? (isLead ? 0 : CTX)
-    const requestedBot = ov?.bot ?? (isTrail ? 0 : CTX)
+    const requestedTop = ov?.top ?? (isLead ? 0 : contextLines)
+    const requestedBot = ov?.bot ?? (isTrail ? 0 : contextLines)
     // During the expander's exit, preserve the already-visible lines on the
     // opposite side instead of merging the entire run into the growing side.
     // Otherwise that small opposite segment unmounts immediately and creates a
@@ -394,7 +395,7 @@ export function bodyShape(file: DiffFile, sideBySide: boolean, isHidden: boolean
   const runs: DiffLine[][] = []
   const expanders: ExpanderShape[] = []
   if (whole) {
-    for (const seg of buildSegments(all, NO_REVEAL)) {
+    for (const seg of buildSegments(all, NO_REVEAL, currentContext)) {
       // A gap sits between two changes and offers both directions; the file's
       // leading/trailing edges only offer one.
       if (seg.kind === 'lines') runs.push(seg.lines!)
