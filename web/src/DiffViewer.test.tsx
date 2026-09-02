@@ -163,6 +163,8 @@ describe('file header metadata', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Syntax highlighting: TypeScript' }))
+    expect(screen.queryByText(/Detected:/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Use the filename and shebang')).not.toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('Search languages, aliases, extensions'), { target: { value: '.libsonnet' } })
     fireEvent.click(screen.getByRole('button', { name: /Jsonnet/ }))
     expect(screen.getByRole('button', { name: 'Syntax highlighting: Jsonnet' })).toBeInTheDocument()

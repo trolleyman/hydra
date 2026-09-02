@@ -93,9 +93,8 @@ export function LanguagePicker({ detected, selected, onSelect }: {
               onClick={() => choose(null)}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors duration-100"
             >
-              <span className="min-w-0 flex-1">
-                <span className="block text-xs font-medium text-gray-700 dark:text-gray-200">Detected: {languageDisplayName(detected)}</span>
-                <span className="block text-[10px] text-gray-400">Use the filename and shebang</span>
+              <span className="min-w-0 flex-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                {languageDisplayName(detected)}
               </span>
               {selected == null && <Check className="h-3.5 w-3.5 text-blue-500" />}
             </button>
