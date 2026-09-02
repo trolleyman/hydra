@@ -64,7 +64,7 @@ import { agentFileUrl, uploadFile, extractFiles, hasFilePayload, isImageFile } f
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
-import { useAutoPairStore, usePasteMarkersStore, useSpellcheckStore } from '../lib/composerPrefs'
+import { useAutoPairStore, useEnterSendsStore, usePasteMarkersStore, useSpellcheckStore } from '../lib/composerPrefs'
 import { fenceEnterEdit } from '../lib/autoPair'
 import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
@@ -125,6 +125,8 @@ import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
 import { historyThresholdTransition, isVerticalScrollbarPointer } from '../lib/chatScroll'
 import { useFeatureFlagsStore } from '../lib/featureFlags'
+
+const isMacPlatform = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -7296,6 +7298,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
+  // Enter sends by default. The Browser setting flips unmodified Enter back to
+  // a newline and makes Cmd/Ctrl+Enter the explicit send shortcut.
+  const enterSends = useEnterSendsStore((s) => s.enabled)
+  const sendShortcutKeys = enterSends ? ['Enter'] : isMacPlatform ? ['Cmd', 'Enter'] : ['Ctrl', 'Enter']
   // Whether the composer auto-pairs (a Browser setting, default on). The shared
   // textarea applies the rules itself; this composer needs the flag because it
   // owns Enter (which sends), so the fence-body step is its call to make.
@@ -10498,10 +10504,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setSlashDismissed(false)
   }
 
-  // Ctrl+Enter / Alt+Enter insert a newline explicitly (plain Enter sends), so
-  // they carry the same markdown list continuation the shared textarea handler
-  // gives Shift+Enter - the box shouldn't behave differently depending on which
-  // newline key you reached for.
+  // Explicit newline shortcuts carry the same markdown list continuation the
+  // shared textarea handler gives an ordinary multiline Enter.
   function insertNewline(ta: HTMLTextAreaElement) {
     const start = ta.selectionStart ?? input.length
     const end = ta.selectionEnd ?? input.length
@@ -10615,14 +10619,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
       }
-      // Shift+Enter is the browser's native newline; Ctrl+Enter and Alt+Enter
-      // insert one too (item 7) - they'd otherwise do nothing.
-      if (e.altKey || (e.ctrlKey && !e.metaKey)) {
+      // Shift+Enter always inserts a newline. Alt+Enter remains a newline too.
+      // With "Enter sends" off, an unmodified Enter inserts one as well.
+      if (e.shiftKey || e.altKey || (!enterSends && !e.metaKey && !e.ctrlKey)) {
         e.preventDefault()
         insertNewline(e.currentTarget)
         return
       }
-      if (!e.shiftKey && !e.metaKey) {
+      // Enter sends by default, with or without Cmd/Ctrl. When the preference
+      // is off, only Cmd/Ctrl+Enter reaches this branch.
+      if (enterSends || e.metaKey || e.ctrlKey) {
         e.preventDefault()
         send()
       }
@@ -11501,13 +11507,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   ~0.7px (half the cap-height difference between 10px and 12px)
                   and the buttons centre on the same ink the text does. */}
               <div className="ml-auto flex items-center gap-1.5">
-                {/* Item 6: surface what Enter will do only when it isn't the
-                    obvious thing - i.e. the message will queue, draining into
-                    the running turn at its next step (terminal-style
-                    steering); otherwise show nothing. */}
+                {/* Item 6: surface what the configured send shortcut will do
+                    only when it isn't the obvious thing - i.e. the message will
+                    queue, draining into the running turn at its next step
+                    (terminal-style steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
                   <span className="hidden select-none sm:inline">
-                    <ShortcutHint keys={['Enter']} note="to queue" />
+                    <ShortcutHint keys={sendShortcutKeys} note="to queue" />
                   </span>
                 )}
                 {/* Context-left chip (item 40): how much of the model's window
@@ -11597,7 +11603,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
-                <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: ['Enter'] }} side="top">
+                <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: sendShortcutKeys }} side="top">
                   <button
                     onClick={() => send()}
                     disabled={!canSend}

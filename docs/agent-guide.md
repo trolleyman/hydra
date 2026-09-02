@@ -77,6 +77,10 @@ attachment list. Upload queues reserve each filename synchronously, before a
 React render, because desktop clipboard events can arrive back-to-back in one
 batched turn.
 
+The chat composer sends with Enter by default. Its browser-local "Enter sends"
+setting gives Enter back to multiline editing; in that mode Cmd/Ctrl+Enter sends.
+Shift+Enter always adds a newline in either mode.
+
 ## Conventions
 
 ### No compatibility layers by default

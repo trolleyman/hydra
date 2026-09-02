@@ -100,6 +100,10 @@ export const StorageKeys = {
   // (image / large text) into a composer also inserts its "[filename]" at the
   // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
   pasteMarkers: 'hydra-paste-markers',
+  // '0' when Enter should add a newline in the chat composer, leaving
+  // Cmd/Ctrl+Enter as send. Absent/'1' = Enter sends (the default). Shift+Enter
+  // always adds a newline. See lib/composerPrefs.ts + AgentChat.
+  enterSends: 'hydra-enter-sends',
   // '0' when the user turned OFF auto-pairing in the composers: typing an opener
   // (` ( [ { " ') inserts its closer, Enter on a "```" line opens a fenced
   // block, and a mark typed over a selection wraps it. Absent/'1' = on (the default). See

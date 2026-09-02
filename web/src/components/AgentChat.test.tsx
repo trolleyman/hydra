@@ -7,6 +7,7 @@ import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
+import { useEnterSendsStore } from '../lib/composerPrefs'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -56,9 +57,13 @@ class FakeWebSocket {
 // The same socket, but reachable from the test so it can push chat frames in.
 const sockets: RecordingWebSocket[] = []
 class RecordingWebSocket extends FakeWebSocket {
+  sent: string[] = []
   constructor(url: string) {
     super(url)
     sockets.push(this)
+  }
+  override send(data: string) {
+    this.sent.push(data)
   }
   emit(frame: unknown) {
     this.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent)
@@ -415,8 +420,43 @@ describe('composer status and actions', () => {
   afterAll(() => vi.unstubAllGlobals())
   afterEach(() => {
     sockets.length = 0
+    useEnterSendsStore.getState().setEnabled(true)
     localStorage.clear()
     useAgentStore.setState({ agents: [] })
+  })
+
+  it('sends with Enter and Cmd/Ctrl+Enter by default while Shift+Enter adds a newline', async () => {
+    renderChat()
+    const ta = await connectedComposer()
+    const ws = sockets[0]
+
+    fireEvent.change(ta, { target: { value: 'plain' } })
+    fireEvent.keyDown(ta, { key: 'Enter' })
+    expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'plain' }] })
+
+    fireEvent.change(ta, { target: { value: 'modified' } })
+    fireEvent.keyDown(ta, { key: 'Enter', metaKey: true })
+    expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'modified' }] })
+
+    fireEvent.change(ta, { target: { value: 'two' } })
+    fireEvent.keyDown(ta, { key: 'Enter', shiftKey: true })
+    expect(ta).toHaveValue('two\n')
+  })
+
+  it('flips Enter to newline and Cmd/Ctrl+Enter to send when Enter sends is off', async () => {
+    useEnterSendsStore.getState().setEnabled(false)
+    renderChat()
+    const ta = await connectedComposer()
+    const ws = sockets[0]
+
+    fireEvent.change(ta, { target: { value: 'first line' } })
+    fireEvent.keyDown(ta, { key: 'Enter' })
+    expect(ta).toHaveValue('first line\n')
+    expect(ws.sent).toHaveLength(0)
+
+    fireEvent.change(ta, { target: { value: 'send this' } })
+    fireEvent.keyDown(ta, { key: 'Enter', ctrlKey: true })
+    expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'send this' }] })
   })
 
   it('offers Send when the reviewer finishes even if the owning head is running', async () => {
