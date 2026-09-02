@@ -203,8 +203,13 @@ export function AutomaticRunsSelect({
       <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
         Automatic runs
         <InfoTooltip title="Automatic runs">
-          <p><strong>Always</strong> starts a missing {item} when viewed. <strong>When agent settles</strong> starts it when the agent stops working, never because you viewed it. <strong>Never</strong> does not start automatically.</p>
-          <p className="mt-1.5">Cached {cached} are still shown in every mode, and Refresh always runs immediately.{kind === 'tests' ? ' Merge and publish workflows also run missing tests when they require a current verdict.' : ''}</p>
+          <ul className="list-disc space-y-1.5 pl-4">
+            <li><strong>Always:</strong> Viewing starts a missing {item}.</li>
+            <li><strong>When agent settles:</strong> A missing {item} starts when the agent stops working. Viewing does not start it.</li>
+            <li><strong>Never:</strong> Nothing starts automatically. Viewing does not start it.</li>
+            <li><strong>Every mode:</strong> Cached {cached} remain visible, and Refresh starts the {item} immediately.</li>
+            {kind === 'tests' && <li><strong>Merge and publish:</strong> A workflow that needs a current verdict starts missing tests in every mode.</li>}
+          </ul>
         </InfoTooltip>
       </label>
       <select

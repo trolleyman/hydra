@@ -6,23 +6,29 @@ This doc covers how Hydra ingests and renders a project's `[tests.<name>]` runne
 output. You only need it when touching `internal/tests`, the tests panel
 (`web/src`), or a project's test-runner config.
 
-Each runner may set `auto_run = "always"` (the default), `"settled"` (start when
-the agent transitions out of active work), or `"never"` (do not start
-automatically). Opening the agent or Tests card starts missing work only in
-`"always"` mode; it is a passive cache read for `"settled"` and `"never"`.
-Cached verdicts remain visible in every mode, and Refresh always runs
-immediately. A workflow that requires a current verdict - direct merge,
-merge-when-green, or publish/push-when-green - also starts missing test runs in
-every mode. Thus `"never"` means never automatically, not never when explicitly
-required by an action.
+Each runner sets `auto_run` to one of these modes:
+
+| Mode | Automatic behavior | When viewed |
+| ---- | ------------------ | ----------- |
+| `"always"` (default) | Hydra may start a missing run proactively. | A missing run starts. |
+| `"settled"` | A missing run starts when the agent transitions out of active work. | No run starts; Hydra only reads the cache. |
+| `"never"` | No run starts automatically. | No run starts; Hydra only reads the cache. |
+
+Explicit actions apply in every mode:
+
+- Refresh starts the run immediately.
+- Direct merge starts missing runs and waits for their verdicts.
+- Merge-when-green and publish/push-when-green start missing runs because they
+  require current verdicts.
+- Cached verdicts remain visible.
 
 `test_concurrency` limits the number of runner commands Hydra starts at once. It
 does not limit parallel workers created inside one command, so resource-heavy
 runners should cap both layers. On a development laptop, a practical low-load
 configuration is `test_concurrency = 1`, `go test -p 2`, and `vitest
---maxWorkers=2`. Set `test_prefetch = false` to generate verdicts only when the
-tests UI or merge flow requests them; use `auto_run = "never"` for a runner that
-should run only after an explicit Refresh.
+--maxWorkers=2`. Set `test_prefetch = false` to disable proactive verdict
+generation. Set `auto_run = "never"` when only explicit actions such as Refresh,
+merge, or publish start a runner.
 
 The primary Merge action preflights the per-runner endpoint before opening its
 normal confirmation. The preflight is passive for `"settled"` and `"never"`, so
