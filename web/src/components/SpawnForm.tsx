@@ -160,14 +160,40 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const Row = ({ a, m }: { a: AgentTypeOption; m: AgentModel }) => {
     const selected = agent === a && model === m.id
     return (
-      <button
-        type="button"
-        onClick={() => { onChange(a, m.id); setOpen(false) }}
-        className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
-      >
-        <span className={m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}>{m.label}</span>
-        {selected && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
-      </button>
+      <div data-selected-model-row={selected || undefined} className={selected ? 'bg-gray-50/70 dark:bg-gray-700/20' : ''}>
+        <button
+          type="button"
+          onClick={() => { onChange(a, m.id); setOpen(false) }}
+          className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+        >
+          <span className={m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}>{m.label}</span>
+          {selected && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
+        </button>
+        {selected && supportsEffort && (
+          <div className="ml-8 mr-2 border-l-2 border-violet-200 pb-2 pl-2 dark:border-violet-500/25">
+            <div className="mb-1.5 text-2xs font-semibold text-gray-500 dark:text-gray-400">Thinking</div>
+            <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Thinking effort">
+              {THINKING_EFFORTS.map((option) => (
+                <button
+                  key={option.id || 'default'}
+                  type="button"
+                  role="radio"
+                  aria-checked={effort === option.id}
+                  onClick={() => { onEffortChange(option.id); setOpen(false) }}
+                  className={`rounded-md border px-1 py-1 text-3xs font-medium transition-colors cursor-pointer ${
+                    effort === option.id
+                      ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-200'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-700/60'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[9px] leading-snug text-gray-400 dark:text-gray-500">{effortOption.desc}</p>
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -217,30 +243,6 @@ const AgentModelPicker = memo(function AgentModelPicker({
               </div>
               <Row a={a.id} m={{ id: '', label: 'Default' }} />
               {AGENT_MODELS[a.id].map((m) => <Row key={m.id} a={a.id} m={m} />)}
-              {a.id === agent && supportsEffort && (
-                <div className="mx-2 mt-1 border-t border-gray-100 px-1 pb-1.5 pt-2 dark:border-gray-700">
-                  <div className="mb-1.5 text-2xs font-semibold text-gray-500 dark:text-gray-400">Thinking effort</div>
-                  <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Thinking effort">
-                    {THINKING_EFFORTS.map((option) => (
-                      <button
-                        key={option.id || 'default'}
-                        type="button"
-                        role="radio"
-                        aria-checked={effort === option.id}
-                        onClick={() => { onEffortChange(option.id); setOpen(false) }}
-                        className={`rounded-md border px-1.5 py-1 text-3xs font-medium transition-colors cursor-pointer ${
-                          effort === option.id
-                            ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-200'
-                            : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-700/60'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-1.5 text-3xs leading-snug text-gray-400 dark:text-gray-500">{effortOption.desc}</p>
-                </div>
-              )}
             </div>
           ))}
         </div>,

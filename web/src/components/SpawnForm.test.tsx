@@ -101,6 +101,7 @@ describe('SpawnForm desktop attachments', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Agent and model: Claude' }))
     const effortChoices = await screen.findByRole('radiogroup', { name: 'Thinking effort' })
+    expect(document.querySelector('[data-selected-model-row="true"]')).toContainElement(effortChoices)
     expect(effortChoices).toContainElement(screen.getByRole('radio', { name: 'Default' }))
 
     fireEvent.click(screen.getByRole('radio', { name: 'High' }))
