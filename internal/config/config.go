@@ -556,9 +556,10 @@ type ArtifactScript struct {
 	// guaranteed-pristine tree. Default false.
 	CleanIgnored bool `toml:"clean_ignored"`
 	// AutoRun controls when a missing artifact generation starts automatically:
-	// "always" (or empty) preserves the historical behavior, "settled" waits
-	// until the agent is no longer actively working, and "never" requires an
-	// explicit refresh. Cached generations are returned in every mode.
+	// "always" (or empty) may start on view, "settled" starts on the transition
+	// out of active work, and "never" requires an explicit refresh/retry. Viewing
+	// is passive in the latter two modes. Cached generations are returned in every
+	// mode.
 	AutoRun AutoRunMode `toml:"auto_run"`
 	// Enabled gates whether the diff viewer runs this script. nil or true means
 	// active; false means it is skipped entirely. nil is the default so configs
@@ -1036,7 +1037,8 @@ type Config struct {
 	// working tree stops changing, so they are ready the instant the user opens the
 	// panel. Turn it off for a project whose generators are too heavy to run
 	// speculatively: foreground generation (on open) and the concurrency cap above
-	// still apply. nil/absent = enabled.
+	// still apply for "always" scripts, while other policies require an explicit
+	// retry. nil/absent = enabled.
 	ArtifactPrefetch *bool `toml:"artifact_prefetch"`
 	// TestConcurrency caps how many test-runner generations run at once, like
 	// ArtifactConcurrency. nil/absent = DefaultTestConcurrency; 0 = unlimited.
@@ -1054,8 +1056,9 @@ type Config struct {
 	// internal/http/tests_prefetch.go). When on (the default) a head's verdict is
 	// kept fresh in the background so it is ready the instant the user opens the
 	// tests panel or the merge gate runs. Turn it off for a project whose suites are
-	// too heavy to run speculatively: foreground runs (on open / at merge) and the
-	// concurrency cap above still apply. nil/absent = enabled.
+	// too heavy to run speculatively: "always" may still run on open, and explicit
+	// refresh/merge/publish workflows may run any mode. The concurrency cap above
+	// still applies. nil/absent = enabled.
 	TestPrefetch *bool `toml:"test_prefetch"`
 	// Review configures how Hydra talks to a forge (GitHub/GitLab) and supplies
 	// defaults for the Create MR dialog (docs/non-local-integration.md). nil = unset
@@ -2846,8 +2849,9 @@ func artifactsDocLines() []string {
 		docPrefix + "                a pristine checkout (git clean -fdx) instead of the default that keeps",
 		docPrefix + "                dependency/build caches warm (-fd). Slower; set true only if stale",
 		docPrefix + "                ignored output can leak between commits (default false).",
-		docPrefix + `   auto_run     "always" (default), "settled" (wait while agent works), or "never"`,
-		docPrefix + "                (Refresh only). Cached artifacts still display in every mode.",
+		docPrefix + `   auto_run     "always" (default; may start on view), "settled" (starts when the`,
+		docPrefix + `                agent rests, never on view), or "never" (no automatic start). Refresh`,
+		docPrefix + "                and explicit retries still run any mode; cached artifacts still display.",
 		docPrefix + "   strict       run the command under `set -eo pipefail` so a failing step aborts",
 		docPrefix + "                and propagates instead of being swallowed (default true; set false",
 		docPrefix + "                to run the command exactly as written).",
@@ -3192,8 +3196,9 @@ func testsDocLines() []string {
 		docPrefix + "   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;",
 		docPrefix + "                only for trusted refs (default false).",
 		docPrefix + "   clean_ignored  also delete git-ignored files before each run (default false).",
-		docPrefix + `   auto_run     "always" (default), "settled" (wait while agent works), or "never"`,
-		docPrefix + "                (Refresh only). Cached verdicts still display in every mode.",
+		docPrefix + `   auto_run     "always" (default; may start on view), "settled" (starts when the`,
+		docPrefix + `                agent rests, never on view), or "never" (no automatic start). Refresh`,
+		docPrefix + "                and merge/publish workflows still run any mode; cached verdicts display.",
 		docPrefix + "   strict       run the command under `set -eo pipefail` (default true). Note: a",
 		docPrefix + "                runner exiting non-zero because tests FAILED is a valid verdict,",
 		docPrefix + "                not a strict abort - strict only governs the shell pipeline.",
@@ -4259,7 +4264,7 @@ func emitTestPrefetch(out *[]string, prefetch *bool, keyComments map[string][]st
 	if uc := keyComments["\x00test_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+` re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).`)
+	*out = append(*out, docPrefix+` re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to disable proactive work ("always" may still start on view, and merge/publish workflows may require any mode). The concurrency cap still applies (default true).`)
 	if prefetch != nil {
 		*out = append(*out, fmt.Sprintf("test_prefetch = %t", *prefetch))
 	} else {
@@ -4290,7 +4295,7 @@ func emitArtifactPrefetch(out *[]string, prefetch *bool, keyComments map[string]
 	if uc := keyComments["\x00artifact_prefetch"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+` pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to generate only when viewing - foreground generation and the concurrency cap still apply (default true).`)
+	*out = append(*out, docPrefix+` pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to disable proactive work ("always" may still start on view, while other modes require an explicit retry). The concurrency cap still applies (default true).`)
 	if prefetch != nil {
 		*out = append(*out, fmt.Sprintf("artifact_prefetch = %t", *prefetch))
 	} else {
