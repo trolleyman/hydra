@@ -314,6 +314,121 @@ func TestControllerReadsHistoryBeforeQueuedResumeTurn(t *testing.T) {
 	}
 }
 
+func TestControllerRepairsInterruptedToolTurnBeforeResume(t *testing.T) {
+	var sent []map[string]any
+	var recovered [][]byte
+	c := New(Options{ConversationID: "thr-old", OnHistoryLine: func(line []byte) { recovered = append(recovered, line) }, Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[]}}`))
+	if err := c.SendText("Continue"); err != nil {
+		t.Fatal(err)
+	}
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-old"}}}`))
+	c.OnLine([]byte(`{"id":4,"result":{"thread":{"historyMode":"paginated","turns":[{"id":"settled","status":"completed","items":[{"id":"old","type":"agentMessage","text":"done"}]},{"id":"broken","status":"interrupted","items":[{"id":"user","type":"userMessage","content":[{"type":"text","text":"Fix the bug"}]},{"id":"call","type":"dynamicToolCall","tool":"exec","status":"inProgress"}]}]}}}`))
+
+	if len(recovered) != 1 || !strings.Contains(string(recovered[0]), `"id":"old"`) {
+		t.Fatalf("recovered history = %q", recovered)
+	}
+	last := sent[len(sent)-1]
+	if last["method"] != "thread/revert" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	params := last["params"].(map[string]any)
+	if params["threadId"] != "thr-old" || params["beforeTurnId"] != "broken" {
+		t.Fatalf("revert params = %+v", params)
+	}
+
+	// The replacement turn starts only after Codex confirms the malformed turn
+	// was removed, and carries both the original task and Hydra's resume nudge.
+	c.OnLine([]byte(`{"id":5,"result":{"thread":{"id":"thr-old"}}}`))
+	last = sent[len(sent)-1]
+	if last["method"] != "turn/start" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	turnParams := last["params"].(map[string]any)
+	input := turnParams["input"].([]any)
+	first := input[0].(map[string]any)
+	second := input[1].(map[string]any)
+	if len(input) != 2 || first["text"] != "Fix the bug" || second["text"] != "Continue" {
+		t.Fatalf("recovery input = %+v", input)
+	}
+}
+
+func TestControllerFallsBackToRollbackForInterruptedLegacyTurn(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{ConversationID: "thr-old", Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[]}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-old"}}}`))
+	c.OnLine([]byte(`{"id":4,"result":{"thread":{"historyMode":"legacy","turns":[{"id":"broken","status":"inProgress","items":[]}]}}}`))
+
+	last := sent[len(sent)-1]
+	if last["method"] != "thread/rollback" {
+		t.Fatalf("sent = %+v", sent)
+	}
+	params := last["params"].(map[string]any)
+	if params["threadId"] != "thr-old" || params["numTurns"] != float64(1) {
+		t.Fatalf("rollback params = %+v", params)
+	}
+}
+
+func TestControllerFallsBackWhenRevertIsUnsupported(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{ConversationID: "thr-old", Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[]}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-old"}}}`))
+	c.OnLine([]byte(`{"id":4,"result":{"thread":{"historyMode":"paginated","turns":[{"id":"broken","status":"inProgress","items":[]}]}}}`))
+	if sent[len(sent)-1]["method"] != "thread/revert" {
+		t.Fatalf("sent = %+v", sent)
+	}
+
+	c.OnLine([]byte(`{"id":5,"error":{"code":-32601,"message":"Method not found"}}`))
+	last := sent[len(sent)-1]
+	if last["method"] != "thread/rollback" {
+		t.Fatalf("sent = %+v", sent)
+	}
+}
+
+func TestControllerKeepsCompletedTurnWithInProgressPlan(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{ConversationID: "thr-old", Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[]}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr-old"}}}`))
+	c.OnLine([]byte(`{"id":4,"result":{"thread":{"turns":[{"id":"done","status":"completed","items":[{"id":"plan","type":"plan","status":"inProgress"}]}]}}}`))
+
+	for _, message := range sent {
+		if message["method"] == "thread/revert" || message["method"] == "thread/rollback" {
+			t.Fatalf("completed plan turn was repaired: %+v", sent)
+		}
+	}
+}
+
 func TestControllerRespondsToUserInputRequest(t *testing.T) {
 	var sent []map[string]any
 	var history [][]byte
