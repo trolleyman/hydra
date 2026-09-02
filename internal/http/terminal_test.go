@@ -3,6 +3,8 @@ package http
 import (
 	"net/http"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/heads"
 )
 
 func TestCheckOrigin(t *testing.T) {
@@ -65,6 +67,45 @@ func TestCheckOriginSameHost(t *testing.T) {
 			r.Header.Set("Origin", tt.origin)
 			if got := checkOrigin(r); got != tt.allow {
 				t.Errorf("checkOrigin(host=%q, origin=%q) = %v, want %v", tt.host, tt.origin, got, tt.allow)
+			}
+		})
+	}
+}
+
+func TestHeadCanHostSession(t *testing.T) {
+	worktree := "/tmp/hydra-worktree"
+	branch := "hydra/test"
+	tests := []struct {
+		name string
+		head heads.Head
+		want bool
+	}{
+		{
+			name: "live worktree head",
+			head: heads.Head{Branch: &branch, Worktree: &worktree},
+			want: true,
+		},
+		{
+			name: "degraded worktree head",
+			head: heads.Head{Branch: &branch},
+			want: false,
+		},
+		{
+			name: "live project-directory head",
+			head: heads.Head{ProjectPath: "/tmp/hydra-project"},
+			want: true,
+		},
+		{
+			name: "archived project-directory head",
+			head: heads.Head{ProjectPath: "/tmp/hydra-project", Archived: true},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := headCanHostSession(tt.head); got != tt.want {
+				t.Fatalf("headCanHostSession() = %v, want %v", got, tt.want)
 			}
 		})
 	}
