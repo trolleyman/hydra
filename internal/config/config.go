@@ -104,10 +104,10 @@ const codexBashDescriptionPrompt = "## Bash tool descriptions\n" +
 	"- Start each non-trivial shell command with a concise comment describing its purpose, on its own first line: `# Inspect the usage handlers`. Hydra shows that comment as the Bash tool card description.\n"
 
 const shellSectionPrompt = "## Bash output sections\n" +
-	"- Hydra renders a constant `printf '%s\\n' '--- [text] <text> ---'`, `printf '%s\\n' '--- [file] <path> ---'`, or `printf '%s\\n' '--- [dir] <path> ---'` as a compact ruled heading. A constant `echo` with the same marker is accepted, but `printf` is the predictable spelling across shells.\n" +
-	"- When one Bash call prints multiple file or directory sections, put the typed marker immediately before every command that produces a section, including the first. It introduces the following output; do not treat it as a separator appended to the previous command. Keep file reads bounded so the marker and its output stay together if a provider truncates a long result.\n" +
-	"- The value after the type is rendered exactly as written. `file` and `dir` select file-path and directory-path presentation; `text` is an ordinary heading. Keep it static, quoted, and on one line.\n" +
-	"- For a Bash call with only one output section, do not print a marker when its command already identifies the file or its rows identify their own file and line, such as one `sed` read or `rg -n`.\n"
+	"- Hydra renders a constant `printf '%s\\n' '--- <text> ---'`, `printf '%s\\n' '--- [file] <path> ---'`, or `printf '%s\\n' '--- [dir] <path> ---'` as a compact ruled heading. A constant `echo` with the same marker is accepted, but `printf` is the predictable spelling across shells.\n" +
+	"- When one Bash call prints multiple file or directory sections, put the appropriate marker immediately before every command that produces a section, including the first. It introduces the following output; do not treat it as a separator appended to the previous command. Keep file reads bounded so the marker and its output stay together if a provider truncates a long result.\n" +
+	"- The untyped form is an ordinary text heading. `file` and `dir` select file-path and directory-path presentation. The value is rendered exactly as written; keep it static, quoted, and on one line.\n" +
+	"- Do not print a marker when the command already identifies the file or its rows carry their own file boundaries, such as one `sed` read, `rg -n`, or `git diff`.\n"
 
 // DefaultResumePrompt is the message Hydra types into an agent that was
 // actively working when the daemon restarted, so it resumes its task rather

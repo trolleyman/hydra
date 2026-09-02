@@ -24,15 +24,21 @@ func TestDefaultPrePromptRequiresStructuredQuestions(t *testing.T) {
 
 func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 	prompt := BuildFinalPrePrompt(Config{}, string(sandbox.AgentTypeClaude))
-	for _, command := range []string{"--- [text] <text> ---", "--- [file] <path> ---", "--- [dir] <path> ---"} {
+	for _, command := range []string{"--- <text> ---", "--- [file] <path> ---", "--- [dir] <path> ---"} {
 		if !strings.Contains(prompt, command) {
 			t.Errorf("final pre-prompt does not document %q", command)
 		}
+	}
+	if strings.Contains(prompt, "--- [text]") {
+		t.Error("final pre-prompt still asks agents to tag ordinary text headings")
 	}
 	for _, guidance := range []string{"immediately before every command", "including the first", "Keep file reads bounded"} {
 		if !strings.Contains(prompt, guidance) {
 			t.Errorf("final pre-prompt does not document output-section guidance %q", guidance)
 		}
+	}
+	if !strings.Contains(prompt, "`git diff`") {
+		t.Error("final pre-prompt does not tell agents that unified diffs need no marker")
 	}
 }
 

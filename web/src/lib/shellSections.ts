@@ -1058,8 +1058,16 @@ function classifyKind(p: Pipeline): ScriptStep {
   if (echo !== null && !trimmedFrom && !filtered && !sliced) {
     if (echo.trim().length < MIN_MARKER_LEN) return { kind: 'echo', text: echo }
     const typed = /^--- \[(text|file|dir)\] (.+) ---$/.exec(echo)
-    return typed
-      ? { kind: 'marker', text: echo, section: { kind: typed[1] as OutputSectionKind, label: typed[2] } }
+    if (typed) {
+      return { kind: 'marker', text: echo, section: { kind: typed[1] as OutputSectionKind, label: typed[2] } }
+    }
+    // Text is the default section kind, so its canonical spelling needs no
+    // `[text]` tag. Give it the same structural identity and ambiguity checks
+    // as the explicitly typed file/dir forms; `[text]` remains accepted above
+    // for old prompts and transcripts.
+    const text = /^--- (.+) ---$/.exec(echo)
+    return text
+      ? { kind: 'marker', text: echo, section: { kind: 'text', label: text[1] } }
       : { kind: 'marker', text: echo }
   }
 
@@ -1843,7 +1851,7 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     }, 0)
     let at = total != null && matchesAt(lines, pos + total, expected) ? pos + total : -1
     if (at < 0 && step.section) {
-      // A typed marker is structural only when it has one possible origin. If
+      // A section marker is structural only when it has one possible origin. If
       // file content contains the same canonical line, keep the whole stretch
       // literal instead of guessing which occurrence printf printed.
       const candidates: number[] = []

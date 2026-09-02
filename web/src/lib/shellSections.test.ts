@@ -25,14 +25,20 @@ describe('parseScriptSteps', () => {
 
   it('takes a constant printf line as a marker', () => {
     expect(steps("printf '%s\\n' '--- run log ---'\ncat a.go")[0]).toEqual({
-      kind: 'marker', text: '--- run log ---',
+      kind: 'marker', text: '--- run log ---', section: { kind: 'text', label: 'run log' },
     })
     expect(steps(`printf "%s\\n" "--- context ---"\ncat a.go`)[0]).toEqual({
-      kind: 'marker', text: '--- context ---',
+      kind: 'marker', text: '--- context ---', section: { kind: 'text', label: 'context' },
     })
   })
 
-  it('reads typed output headings without changing their labels', () => {
+  it('reads output headings without changing their labels', () => {
+    expect(steps("printf '%s\\n' '--- lowercase diagnostics ---'")[0]).toEqual({
+      kind: 'marker',
+      text: '--- lowercase diagnostics ---',
+      section: { kind: 'text', label: 'lowercase diagnostics' },
+    })
+    // The old explicit text spelling remains valid for existing transcripts.
     expect(steps("printf '%s\\n' '--- [text] lowercase diagnostics ---'")[0]).toEqual({
       kind: 'marker',
       text: '--- [text] lowercase diagnostics ---',
@@ -777,11 +783,11 @@ describe('splitScriptOutput', () => {
     ].join('\n')
 
     expect(splitScriptOutput(steps(script), output)?.map((section) => [section.kind, section.lines])).toEqual([
-      ['marker', ['--- run log ---']],
+      ['section', ['--- run log ---']],
       ['view', ['run line']],
-      ['marker', ['--- context ---']],
+      ['section', ['--- context ---']],
       ['view', ['context line']],
-      ['marker', ['--- Hydra log window ---']],
+      ['section', ['--- Hydra log window ---']],
       ['view', ['log one', 'log two']],
     ])
   })
@@ -882,12 +888,14 @@ describe('splitScriptOutput', () => {
     ])
   })
 
-  it('does not guess which duplicate typed marker came from printf', () => {
-    const script = "cat notes.txt\nprintf '%s\\n' '--- [text] repeated ---'\nmage build"
-    const output = 'before\n--- [text] repeated ---\nafter\n--- [text] repeated ---\nbuild output'
-    const sections = splitScriptOutput(steps(script), output)
+  it('does not guess which duplicate section marker came from printf', () => {
+    for (const marker of ['--- repeated ---', '--- [text] repeated ---']) {
+      const script = `cat notes.txt\nprintf '%s\\n' '${marker}'\nmage build`
+      const output = `before\n${marker}\nafter\n${marker}\nbuild output`
+      const sections = splitScriptOutput(steps(script), output)
 
-    expect(sections?.some((section) => section.kind === 'section')).not.toBe(true)
+      expect(sections?.some((section) => section.kind === 'section'), marker).not.toBe(true)
+    }
   })
 
   it('keeps a shortened sed gutter between numbered rg results', () => {
