@@ -64,6 +64,11 @@ Results are cached per commit under
 `<state-dir>/projects/<project-id>/artifacts/out/<name>/<version-key>`, so
 re-viewing a diff is free.
 
+Commit-side generations reuse a bounded pool of warm detached worktrees. On
+daemon startup, stale slot, legacy checkout, and copy-on-write directories are
+renamed out of their live paths atomically, then recursively reclaimed in the
+background. Large dependency trees therefore do not delay the HTTP listener.
+
 ## Streaming outputs (`::hydra:artifact::`)
 
 By default every output is collected when the command **exits**, so all the tiles

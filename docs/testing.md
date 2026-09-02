@@ -11,6 +11,12 @@ start a missing run while the agent is actively working), or `"never"` (only the
 Tests card's Refresh action starts it). Cached verdicts remain visible in every
 mode, and Refresh always runs immediately.
 
+Commit-side runs reuse a bounded pool of warm detached worktrees under the
+project state directory. At daemon startup, stale slot and copy-on-write trees
+are renamed out of their live paths atomically; recursive disk reclamation then
+runs in the background. This keeps crash recovery from delaying the HTTP
+listener when a dependency-heavy checkout contains many thousands of files.
+
 The primary Merge action preflights the per-runner endpoint before opening its
 normal confirmation. This catches a missing, stale, or newly-running verdict
 before the authoritative merge gate can reject a previously confirmed action;

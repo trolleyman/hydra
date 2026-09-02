@@ -221,6 +221,58 @@ func TestSlotPoolCleanCrashRecovery(t *testing.T) {
 	}
 }
 
+func TestDetachForRemovalMakesOriginalPathImmediatelyReusable(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "slots")
+	file := filepath.Join(dir, "node_modules", "package", "index.js")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("large disposable tree"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := detachForRemoval(dir)
+	if stale == "" {
+		t.Fatal("detachForRemoval returned an empty path")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("original path still exists after detach: err=%v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(stale, "node_modules", "package", "index.js")); err != nil {
+		t.Fatalf("read detached file: %v", err)
+	} else if string(got) != "large disposable tree" {
+		t.Fatalf("detached file = %q", got)
+	}
+}
+
+func TestDetachedRemovalDirsFindsInterruptedCleanup(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "slots")
+	want := []string{
+		dir + detachedRemovalMarker + "100-1",
+		dir + detachedRemovalMarker + "100-2",
+	}
+	for _, stale := range want {
+		if err := os.Mkdir(stale, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(parent, "slots-unrelated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detachedRemovalDirs(dir)
+	if len(got) != len(want) {
+		t.Fatalf("detachedRemovalDirs() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("detachedRemovalDirs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 // TestSlotPoolCleanIgnored verifies the clean policy: an ignored file left in a
 // slot by a prior run survives a default (warm-cache) reuse but is wiped when the
 // next acquire requests a pristine tree (cleanIgnored=true) - which also bypasses
