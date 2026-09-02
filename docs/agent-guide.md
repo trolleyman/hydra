@@ -23,9 +23,12 @@ Use `mage` for development tasks.
 
 1.  **Backend**: Go 1.22+ is used. Follow standard Go idioms.
 2.  **Frontend**: React + TypeScript + Vite. Uses `npm` (or `aube`, if on PATH) for
-    package management against `web/package-lock.json`. Build scripts under
-    `web/scripts/` and `web/e2e/` run directly with `node` (Node 24+ strips the TS
-    types), not a separate TS runner.
+    package management against `web/package-lock.json`. Package lifecycle scripts
+    intentionally spell nested calls as `npm run`: npm executes them directly,
+    while aube transparently redirects them to itself, keeping every script usable
+    through either package manager. Build scripts under `web/scripts/` and
+    `web/e2e/` run directly with `node` (Node 24+ strips the TS types), not a
+    separate TS runner.
 
     **Expected `aube install` warnings (all benign - do not "fix" them):**
     - `WARN_AUBE_GVS_INCOMPATIBLE` for `vite`: vite can't use aube's global

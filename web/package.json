@@ -69,5 +69,6 @@
   "trustedDependencies": [
     "ffmpeg-static"
   ],
-  "//typescript": "Held at 6.0.x, NOT bumped to 7.0. As of 2026-07-24 typescript-eslint (latest 8.65) caps its peer at 'typescript <6.1', and our eslint.config.js extends tseslint.configs.recommended, so 6.0 is the newest that lints - TS 7.0 (the native Go port) breaks `npm run lint`. Revisit 7.0 once typescript-eslint ships TS 7 support."
+  "//package-manager": "Lifecycle scripts intentionally use `npm run`: npm executes them directly, while aube transparently redirects them to itself. Keep the package buildable with either `npm run <script>` or `aube run <script>`.",
+  "//typescript": "Held at 6.0.x, NOT bumped to 7.0. As of 2026-07-24 typescript-eslint (latest 8.65) caps its peer at 'typescript <6.1', and our eslint.config.js extends tseslint.configs.recommended, so 6.0 is the newest that lints - TS 7.0 (the native Go port) breaks both `npm run lint` and `aube run lint`. Revisit 7.0 once typescript-eslint ships TS 7 support."
 }
