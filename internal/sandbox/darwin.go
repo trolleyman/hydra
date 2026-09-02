@@ -60,6 +60,16 @@ func BuildSpec(opts Options) (*Spec, error) {
 		for _, p := range []string{"/tmp", "/private/tmp", os.TempDir(), filepath.Dir(opts.TmpDir)} {
 			fmt.Fprintf(&b, "(deny file-read* file-write* %s)\n", sbPathRule(p))
 		}
+		// Path-canonicalizing tools (notably Git and SQLite) stat each ancestor
+		// before opening a file below TMPDIR. Re-open metadata on the literal
+		// ancestors only: directory enumeration and sibling file data stay denied.
+		for parent := filepath.Dir(canonicalSBPath(opts.TmpDir)); ; parent = filepath.Dir(parent) {
+			fmt.Fprintf(&b, "(allow file-read-metadata %s)\n", sbLiteralPathRule(parent))
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+		}
 		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(opts.TmpDir))
 	}
 
@@ -235,11 +245,17 @@ func cowClone(m CowMount) error {
 // stat'd (e.g. not yet created).
 func sbPathRule(p string) string {
 	p = canonicalSBPath(p)
-	quoted := strings.ReplaceAll(p, `"`, `\"`)
 	if info, err := os.Stat(p); err == nil && !info.IsDir() {
-		return `(literal "` + quoted + `")`
+		return sbLiteralPathRule(p)
 	}
+	quoted := strings.ReplaceAll(p, `"`, `\"`)
 	return `(subpath "` + quoted + `")`
+}
+
+func sbLiteralPathRule(p string) string {
+	p = canonicalSBPath(p)
+	quoted := strings.ReplaceAll(p, `"`, `\"`)
+	return `(literal "` + quoted + `")`
 }
 
 // canonicalSBPath resolves macOS's visible compatibility symlinks (notably

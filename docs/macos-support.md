@@ -49,6 +49,9 @@ What works:
   pre-prompt, persists the pre-spawn environment there for sibling shells, and
   denies the shared `/tmp` and user temp roots. A narrow later rule exposes the
   head's own scratch directory and its random Hydra supervisor socket directory.
+  Literal ancestors receive metadata-only access so path-canonicalizing tools
+  such as Git and SQLite work without exposing directory listings or sibling
+  scratch data.
 - Codex uses a persistent per-head `CODEX_HOME` beneath the project state. Hydra
   writes merged `AGENTS.md`, `hooks.json`, and `config.toml` there atomically and
   Seatbelt makes those exact files immutable while leaving provider-owned state
