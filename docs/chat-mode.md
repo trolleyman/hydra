@@ -380,8 +380,10 @@ one expandable `Merged <base> - N commits` row. Its expanded list connects to
 the summary as one surface: the list's top border runs along the exposed
 shoulders and opens beneath the summary. It draws the commits on a continuous
 vertical graph that reaches the list edges, and uses the shared commit card for
-each row's hover details. Ordinary commit pills use the same edge-to-edge graph
-line around their single commit dot. Hydra also
+each row's hover details. Commit subjects wrap inside ordinary pills, merge
+summaries, and expanded merge rows, while their SHA and change totals remain
+visible. Ordinary commit pills use the same edge-to-edge graph line around their
+single commit dot. Hydra also
 observes every chat that owns a merge destination before merging another head
 into it, then labels the resulting fast-forward or merge commit with the
 incoming branch. This works for both managed worktree branches and a
