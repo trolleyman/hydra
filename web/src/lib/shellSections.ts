@@ -1560,6 +1560,57 @@ function verifiedSearchBeforeView(
   return null
 }
 
+// interiorSearchDistribution recovers a numbered search in the middle of a
+// multi-command result. Unlike file content, every search row carries its own
+// line number (and often its path), so a unique run of two or more such rows can
+// separate independently attributable output on both sides. Requiring both
+// sides to distribute successfully keeps a stray `12:text` source line from
+// becoming a guessed boundary.
+function interiorSearchDistribution(
+  producers: ScriptStep[],
+  slice: string[],
+  failed: ReadonlySet<ScriptStep>,
+): Distribution | null {
+  const candidates: Distribution[] = []
+  for (let searchAt = 1; searchAt < producers.length - 1; searchAt++) {
+    const search = producers[searchAt]
+    if (search.kind !== 'matches' || !search.match.numbered) continue
+    const owns = (line: string) => {
+      const parsed = parseMatchLines([line], search.match.paths, true)[0]
+      return parsed != null && (parsed.separator || Boolean(parsed.num))
+    }
+    for (let start = 0; start < slice.length;) {
+      if (!owns(slice[start])) { start++; continue }
+      let end = start + 1
+      while (end < slice.length && owns(slice[end])) end++
+      // A single numbered-looking source line is too weak to establish two
+      // boundaries in the middle of otherwise anonymous output.
+      if (end - start < 2) { start = end; continue }
+      const before = distribute(producers.slice(0, searchAt), slice.slice(0, start), failed)
+      const after = distribute(producers.slice(searchAt + 1), slice.slice(end), failed)
+      if (before && after) {
+        const parts = producers.map(() => [] as string[])
+        const pinned = producers.map(() => false)
+        const plain = new Set<number>()
+        const languageOnly = new Map<number, string>()
+        before.parts.forEach((part, i) => { parts[i] = part })
+        before.pinned.forEach((value, i) => { pinned[i] = value })
+        before.plain.forEach((i) => plain.add(i))
+        before.languageOnly.forEach((language, i) => languageOnly.set(i, language))
+        parts[searchAt] = slice.slice(start, end)
+        pinned[searchAt] = true
+        after.parts.forEach((part, i) => { parts[searchAt + 1 + i] = part })
+        after.pinned.forEach((value, i) => { pinned[searchAt + 1 + i] = value })
+        after.plain.forEach((i) => plain.add(searchAt + 1 + i))
+        after.languageOnly.forEach((language, i) => languageOnly.set(searchAt + 1 + i, language))
+        candidates.push({ parts, pinned, plain, languageOnly })
+      }
+      start = end
+    }
+  }
+  return candidates.length === 1 ? candidates[0] : null
+}
+
 // distribute hands a stretch of output to the producers that ran inside it.
 // Null when the boundaries between them are not knowable.
 //
@@ -1579,6 +1630,9 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
 
   const verified = verifiedSearchBeforeView(producers, slice, failed)
   if (verified) return verified
+
+  const interior = interiorSearchDistribution(producers, slice, failed)
+  if (interior) return interior
 
   // Peel a search-shaped suffix before using any file-view limit. A sed range is
   // an UPPER bound, not an exact count: a range past the end of the file emits

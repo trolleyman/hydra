@@ -187,17 +187,16 @@ and `web/src/DiffViewer.tsx`):
   it. Adjacent
   bounded reads keep their requested starts when their exact range lengths
   account for all returned lines. Adjacent bounded ranges of the same file do
-  not need headings between them. When an unbounded boundary cannot otherwise
-  be proved, agents print a static marker such as
-  `printf '%s\n' '--- [file] web/src/App.tsx ---'`; the untyped
-  `printf '%s\n' '--- Notes ---'` form creates an ordinary heading and `[dir]`
+  not need headings between them. Agents label each file or directory section
+  in a multi-section call with a static marker such as
+  `echo '--- [file] web/src/App.tsx ---'`; the untyped
+  `echo '--- Notes ---'` form creates an ordinary heading and `[dir]`
   selects the shared directory treatment. The older `[text]` spelling remains
   accepted for existing transcripts. File and directory marker values are exact
   paths without annotations such as `(continued)`. A Bash call with several
-  unbounded sections puts the marker immediately before every command that
-  produces one, including the first, and keeps reads bounded where possible so
-  truncation cannot remove its boundary evidence. A constant `echo` is accepted,
-  while `printf` is the canonical cross-shell spelling. The parser only consumes
+  file or directory sections puts the marker immediately before every command
+  that produces one, including the first. This includes bounded reads of
+  different files because a range can stop early at EOF. The parser only consumes
   a marker when it can correlate it unambiguously with the constant-printing
   command. In a script where a numbered search immediately
   precedes a read of the same file, repeated search rows can pin the read's start

@@ -109,10 +109,10 @@ const codexSandboxCleanupPrompt = "## Recursive cleanup inside Hydra\n" +
 	"- Codex may reject raw `rm -rf` before it reaches Hydra's outer OS sandbox. To recursively remove generated scratch data, use `$HYDRA_BIN sandbox-remove -- \"$HYDRA_WORKTREE/<path>\"` or a path beneath `$TMPDIR`. The helper accepts only absolute descendants of this head's worktree or private temporary directory; it refuses either root itself and every outside path.\n"
 
 const shellSectionPrompt = "## Bash output sections\n" +
-	"- Hydra renders a constant `printf '%s\\n' '--- <text> ---'`, `printf '%s\\n' '--- [file] <path> ---'`, or `printf '%s\\n' '--- [dir] <path> ---'` as a compact ruled heading. A constant `echo` with the same marker is accepted, but `printf` is the predictable spelling across shells.\n" +
-	"- Use markers only when the commands and output cannot otherwise prove a boundary. For multiple unbounded file or directory sections, put the appropriate marker immediately before every command that produces a section, including the first. It introduces the following output; do not append it to the previous command. Keep reads bounded where possible so a provider cannot truncate away the boundary evidence.\n" +
+	"- Hydra renders a constant `echo '--- <text> ---'`, `echo '--- [file] <path> ---'`, or `echo '--- [dir] <path> ---'` as a compact ruled heading.\n" +
+	"- When one Bash call prints multiple file or directory sections, put the appropriate marker immediately before every section-producing command, including the first. This includes bounded reads of different files: `sed` output does not name its source, and a range can end early at EOF. The marker introduces the output that follows rather than terminating the output above it.\n" +
 	"- The untyped form is an ordinary text heading. `file` and `dir` select file-path and directory-path presentation; their value must be the exact path with no note such as `(continued)`. Every marker stays static, quoted, and on one line.\n" +
-	"- Do not print a marker when commands already identify their output, including adjacent bounded `sed` ranges, `rg -n`, and `git diff`.\n"
+	"- A command whose own output identifies every section needs no redundant marker. This includes `rg -n`, unified `git diff`, and adjacent bounded ranges of the same file.\n"
 
 // DefaultResumePrompt is the message Hydra types into an agent that was
 // actively working when the daemon restarted, so it resumes its task rather

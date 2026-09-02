@@ -610,6 +610,45 @@ describe('splitScriptOutput', () => {
     ])
   })
 
+  it('recovers a numbered search between shortened reads', () => {
+    const script = [
+      "sed -n '940,1085p' web/src/components/settings/ConfigForm.tsx",
+      "sed -n '1,120p' web/src/components/settings/ConfigForm.list-editors.test.tsx",
+      'rg -n "func \\(.*merge|Cache" internal/config/config.go | head -80',
+      "sed -n '2230,2325p' internal/config/config.go",
+    ].join('\n')
+    const output = [
+      '            </label>',
+      '          </div>',
+      "import { fireEvent } from '@testing-library/react'",
+      "describe('settings list editors', () => {",
+      '325:\t// Cache names project-scoped writable caches',
+      '435:// ValidateSharedCache checks a named sandbox.cache entry.',
+      '// TestsAtProjectTOML resolves the configured tests.',
+      'func TestsAtProjectTOML(content []byte) ([]TestScript, error) {',
+    ].join('\n')
+
+    const split = splitScriptOutput(steps(script), output)
+    expect(split?.map((section) => [section.kind, section.lines])).toEqual([
+      ['view', [
+        '            </label>',
+        '          </div>',
+        "import { fireEvent } from '@testing-library/react'",
+        "describe('settings list editors', () => {",
+      ]],
+      ['matches', [
+        '325:\t// Cache names project-scoped writable caches',
+        '435:// ValidateSharedCache checks a named sandbox.cache entry.',
+      ]],
+      ['view', [
+        '// TestsAtProjectTOML resolves the configured tests.',
+        'func TestsAtProjectTOML(content []byte) ([]TestScript, error) {',
+      ]],
+    ])
+    expect(split?.[0]).toMatchObject({ kind: 'view', view: { languageOnly: true, start: null } })
+    expect(split?.[2]).toMatchObject({ kind: 'view', view: { path: 'internal/config/config.go', start: 2230 } })
+  })
+
   it('keeps the language when adjacent shortened reads use the same language', () => {
     // This is the shape left when the Bash result is truncated at the front:
     // neither Go read reached its requested bound, so their boundary and line

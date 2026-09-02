@@ -121,21 +121,21 @@ gets one full-width rule across the gutter and source at the omitted-line
 boundary. The structural header and its rules carry `data-copy-skip`, leaving
 copied source free of presentation chrome.
 
-Agents introduce only a boundary the commands and output cannot otherwise prove
-by printing one static marker: `printf '%s\n' '--- <text> ---'`, `--- [file]
-<path> ---`, or `--- [dir] <path> ---`. The untyped form is a text heading; the
+Agents label output sections by printing one static marker:
+`echo '--- <text> ---'`, `echo '--- [file] <path> ---'`, or
+`echo '--- [dir] <path> ---'`. The untyped form is a text heading; the
 older explicit `[text]` form remains accepted for existing transcripts. In a
-Bash call with several unbounded sections, the marker goes immediately before
-every section-producing command, including the first: it introduces the output
-that follows rather than terminating the output above it. Reads stay bounded
-where possible so a provider cannot truncate away the evidence that identifies
-their boundaries. File and directory marker values are exact paths, without
-annotations such as `(continued)`. A constant `echo` is accepted, but `printf`
-is the canonical cross-shell spelling. The parser correlates the marker with
+Bash call with several file or directory sections, the marker goes immediately
+before every section-producing command, including the first: it introduces the
+output that follows rather than terminating the output above it. This includes
+bounded reads of different files because `sed` does not name its source and a
+range may stop early at EOF. File and directory marker values are exact paths,
+without annotations such as `(continued)`. The parser correlates the marker with
 that constant-printing command; a marker-shaped line read from a file is source,
 and an ambiguous duplicate marker is left as ordinary output rather than
-guessed. Adjacent bounded `sed` ranges, `rg -n`, and unified `git diff` output
-already identify their output and need no marker.
+guessed. Output that identifies every section itself needs no redundant marker;
+this includes `rg -n`, unified `git diff`, and adjacent bounded ranges of the
+same file.
 
 ### Test status wording: three layers, three vocabularies
 
