@@ -6,7 +6,7 @@ import { BranchSelector } from './BranchSelector'
 import { SettingsPopover, SettingsGroupLabel, SettingsSelect } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, GitBranch, FolderGit2, X, Lock } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, ChevronRight, MessageSquare, SquareTerminal, GitBranch, FolderGit2, X, Lock } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -109,10 +109,14 @@ const AgentModelPicker = memo(function AgentModelPicker({
   agents?: typeof AGENT_TYPES
 }) {
   const [open, setOpen] = useState(false)
+  const [effortOpen, setEffortOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const effortBtnRef = useRef<HTMLButtonElement>(null)
+  const effortMenuRef = useRef<HTMLDivElement>(null)
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
+  const [effortCoords, setEffortCoords] = useState<{ left: number; top: number } | null>(null)
 
   const place = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect()
@@ -126,22 +130,41 @@ const AgentModelPicker = memo(function AgentModelPicker({
     }
   }, [])
 
+  const placeEffort = useCallback(() => {
+    const r = effortBtnRef.current?.getBoundingClientRect()
+    if (!r) return
+    const width = 248
+    const height = 306
+    const left = r.right + 6 + width <= window.innerWidth - 8
+      ? r.right + 6
+      : Math.max(8, r.left - width - 6)
+    const top = Math.max(8, Math.min(r.top - 8, window.innerHeight - height - 8))
+    setEffortCoords({ left, top })
+  }, [])
+
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
       const target = e.target as Node
-      if (!ref.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
+      if (!ref.current?.contains(target) && !menuRef.current?.contains(target) && !effortMenuRef.current?.contains(target)) {
+        setOpen(false)
+        setEffortOpen(false)
+      }
+    }
+    const handlePlace = () => {
+      place()
+      if (effortOpen) placeEffort()
     }
     document.addEventListener('mousedown', handleClick)
     // Keep the menu pinned to the trigger if the page scrolls or resizes.
-    window.addEventListener('scroll', place, true)
-    window.addEventListener('resize', place)
+    window.addEventListener('scroll', handlePlace, true)
+    window.addEventListener('resize', handlePlace)
     return () => {
       document.removeEventListener('mousedown', handleClick)
-      window.removeEventListener('scroll', place, true)
-      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', handlePlace, true)
+      window.removeEventListener('resize', handlePlace)
     }
-  }, [open, place])
+  }, [effortOpen, open, place, placeEffort])
 
   const active = AGENT_TYPES.find((a) => a.id === agent) ?? AGENT_TYPES[0]
   const orderedAgents = orderModelProviders(agents, agent)
@@ -160,38 +183,34 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const Row = ({ a, m }: { a: AgentTypeOption; m: AgentModel }) => {
     const selected = agent === a && model === m.id
     return (
-      <div data-selected-model-row={selected || undefined} className={selected ? 'bg-gray-50/70 dark:bg-gray-700/20' : ''}>
+      <div data-selected-model-row={selected || undefined} className={`flex items-center ${selected ? 'bg-gray-50/70 dark:bg-gray-700/20' : ''}`}>
         <button
           type="button"
-          onClick={() => { onChange(a, m.id); setOpen(false) }}
-          className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer"
+          onClick={() => { onChange(a, m.id); setOpen(false); setEffortOpen(false) }}
+          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-8 pr-2 text-left text-xs text-gray-700 transition-colors cursor-pointer hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700/60"
         >
-          <span className={m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}>{m.label}</span>
+          <span className={`truncate ${m.id ? '' : 'italic text-gray-500 dark:text-gray-400'}`}>{m.label}</span>
           {selected && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
         </button>
         {selected && supportsEffort && (
-          <div className="ml-8 mr-2 border-l-2 border-violet-200 pb-2 pl-2 dark:border-violet-500/25">
-            <div className="mb-1.5 text-2xs font-semibold text-gray-500 dark:text-gray-400">Thinking</div>
-            <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Thinking effort">
-              {THINKING_EFFORTS.map((option) => (
-                <button
-                  key={option.id || 'default'}
-                  type="button"
-                  role="radio"
-                  aria-checked={effort === option.id}
-                  onClick={() => { onEffortChange(option.id); setOpen(false) }}
-                  className={`rounded-md border px-1 py-1 text-3xs font-medium transition-colors cursor-pointer ${
-                    effort === option.id
-                      ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-200'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-700/60'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-[9px] leading-snug text-gray-400 dark:text-gray-500">{effortOption.desc}</p>
-          </div>
+          <button
+            ref={effortBtnRef}
+            type="button"
+            aria-label={`Thinking effort: ${effortOption.label}`}
+            aria-expanded={effortOpen}
+            onClick={() => {
+              if (!effortOpen) placeEffort()
+              setEffortOpen((value) => !value)
+            }}
+            className={`mr-2 flex h-5 shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[9px] font-semibold transition-colors cursor-pointer ${
+              effortOpen || effort
+                ? 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200'
+                : 'border-gray-200 bg-white text-gray-500 hover:border-violet-200 hover:text-violet-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-violet-500/30 dark:hover:text-violet-300'
+            }`}
+          >
+            {effortOption.label}
+            <ChevronRight className="h-2.5 w-2.5" />
+          </button>
         )}
       </div>
     )
@@ -208,7 +227,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}${showEffort ? `, ${effortOption.label} thinking effort` : ''}`}
           // Measure the trigger before opening so the fixed-position menu lands in
           // the right spot on its first paint; scroll/resize keep it pinned after.
-          onClick={() => { if (!open) place(); setOpen((o) => !o) }}
+          onClick={() => { if (!open) place(); else setEffortOpen(false); setOpen((o) => !o) }}
           className={`flex min-w-0 max-w-full items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${hasTriggerText ? 'pr-1.5' : 'w-7 justify-center'} ${trigger} ${
             open
               ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
@@ -227,25 +246,62 @@ const AgentModelPicker = memo(function AgentModelPicker({
         </button>
       </Tooltip>
       {open && coords && createPortal(
-        <div
-          ref={menuRef}
-          data-portal-menu
-          style={{ position: 'fixed', left: coords.left, top: coords.top }}
-          onWheel={(e) => e.stopPropagation()}
-          className="z-[100] w-56 max-h-96 overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1"
-        >
-          {orderedAgents.map((a, i) => (
-            <div key={a.id}>
-              {i > 0 && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
-              <div className="flex items-center gap-2 px-3 py-1 text-2xs font-semibold text-gray-500 dark:text-gray-400">
-                <AgentTypeIcon name={a.id} className={`w-3.5 h-3.5 shrink-0 ${a.color}`} />
-                <span>{a.label}</span>
+        <>
+          <div
+            ref={menuRef}
+            data-portal-menu
+            style={{ position: 'fixed', left: coords.left, top: coords.top }}
+            onWheel={(e) => e.stopPropagation()}
+            className="z-[100] w-56 max-h-96 overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1"
+          >
+            {orderedAgents.map((a, i) => (
+              <div key={a.id}>
+                {i > 0 && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
+                <div className="flex items-center gap-2 px-3 py-1 text-2xs font-semibold text-gray-500 dark:text-gray-400">
+                  <AgentTypeIcon name={a.id} className={`w-3.5 h-3.5 shrink-0 ${a.color}`} />
+                  <span>{a.label}</span>
+                </div>
+                <Row a={a.id} m={{ id: '', label: 'Default' }} />
+                {AGENT_MODELS[a.id].map((m) => <Row key={m.id} a={a.id} m={m} />)}
               </div>
-              <Row a={a.id} m={{ id: '', label: 'Default' }} />
-              {AGENT_MODELS[a.id].map((m) => <Row key={m.id} a={a.id} m={m} />)}
+            ))}
+          </div>
+          {effortOpen && effortCoords && (
+            <div
+              ref={effortMenuRef}
+              style={{ position: 'fixed', left: effortCoords.left, top: effortCoords.top }}
+              className="z-[101] w-[248px] rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800"
+            >
+              <div className="px-2 pb-2 pt-1">
+                <div className="text-xs font-semibold text-gray-800 dark:text-gray-100">Thinking effort</div>
+                <div className="mt-0.5 text-3xs text-gray-400 dark:text-gray-500">For {active.label} with {label || 'Default model'}</div>
+              </div>
+              <div role="radiogroup" aria-label="Thinking effort" className="space-y-0.5">
+                {THINKING_EFFORTS.map((option) => (
+                  <button
+                    key={option.id || 'default'}
+                    type="button"
+                    role="radio"
+                    aria-label={option.label}
+                    aria-checked={effort === option.id}
+                    onClick={() => { onEffortChange(option.id); setEffortOpen(false); setOpen(false) }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors cursor-pointer ${
+                      effort === option.id
+                        ? 'bg-violet-50 dark:bg-violet-500/15'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-700/60'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className={`block text-xs font-medium ${effort === option.id ? 'text-violet-700 dark:text-violet-200' : 'text-gray-700 dark:text-gray-200'}`}>{option.label}</span>
+                      <span className="block text-[9px] leading-snug text-gray-400 dark:text-gray-500">{option.desc}</span>
+                    </span>
+                    {effort === option.id && <Check className="h-3.5 w-3.5 shrink-0 text-violet-500" />}
+                  </button>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>,
+          )}
+        </>,
         document.body,
       )}
     </div>
