@@ -1155,7 +1155,7 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 		"HYDRA_TEST_SOURCE="+runDir,
 		"HYDRA_TEST_REF="+ref,
 	)
-	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
+	env = append(env, sandbox.MiseEnv(m.projectRoot, runDir)...)
 
 	command := spec.Script
 	if spec.IsStrict() {

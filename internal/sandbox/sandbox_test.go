@@ -84,22 +84,24 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 		"GOBIN=/shared/go/bin",
 		"XDG_CACHE_HOME=/shared/cache",
 		"MISE_CACHE_DIR=/shared/mise-cache",
+		"MISE_INSTALL_PATH=/home/u/.local/share/mise/bootstrap/mise-2026.8.15",
 	}, hostTmp)
 	wantTmp := SandboxTempDir(hostTmp)
 	wants := map[string]string{
-		"TMPDIR":         wantTmp,
-		"TMP":            wantTmp,
-		"TEMP":           wantTmp,
-		"XDG_CACHE_HOME": filepath.Join(wantTmp, "cache"),
-		"XDG_STATE_HOME": filepath.Join(wantTmp, "state"),
-		"GOCACHE":        filepath.Join(wantTmp, "cache", "go-build"),
-		"GOMODCACHE":     filepath.Join(wantTmp, "go", "pkg", "mod"),
-		"GOPATH":         filepath.Join(wantTmp, "go"),
-		"GOBIN":          filepath.Join(wantTmp, "go", "bin"),
-		"MAGEFILE_CACHE": filepath.Join(wantTmp, "cache", "mage"),
-		"MISE_CACHE_DIR": filepath.Join(wantTmp, "cache", "mise"),
-		"MISE_DATA_DIR":  filepath.Join(wantTmp, "data", "mise"),
-		"MISE_STATE_DIR": filepath.Join(wantTmp, "state", "mise"),
+		"TMPDIR":            wantTmp,
+		"TMP":               wantTmp,
+		"TEMP":              wantTmp,
+		"XDG_CACHE_HOME":    filepath.Join(wantTmp, "cache"),
+		"XDG_STATE_HOME":    filepath.Join(wantTmp, "state"),
+		"GOCACHE":           filepath.Join(wantTmp, "cache", "go-build"),
+		"GOMODCACHE":        filepath.Join(wantTmp, "go", "pkg", "mod"),
+		"GOPATH":            filepath.Join(wantTmp, "go"),
+		"GOBIN":             filepath.Join(wantTmp, "go", "bin"),
+		"MAGEFILE_CACHE":    filepath.Join(wantTmp, "cache", "mage"),
+		"MISE_CACHE_DIR":    filepath.Join(wantTmp, "cache", "mise"),
+		"MISE_DATA_DIR":     filepath.Join(wantTmp, "data", "mise"),
+		"MISE_STATE_DIR":    filepath.Join(wantTmp, "state", "mise"),
+		"MISE_INSTALL_PATH": "/home/u/.local/share/mise/bootstrap/mise-2026.8.15",
 	}
 	for key, want := range wants {
 		prefix := key + "="
@@ -119,6 +121,44 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 	}
 	if got := SandboxPreSpawnEnvFile(hostTmp); got != filepath.Join(wantTmp, PreSpawnEnvFileName) {
 		t.Errorf("SandboxPreSpawnEnvFile() = %q, want %q", got, filepath.Join(wantTmp, PreSpawnEnvFileName))
+	}
+}
+
+func TestRuntimeEnvHonorsInheritedApplicationPaths(t *testing.T) {
+	hostTmp := filepath.Join(t.TempDir(), "head-tmp")
+	got := RuntimeEnv([]string{
+		"HOME=/home/u",
+		"PATH=/usr/bin",
+		"TMPDIR=/host/tmp",
+		"GOCACHE=/host/go-build",
+		"GOBIN=/host/go-bin",
+		"PLAYWRIGHT_BROWSERS_PATH=/host/playwright",
+		"MISE_DATA_DIR=/host/mise-data",
+		"MISE_SHARED_INSTALL_DIRS=/host/mise-installs",
+	}, hostTmp, "GOCACHE", "GOBIN", "PLAYWRIGHT_BROWSERS_PATH", "MISE_DATA_DIR", "MISE_SHARED_INSTALL_DIRS")
+	env := make(map[string]string)
+	for _, entry := range got {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[key] = value
+		}
+	}
+	for key, want := range map[string]string{
+		"GOCACHE":                  "/host/go-build",
+		"GOBIN":                    "/host/go-bin",
+		"PLAYWRIGHT_BROWSERS_PATH": "/host/playwright",
+		"MISE_DATA_DIR":            "/host/mise-data",
+		"MISE_SHARED_INSTALL_DIRS": "/host/mise-installs",
+	} {
+		if env[key] != want {
+			t.Errorf("%s = %q, want %q", key, env[key], want)
+		}
+	}
+	if env["TMPDIR"] != SandboxTempDir(hostTmp) {
+		t.Errorf("managed TMPDIR = %q, want private temp", env["TMPDIR"])
+	}
+	wantPath := "/host/go-bin" + string(os.PathListSeparator) + "/usr/bin"
+	if env["PATH"] != wantPath {
+		t.Errorf("PATH = %q, want inherited GOBIN prefix %q", env["PATH"], wantPath)
 	}
 }
 

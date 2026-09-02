@@ -30,8 +30,7 @@ func TestInheritedEnvRejectsInvalidAndManagedNames(t *testing.T) {
 	for _, name := range []string{
 		"", "1TOKEN", "BAD-NAME", "HYDRA_STATE_DIR", "hydra_state_dir",
 		"HOME", "HTTP_PROXY", "Http_Proxy", "CLAUDE_CONFIG_DIR", "claude_config_dir", "CODEX_HOME",
-		"XDG_CACHE_HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "GOBIN",
-		"MAGEFILE_CACHE", "MISE_CACHE_DIR", "MISE_STATE_DIR",
+		"XDG_CACHE_HOME", "MISE_INSTALL_PATH", "MISE_TRUSTED_CONFIG_PATHS",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := ValidateInheritedEnvName(name); err == nil {
@@ -39,7 +38,13 @@ func TestInheritedEnvRejectsInvalidAndManagedNames(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{"ANDROID_HOME", "SSH_AUTH_SOCK", "PRIVATE_REGISTRY_TOKEN"} {
+	for _, name := range []string{
+		"ANDROID_HOME", "SSH_AUTH_SOCK", "PRIVATE_REGISTRY_TOKEN",
+		"GOCACHE", "GOMODCACHE", "GOPATH", "GOBIN", "MAGEFILE_CACHE",
+		"npm_config_cache", "AUBE_CACHE_DIR", "AUBE_STORE_DIR",
+		"PLAYWRIGHT_BROWSERS_PATH", "MISE_CACHE_DIR", "MISE_DATA_DIR",
+		"MISE_STATE_DIR", "MISE_SHARED_INSTALL_DIRS",
+	} {
 		if err := ValidateInheritedEnvName(name); err != nil {
 			t.Errorf("ValidateInheritedEnvName(%q): %v", name, err)
 		}

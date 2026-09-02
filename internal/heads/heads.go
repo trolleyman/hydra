@@ -767,7 +767,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 
 	env := append(agentEnv(opts.AgentType, cfg.ResolveInheritedEnv(string(opts.AgentType)), home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
 	// Chat mode has no TUI to render; force the classic (non-fullscreen)
 	// renderer env regardless of config.
@@ -798,6 +798,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		ROOverlays:            seed.ROOverlays,
 		CowMounts:             cowMounts,
 		Env:                   env,
+		InheritedEnv:          cfg.ResolveInheritedEnv(string(opts.AgentType)),
 		Argv:                  argv,
 		HydraBinPath:          seed.HydraBinPath,
 		StdioPipes:            opts.ChatMode,
@@ -1122,7 +1123,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 	var env []string
 	if sandboxed {
 		env = agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
-		env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+		env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 		// The shell shares the head's worktree; report it as a bash session since
 		// the pre-spawn config it runs is the bash agent's.
 		env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
@@ -1131,7 +1132,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// daemon's host environment. Environment isolation is part of the sandboxed
 		// head boundary, not a change to this user-opted-in escape hatch.
 		env = append([]string(nil), os.Environ()...)
-		env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+		env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 		env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	}
 	// Env vars the head's pre_spawn_script set for the agent (via $HYDRA_ENV, see
@@ -1158,7 +1159,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			// same HTTP_PROXY the agent got. The supervisor is live here, so its proxy
 			// is running; nil in unrestricted/off modes, where the shell needs none.
 			tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
-			shellEnv := sandbox.RuntimeEnv(append([]string(nil), env...), tmpDir)
+			shellEnv := sandbox.RuntimeEnv(append([]string(nil), env...), tmpDir, cfg.ResolveInheritedEnv(string(head.AgentType))...)
 			shellEnv = sandbox.SharedCacheEnv(shellEnv, filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
 			// Persisted pre-spawn values are trusted project policy and intentionally
 			// override Hydra's private cache defaults, just as they do for the agent.
@@ -1232,6 +1233,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			ImmutablePaths:        seed.ImmutablePaths,
 			CowMounts:             cowMounts,
 			Env:                   append(append(append(env, seed.Env...), preSpawnEnv...), egressEnv...),
+			InheritedEnv:          cfg.ResolveInheritedEnv(string(head.AgentType)),
 			Argv:                  []string{"/bin/bash"},
 			HydraBinPath:          seed.HydraBinPath,
 			EgressWrap:            egressWrap,
@@ -1429,7 +1431,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 
 	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	// Chat mode has no TUI to render; force the classic renderer env (see SpawnHead).
 	env = append(env, claudeRenderingEnv(head.AgentType, !head.ChatMode && cfg.ResolveFullscreen(string(head.AgentType)))...)
@@ -1466,6 +1468,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		ROOverlays:            seed.ROOverlays,
 		CowMounts:             cowMounts,
 		Env:                   env,
+		InheritedEnv:          cfg.ResolveInheritedEnv(string(head.AgentType)),
 		Argv:                  argv,
 		HydraBinPath:          seed.HydraBinPath,
 		StdioPipes:            head.ChatMode,
@@ -1894,8 +1897,8 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 
 	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
 	tmpDir := ensureHeadTmpDir(head.ProjectPath, head.ID)
-	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
-	env = sandbox.RuntimeEnv(env, tmpDir)
+	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseEnv(head.ProjectPath, worktree)...)
+	env = sandbox.RuntimeEnv(env, tmpDir, cfg.ResolveInheritedEnv(string(head.AgentType))...)
 	env = sandbox.SharedCacheEnv(env, filepath.Join(paths.GetCacheDirFromProjectRoot(head.ProjectPath), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)
@@ -1929,6 +1932,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 		RestoreRO:             restore,
 		Network:               net,
 		Env:                   env,
+		InheritedEnv:          cfg.ResolveInheritedEnv(string(head.AgentType)),
 		Argv:                  []string{"bash", "-c", sandbox.StrictScript(script)},
 		HardenGUI:             true,
 		Seccomp:               true,
