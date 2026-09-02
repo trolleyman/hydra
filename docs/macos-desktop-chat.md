@@ -81,8 +81,8 @@ agent route.
   must not start a second daemon, database, agent registry or network proxy.
 - Closing the last window does not automatically terminate the backend. Hydra
   remains available through a menu-bar item, especially while work is running.
-- Explicit Quit owns backend shutdown. If sessions are active, Quit must explain
-  the consequence and offer to cancel, stop them, or leave Hydra running.
+- Closing or quitting the shell leaves the shared backend and running work
+  available for another native window or browser client.
 - The existing browser-served UI remains supported. The desktop app is another
   trusted client of the same backend, not a fork of it.
 
@@ -431,27 +431,23 @@ for input without becoming a second session-management UI.
   the runtime shape is stable.
 
 Status: the thin Swift/AppKit shell, shared multi-window WebKit configuration,
-control-socket daemon reuse/startup, PID-bound random-port discovery, private
-ready-file compatibility fallback, development `.app` builder,
-background-after-last-window behavior, and guarded
-Quit path are implemented. App-launched backends now publish a one-minute,
-single-use auth bootstrap credential in their private atomic readiness record;
+control-socket daemon reuse/startup, PID-bound random-port discovery,
+development `.app` builder, and background-after-last-window behavior are
+implemented. App-launched backends publish a one-minute, single-use auth
+bootstrap credential through the trusted control connection;
 the first WKWebView redeems it for the shared HttpOnly cookie without exposing
 the persistent auth key. App-launched backends require this authentication for
 all TCP clients even when deploy configuration has no key; an ephemeral secret
 is generated in memory for that backend lifetime. Protocol 3 carries version,
 build, project, and protocol compatibility metadata in the trusted control-socket
-or private ready-file response. AppKit does not query protected `/api/status`
+response. AppKit does not query protected `/api/status`
 over TCP before the webview redeems its credential. The bundled CLI now performs daemon
 reuse and startup through the shared control socket, reads the versioned,
 PID-bound endpoint record, and returns a fresh bootstrap credential to AppKit;
-the fixed-port probe is gone. It also returns the selected project ID, so the
-first project-directory window opens the folder chosen by the user rather than the
-daemon's boot project. Older development bundles retain the private ready-file
-launch only when the bundled CLI does not recognise `__desktop-connect`;
-connection, authentication, and compatibility failures are surfaced without
-starting a competing backend. Quit-time running-session checks use the trusted
-control socket rather than an unauthenticated native HTTP client. Native navigation compares the
+the fixed-port probe is gone. It also returns the selected project ID. The app
+starts immediately in Hydra's built-in chat project, and projects can be added
+or selected in the app. Connection, authentication, and compatibility failures
+are surfaced without starting a competing backend. Native navigation compares the
 complete scheme/host/effective-port origin; every other HTTP(S) origin opens in
 the system browser and non-web origins are blocked from the privileged webview.
 The WebKit script bridge uses a weak proxy and is removed during window close,
