@@ -3593,16 +3593,18 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-      <Tooltip
-        content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
-        align="left"
-        className="min-w-0 flex-1"
-      >
-        <span className="text-xs truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
-          {file.path.split('/').pop()}
-        </span>
-      </Tooltip>
-      <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+      <span className="flex min-w-0 items-center gap-1.5">
+        <Tooltip
+          content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
+          align="left"
+          className="min-w-0"
+        >
+          <span className="min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">
+            {file.path.split('/').pop()}
+          </span>
+        </Tooltip>
+        <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+      </span>
       <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
     </button>
   )
