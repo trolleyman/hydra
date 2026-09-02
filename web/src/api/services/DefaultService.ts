@@ -1177,6 +1177,7 @@ export class DefaultService {
      * @param ignoreWhitespace Ignore whitespace changes in the diff
      * @param includeUncommitted Include uncommitted changes in the worktree in the diff
      * @param path Only return the diff for this specific file path
+     * @param viewedBlobSha With path, compare the file version previously marked viewed to its current head-side content. This returns only changes made after that review baseline. The blob must still exist in the repository.
      * @param context Number of lines of context to show (defaults to 3)
      * @param fullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Combined with path it expands just that file, which is how the client promotes a single big file (left windowed by the bulk caps) once the reader expands it - pass caps above the bulk ones.
      * @param maxFullChanges Only auto-expand files with at most this many changed lines. Larger files (which the client also hides by default) keep the normal context so their full content isn't shipped until requested. Only meaningful with full_context.
@@ -1192,6 +1193,7 @@ export class DefaultService {
         ignoreWhitespace?: boolean,
         includeUncommitted?: boolean,
         path?: string,
+        viewedBlobSha?: string,
         context: number = 3,
         fullContext?: boolean,
         maxFullChanges: number = 1000,
@@ -1210,6 +1212,7 @@ export class DefaultService {
                 'ignore_whitespace': ignoreWhitespace,
                 'include_uncommitted': includeUncommitted,
                 'path': path,
+                'viewed_blob_sha': viewedBlobSha,
                 'context': context,
                 'full_context': fullContext,
                 'max_full_changes': maxFullChanges,

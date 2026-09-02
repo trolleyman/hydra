@@ -127,6 +127,40 @@ describe('diff sidebar path tooltips', () => {
   })
 })
 
+describe('viewed file delta', () => {
+  it('labels new changes and marks the latest blob when reviewed', () => {
+    const onToggleViewed = vi.fn()
+    const reviewedDelta = file({
+      path: 'README.md',
+      head_blob_sha: 'current-blob',
+      hunks: [hunk([ctx('already reviewed', 1), add('new since review', 2)])],
+    })
+    const { rerender } = render(
+      <FileDiff
+        file={reviewedDelta} sideBySide={false} currentContext={3}
+        viewed={false} showingSinceViewed onToggleViewed={onToggleViewed}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('New since viewed')).toBeVisible()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
+    expect(onToggleViewed).toHaveBeenCalledWith('README.md', 'current-blob')
+
+    rerender(
+      <FileDiff
+        file={reviewedDelta} sideBySide={false} currentContext={3}
+        viewed showingSinceViewed={false} onToggleViewed={onToggleViewed}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    expect(screen.queryByText('New since viewed')).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Viewed' })).toBeChecked()
+  })
+})
+
 // A whole-file (expanded) diff: 40 unchanged lines, a change, 40 more. The
 // reveal model shows the selected context either side of the change and collapses the rest
 // behind expanders, so the rendered row count is far below the line count.

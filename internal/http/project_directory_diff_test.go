@@ -109,13 +109,44 @@ func TestProjectDirectoryHeadDiffUsesStartingCommitAndProjectDirectory(t *testin
 		t.Fatalf("project-directory range = %q -> %q, want %q -> working directory", diff.BaseRef, diff.HeadRef, startSHA)
 	}
 	paths := make(map[string]bool, len(diff.Files))
+	viewedBlobSHA := ""
 	for _, file := range diff.Files {
 		paths[file.Path] = true
+		if file.Path == "tracked.txt" && file.HeadBlobSha != nil {
+			viewedBlobSHA = *file.HeadBlobSha
+		}
 	}
 	if !paths["tracked.txt"] || !paths["untracked.txt"] {
 		t.Fatalf("project-directory diff files = %v, want committed/live tracked file and untracked file", paths)
 	}
 	if diff.UncommittedChanges == nil || !*diff.UncommittedChanges {
 		t.Fatalf("project-directory uncommitted flag = %#v, want true", diff.UncommittedChanges)
+	}
+	if viewedBlobSHA == "" {
+		t.Fatal("tracked file has no viewed baseline blob sha")
+	}
+
+	// Once that complete version is viewed, a later request with its blob sha
+	// returns only the subsequent edit, not every change since the chat started.
+	write("tracked.txt", "live project directory\nnew after review\n")
+	path := "tracked.txt"
+	deltaResponse, err := server.GetAgentDiff(context.Background(), api.GetAgentDiffRequestObject{
+		ProjectId: project.ID,
+		AgentId:   "project-directory",
+		Params: api.GetAgentDiffParams{
+			IncludeUncommitted: &includeUncommitted,
+			Path:               &path,
+			ViewedBlobSha:      &viewedBlobSHA,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta, ok := deltaResponse.(api.GetAgentDiff200JSONResponse)
+	if !ok || len(delta.Files) != 1 {
+		t.Fatalf("viewed delta response = %#v, want one file", deltaResponse)
+	}
+	if delta.Files[0].Additions != 1 || delta.Files[0].Deletions != 0 {
+		t.Fatalf("viewed delta = +%d -%d, want +1 -0", delta.Files[0].Additions, delta.Files[0].Deletions)
 	}
 }
