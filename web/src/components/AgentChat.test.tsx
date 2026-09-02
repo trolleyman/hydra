@@ -286,6 +286,28 @@ describe('sectioned search output', () => {
     ])
   })
 
+  it('derives file headings from unified diff boundaries', () => {
+    const rows = scriptOutputRows([{
+      kind: 'git',
+      command: 'git diff main',
+      lines: [
+        'diff --git a/internal/a.go b/internal/a.go',
+        '--- a/internal/a.go',
+        '+++ b/internal/a.go',
+        '@@ -1 +1 @@',
+        '-old',
+        '+new',
+        'diff --git a/docs/old.md b/docs/new.md',
+        '--- a/docs/old.md',
+        '+++ b/docs/new.md',
+      ],
+    }])
+
+    expect(rows.filter((row) => row.header).map((row) => row.header?.label)).toEqual([
+      'internal/a.go', 'docs/new.md',
+    ])
+  })
+
   it('renders one inset rule between nonconsecutive matches in the same file', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',

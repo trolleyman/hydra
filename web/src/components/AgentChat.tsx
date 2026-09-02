@@ -54,7 +54,7 @@ import { buildOutputSpans, diagnosticSpans } from '../lib/buildOutput'
 import { isJsonOutput } from '../lib/jsonOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
-import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
+import { blamePrefixSpans, gitDiffPath, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
 import type { OutputSpan } from '../lib/outputSpan'
 import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
@@ -2932,7 +2932,12 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'git') {
-      for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
+      const highlighted = gitOutputSpans(section.lines)
+      section.lines.forEach((line, i) => {
+        const path = gitDiffPath(line)
+        if (path) add([scriptHeader('file', path)])
+        rows.push({ num: '', html: '', spans: highlighted[i], tone: 'code' })
+      })
       continue
     }
     if (section.kind === 'summary') {

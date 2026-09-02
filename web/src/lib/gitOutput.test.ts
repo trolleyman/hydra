@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { gitOutputSpans, parseBlameLine } from './gitOutput'
+import { gitDiffPath, gitOutputSpans, parseBlameLine } from './gitOutput'
 
 // The colour a span carries, named rather than spelled, so a case reads as the
 // line it is about rather than as a list of Tailwind classes.
@@ -224,6 +224,20 @@ describe('gitOutputSpans', () => {
   it('leaves a line it has no shape for alone', () => {
     // A commit message body, indented four spaces by `git show`.
     expect(spans('    Merge branch \'main\'', '')).toEqual([[["    Merge branch 'main'", '']], []])
+  })
+})
+
+describe('gitDiffPath', () => {
+  it('reads ordinary, renamed and quoted destination paths', () => {
+    expect(gitDiffPath('diff --git a/internal/a.go b/internal/a.go')).toBe('internal/a.go')
+    expect(gitDiffPath('diff --git a/old.go b/new.go')).toBe('new.go')
+    expect(gitDiffPath('diff --git "a/old name.go" "b/new name.go"')).toBe('new name.go')
+    expect(gitDiffPath('diff --git "a/caf\\303\\251.go" "b/caf\\303\\251.go"')).toBe('café.go')
+  })
+
+  it('does not invent a path for a fragment inside a patch', () => {
+    expect(gitDiffPath('+++ b/internal/a.go')).toBeNull()
+    expect(gitDiffPath('@@ -1 +1 @@')).toBeNull()
   })
 })
 
