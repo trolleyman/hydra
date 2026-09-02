@@ -15,11 +15,11 @@ import { isIgnoreFile } from './ignoreHighlight'
 // lib/ignoreHighlight, the way a shell snippet is highlighted by lib/shellEmbed.
 // highlightCore.canHighlight is the question to ask about a name from here -
 // "can anything colour this?" - rather than prism.hasLanguage alone.
-const EXT_LANG_MAP: Record<string, string> = {
+export const EXT_LANG_MAP: Record<string, string> = {
   // Web / TS-JS
   ts: 'typescript', tsx: 'tsx', mts: 'typescript', cts: 'typescript',
   js: 'javascript', jsx: 'jsx', mjs: 'javascript', cjs: 'javascript',
-  json: 'json', jsonc: 'json',
+  json: 'json', jsonc: 'json', jsonnet: 'jsonnet', libsonnet: 'jsonnet',
   html: 'markup', htm: 'markup', xml: 'markup', xhtml: 'markup', svg: 'markup',
   vue: 'markup', svelte: 'markup',
   css: 'css', scss: 'scss', sass: 'scss', less: 'less', styl: 'stylus',

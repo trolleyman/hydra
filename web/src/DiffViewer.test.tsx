@@ -127,6 +127,48 @@ describe('diff sidebar path tooltips', () => {
   })
 })
 
+describe('file header metadata', () => {
+  it('marks generated files and passes the current viewed state to the toggle', () => {
+    const onToggleViewed = vi.fn()
+    render(
+      <FileDiff
+        file={file({ path: 'Cargo.lock', head_blob_sha: 'blob-1' })}
+        sideBySide={false}
+        currentContext={3}
+        viewed={false}
+        onToggleViewed={onToggleViewed}
+        onComment={() => {}}
+        onExpand={() => {}}
+        isCollapsed={false}
+        onToggleCollapse={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('Auto-generated')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
+    expect(onToggleViewed).toHaveBeenCalledWith('Cargo.lock', 'blob-1', false)
+  })
+
+  it('searches for and applies a syntax language override', () => {
+    render(
+      <FileDiff
+        file={file({ path: 'a.ts' })}
+        sideBySide={false}
+        currentContext={3}
+        onComment={() => {}}
+        onExpand={() => {}}
+        isCollapsed={false}
+        onToggleCollapse={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Syntax highlighting: TypeScript' }))
+    fireEvent.change(screen.getByPlaceholderText('Search languages, aliases, extensions'), { target: { value: '.libsonnet' } })
+    fireEvent.click(screen.getByRole('button', { name: /Jsonnet/ }))
+    expect(screen.getByRole('button', { name: 'Syntax highlighting: Jsonnet' })).toBeInTheDocument()
+  })
+})
+
 // A whole-file (expanded) diff: 40 unchanged lines, a change, 40 more. The
 // reveal model shows CTX lines either side of the change and collapses the rest
 // behind expanders, so the rendered row count is far below the line count.
@@ -241,9 +283,9 @@ describe('bodyShape matches what the body renders', () => {
 
   it('carries the label text of each expander, so a narrow pane can be measured', () => {
     const shape = bodyShape(wholeFile(), false, false, 3)
-    // Leading and trailing edge expanders: one chevron each, both counting the
-    // 37 lines they hide (40 minus the CTX shown next to the change).
-    expect(shape).toMatchObject({ expanders: [{ buttons: 1, hidden: 37 }, { buttons: 1, hidden: 37 }] })
+    // Leading and trailing edge expanders each offer a directional action and
+    // show-all, both counting the 37 lines they hide.
+    expect(shape).toMatchObject({ expanders: [{ buttons: 2, hidden: 37 }, { buttons: 2, hidden: 37 }] })
   })
 
   it('describes the fixed-height bodies', () => {
@@ -326,7 +368,7 @@ describe('expander context labels', () => {
 })
 
 // A file too big to ship whole arrives as `-U3` fragments, and its two edge
-// expanders used to be bare chevrons: the gaps BETWEEN hunks could state their
+// expanders identify their direction and count: the gaps BETWEEN hunks can state their
 // size (two hunk headers bracket them) but the runs above the first and below the
 // last had nothing to measure against, so the reader was told "there is more"
 // without being told how much - and only learnt it after a click promoted the
@@ -360,15 +402,15 @@ describe('a windowed file counts what its edges hide', () => {
       expect.stringContaining('395 lines'),
     ])
     expect(bodyShape(f, false, false, 3)).toMatchObject({
-      expanders: [{ buttons: 1, hidden: 99 }, { buttons: 1, hidden: 395 }],
+      expanders: [{ buttons: 2, hidden: 99 }, { buttons: 2, hidden: 395 }],
     })
   })
 
-  it('still counts the leading run without one, and leaves the trailing chevron bare', () => {
+  it('still counts the leading run without one, and leaves the trailing action directional-only', () => {
     const f = windowedDeep()
-    expect(expanderTexts(f)).toEqual([expect.stringContaining('99 lines'), ''])
+    expect(expanderTexts(f)).toEqual([expect.stringContaining('99 lines'), 'Down 20 lines'])
     expect(bodyShape(f, false, false, 3)).toMatchObject({
-      expanders: [{ buttons: 1, hidden: 99 }, { buttons: 1, hidden: null }],
+      expanders: [{ buttons: 2, hidden: 99 }, { buttons: 1, hidden: null }],
     })
   })
 
@@ -379,7 +421,7 @@ describe('a windowed file counts what its edges hide', () => {
   it('drops the trailing expander when the last hunk provably reaches EOF', () => {
     const atEof = windowedDeep({ total_lines: 105 })
     expect(expanderTexts(atEof)).toEqual([expect.stringContaining('99 lines')])
-    expect(bodyShape(atEof, false, false, 3)).toMatchObject({ expanders: [{ buttons: 1, hidden: 99 }] })
+    expect(bodyShape(atEof, false, false, 3)).toMatchObject({ expanders: [{ buttons: 2, hidden: 99 }] })
   })
 
   it('leaves a file that starts at line 1 without a leading expander', () => {

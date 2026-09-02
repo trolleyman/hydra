@@ -18,6 +18,8 @@ describe('getLanguage', () => {
     // A log is the commonest thing a Bash card reads out, and Prism has a
     // grammar for one: the timestamp, the level and the paths in the message.
     expect(getLanguage('watch.log')).toBe('log')
+    expect(getLanguage('policy.jsonnet')).toBe('jsonnet')
+    expect(getLanguage('lib/policy.libsonnet')).toBe('jsonnet')
   })
 
   it('maps the JSX-bearing extensions to the JSX grammars, not the plain ones', () => {
@@ -73,7 +75,7 @@ describe('getLanguage', () => {
     // the other tests here assert the eager set of.
     const paths = [
       'a.ts', 'a.tsx', 'a.js', 'a.jsx', 'a.mjs', 'a.cjs', 'a.json', 'a.html', 'a.xml',
-      'a.svg', 'a.vue', 'a.svelte', 'a.css', 'a.scss', 'a.less', 'a.styl', 'a.go',
+      'a.svg', 'a.vue', 'a.svelte', 'a.css', 'a.scss', 'a.less', 'a.styl', 'a.jsonnet', 'a.go',
       'a.rs', 'a.c', 'a.h', 'a.cpp', 'a.cs', 'a.swift', 'a.dart', 'a.nim', 'a.d',
       'a.v', 'a.vhdl', 'a.wasm', 'a.java', 'a.kt', 'a.kts', 'a.scala', 'a.groovy', 'a.clj',
       'a.py', 'a.rb', 'a.pl', 'a.lua', 'a.r', 'a.php', 'a.tcl', 'a.coffee', 'a.ex',
@@ -116,7 +118,7 @@ describe('shebangLanguage', () => {
 
 describe('eager Prism grammars', () => {
   it('bundles lua and other common languages up front', () => {
-    for (const lang of ['lua', 'typescript', 'tsx', 'go', 'python', 'rust', 'bash', 'json', 'yaml', 'log']) {
+    for (const lang of ['lua', 'typescript', 'tsx', 'go', 'python', 'rust', 'bash', 'json', 'jsonnet', 'yaml', 'log']) {
       expect(hasLanguage(lang), lang).toBe(true)
     }
   })
@@ -124,6 +126,13 @@ describe('eager Prism grammars', () => {
   it('resolves aliases of eager grammars', () => {
     expect(hasLanguage('html')).toBe(true) // via markup
     expect(hasLanguage('ts')).toBe(true) // via typescript
+  })
+
+  it('highlights Jsonnet with the bundled grammar', () => {
+    const html = highlightToHtml('local object = { answer: 42 }; if ready then object else null', 'jsonnet')
+    expect(html).toContain('token keyword')
+    expect(html).toContain('token property')
+    expect(html).toContain('token number')
   })
 
   it('does not eagerly bundle rare languages', () => {

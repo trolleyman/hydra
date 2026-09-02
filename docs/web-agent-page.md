@@ -90,10 +90,14 @@ and `web/src/DiffViewer.tsx`):
   one comes from `total_lines` on the wire - the file's length, which the server
   fills in from the full read `getFullContextDiff` already does, so it costs no
   extra work and is simply absent for a file that read never covered. Without it
-  `trailingGap` returns null and that expander falls back to a bare chevron;
+  `trailingGap` returns null and that expander falls back to its directional
+  action without a Show all action;
   with it, `atFileEnd` also drops the expander outright when the last hunk
   provably ends at EOF (the old `trailingContext < currentContext` guess couldn't
-  tell that from a file with more below, and drew a chevron expanding to nothing).
+  tell that from a file with more below, and drew an action that expanded to nothing).
+  Every known gap presents labelled **Up 20 lines**, **Down 20 lines**, and/or
+  **Show all N lines** actions with directional line icons; a middle gap has all
+  three and a file edge has the two actions that make sense there.
 - Lazy file bodies + **measured placeholders**: a file card's body stays an empty
   placeholder until the card first scrolls near the viewport (`near`, a one-way
   IntersectionObserver latch in `FileDiff`). The placeholder's height is not
@@ -132,7 +136,8 @@ and `web/src/DiffViewer.tsx`):
   thread mounts taller than its placeholder (79px for one thread, in the sim).
   Two things in `FileDiff` keep that from moving the page under the reader, and
   both are easy to undo by accident:
-  - The wrapper's `transition-[height]` is the collapse/expand glide, and the
+  - The wrapper's `transition-[height]` is the opening glide; closing a file is
+    immediate. The same height is also where a
     correction lands on that same height. Left to animate it turned a one-frame
     reflow into 200ms of the diff sliding - so the layout effect on `wrapperH`
     cancels the transition (set `none`, read `offsetHeight`, restore) whenever
@@ -148,6 +153,14 @@ and `web/src/DiffViewer.tsx`):
     double. This is also what keeps the **sticky file headers** attached - a
     header whose card slides out from under it goes on being painted where it
     was, so it reads as detached from its own card until the next scroll.
+- Diff file headers show the detected syntax language as a lowlit control. Its
+  picker searches the full Prism catalog by display name, grammar codename,
+  alias, or mapped file extension, and a per-file override immediately
+  re-highlights both sides. Jsonnet uses Hydra's bundled Jsonnet grammar.
+  Machine-owned lockfiles and conventional generated paths carry an
+  **Auto-generated** label and start folded once per page session. Marking a file
+  **Viewed** also folds it immediately; unmarking it leaves the reader's current
+  fold state alone.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
   (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to
