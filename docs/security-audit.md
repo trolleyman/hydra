@@ -162,6 +162,10 @@ and it can *record* intent (every `PreToolUse` is already logged to
   die-with-parent + namespace isolation on by default.
 - Credential masking list is broad and sensible.
 - Codex's own sandbox is bypassed **deliberately** (it's already inside Hydra's).
+- Codex's separate command classifier can still reject raw recursive `rm` before
+  Hydra's outer sandbox runs it. `$HYDRA_BIN sandbox-remove` provides bounded
+  scratch cleanup under only the head worktree and private `$TMPDIR`; it does not
+  weaken the host boundary or add a blanket `rm` allow rule.
 - The artifacts trust model (branch can't self-grant host access) is a good
   template to copy for MCP.
 - Every hook event is already captured to `status_log.jsonl` — the raw material
