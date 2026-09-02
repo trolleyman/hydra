@@ -697,8 +697,10 @@ const GIT_QUIET = /^(-q|--quiet)$/
 //
 // `--graph` and `-p` are not among them: the first only puts the topology in the
 // left margin and then prints the same lines, and the second prints a patch,
-// which lib/gitOutput now reads.
+// which lib/gitOutput now reads. Git's named pretty presets are also known
+// shapes; only a caller-authored format string is arbitrary.
 const GIT_REFUSED = /^(--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
+const GIT_NAMED_FORMAT = /^--(?:pretty|format)=(?:oneline|short|medium|full|fuller|reference|email|raw)$/
 
 // parseGitReport says what a git call prints: one of the reports lib/gitOutput
 // colours - a status, a commit header, a diffstat, a patch, an ignore rule -
@@ -720,7 +722,7 @@ function parseGitReport(words: Word[]): 'report' | 'quiet' | null {
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return null
   const args = words.slice(i + 1).filter((w) => !w.quoted)
   if (args.some((w) => GIT_QUIET.test(w.text))) return 'quiet'
-  if (args.some((w) => GIT_REFUSED.test(w.text))) return null
+  if (args.some((w) => GIT_REFUSED.test(w.text) && !GIT_NAMED_FORMAT.test(w.text))) return null
   const readonly = GIT_READONLY[sub.text]
   return !readonly || readonly(args) ? 'report' : null
 }

@@ -62,6 +62,22 @@ describe('gitOutputSpans', () => {
     ])
   })
 
+  it('colours the fields in Git fuller format', () => {
+    expect(spans(
+      'commit f5c8c282d6a45373941fa5de42879b1576a46459',
+      'Author:     Callum Tolley <cgtrolley@gmail.com>',
+      'AuthorDate: Wed Sep 2 01:25:04 2026 +0100',
+      'Commit:     Callum Tolley <cgtrolley@gmail.com>',
+      'CommitDate: Wed Sep 2 01:25:04 2026 +0100',
+    )).toEqual([
+      [['commit ', 'dim'], ['f5c8c282d6a45373941fa5de42879b1576a46459', 'sha']],
+      [['Author:', 'dim'], ['     ', ''], ['Callum Tolley', ''], [' <cgtrolley@gmail.com>', 'dim']],
+      [['AuthorDate:', 'dim'], [' ', ''], ['Wed Sep 2 01:25:04 2026 +0100', '']],
+      [['Commit:', 'dim'], ['     ', ''], ['Callum Tolley', ''], [' <cgtrolley@gmail.com>', 'dim']],
+      [['CommitDate:', 'dim'], [' ', ''], ['Wed Sep 2 01:25:04 2026 +0100', '']],
+    ])
+  })
+
   it('lowlights the address on an author line', () => {
     expect(spans('Author: Callum Tolley <cgtrolley@gmail.com>')).toEqual([
       [['Author:', 'dim'], [' ', ''], ['Callum Tolley', ''], [' <cgtrolley@gmail.com>', 'dim']],
