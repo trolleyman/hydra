@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -108,7 +109,7 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 		if !strings.HasPrefix(res.MCPConfigPath, paths.GetSeedDirFromProjectRoot(projectRoot, "strict-head")+string(os.PathSeparator)) {
 			t.Fatalf("MCPConfigPath = %q, want native seed path", res.MCPConfigPath)
 		}
-		if !stringInSlice(res.ImmutablePaths, res.MCPConfigPath) {
+		if !slices.Contains(res.ImmutablePaths, res.MCPConfigPath) {
 			t.Fatalf("native strict MCP config is not immutable: %v", res.ImmutablePaths)
 		}
 		if srv := readMCPServer(t, res.MCPConfigPath, gate.HydraControlServer); srv["command"] != res.HydraBinPath {
