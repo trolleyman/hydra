@@ -4,7 +4,9 @@ Status: **BUILT.** A head linked to a PR/MR shows the forge's review
 conversations inline in Hydra's diff viewer, anchored to the file and line they
 were written against, next to your own local comments. You can reply on the pull
 request, keep a reply local to Hydra, hand a thread to the agent, or start a new
-thread on a line. The publish/forge machinery underneath is
+thread on a line. Code suggestions can be applied individually from their
+comment or added to an explicit batch and applied together from the Changes
+toolbar. The publish/forge machinery underneath is
 [non-local-integration.md](non-local-integration.md); adopting someone's PR as a
 head is [pr-adoption.md](pr-adoption.md).
 
@@ -48,6 +50,11 @@ me to this on GitHub" move costs one click and needs no menu entry.
   agent-*pull* pattern used elsewhere: the agent re-reads the live thread itself,
   so nothing is snapshotted at click time.
 - **Copy link to thread** (the `...` menu) - opening it is the icon's job.
+- **Apply suggestion** - writes that comment's fenced replacement directly into
+  the head's worktree. **Add to batch** selects a suggestion without applying it;
+  once the batch is non-empty, the Changes toolbar offers **Apply batch** for
+  exactly those selections. Hydra validates the entire batch before it changes a
+  file.
 - **Comment on GitHub / GitLab** (in the new-comment box on any new-side line) -
   starts a new review thread instead of writing to the agent.
 
@@ -140,6 +147,12 @@ components would bust their memos on every parent render.
 - **New comments need a fresh anchor.** A new GitHub review comment must name
   the head commit; GitLab needs all three diff refs. Both are read at post time
   rather than cached, since a stale one is rejected by the forge.
+- **Suggestions verify their source.** GitHub's `diffHunk` and GitLab's structured
+  `from_content` carry the original lines. Hydra compares those lines with the
+  head's current worktree before writing, rejects stale ranges, rejects overlaps
+  in a batch, and never follows a suggestion path outside the worktree. Applied
+  state is Hydra-local because the change is left uncommitted for the head to
+  inspect and commit.
 - **`local_only`, not `local`.** The origin enum value is spelled that way
   because an oapi-codegen enum value colliding with another enum's (the config
   scopes) silently re-prefixes BOTH enums' Go constants.
@@ -151,5 +164,4 @@ components would bust their memos on every parent render.
   PR but Hydra has nowhere to put them).
 - A local note on a line with no forge thread - local review comments already
   cover that, with a different audience.
-- Reactions, suggestions ("apply suggestion"), and review submission. Those are
-  the forge's review UI, which Hydra deliberately does not replicate.
+- Reactions and review submission. Those remain the forge's review UI.

@@ -1255,6 +1255,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply:
+    post:
+      summary: Apply one or more review suggestions to a head's worktree
+      operationId: applyReviewSuggestions
+      description: >
+        Applies the suggested replacements carried by the numbered forge comments to
+        the head's worktree. The whole batch is validated before any file is changed;
+        stale, missing, and overlapping suggestions are rejected together.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyReviewSuggestionsRequest'
+      responses:
+        '200':
+          description: Applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyReviewSuggestionsResponse'
+        '400':
+          description: Bad Request (invalid, stale, or overlapping suggestions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{agent_id}/review/comments:
     get:
       summary: This head's Hydra-native review comments
@@ -4571,6 +4614,9 @@ components:
         line:
           type: integer
           description: NEW-side line the thread anchors to (0 when the forge reports none).
+        start_line:
+          type: integer
+          description: First NEW-side line covered by the comment. Omitted for a single-line comment.
         resolved:
           type: boolean
           description: Resolved, by the forge's own flag OR Hydra's local mark (see resolved_locally).
@@ -4614,6 +4660,41 @@ components:
           type: string
           enum: [forge, local_only]
           description: "\"forge\" - on the PR for everyone to see; \"local_only\" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants."
+        suggestion:
+          $ref: '#/components/schemas/ReviewSuggestion'
+
+    ReviewSuggestion:
+      type: object
+      description: A replacement proposed by a forge comment for its anchored line range.
+      required: [start_line, end_line, replacement, applied]
+      properties:
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+        replacement:
+          type: string
+        applied:
+          type: boolean
+
+    ApplyReviewSuggestionsRequest:
+      type: object
+      required: [numbers]
+      properties:
+        numbers:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+
+    ApplyReviewSuggestionsResponse:
+      type: object
+      required: [applied]
+      properties:
+        applied:
+          type: array
+          items:
+            type: integer
 
     ReviewCommentsResponse:
       type: object

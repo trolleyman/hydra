@@ -809,6 +809,16 @@ type AgentTestsChangedEvent struct {
 // AgentTestsChangedEventType defines model for AgentTestsChangedEvent.Type.
 type AgentTestsChangedEventType string
 
+// ApplyReviewSuggestionsRequest defines model for ApplyReviewSuggestionsRequest.
+type ApplyReviewSuggestionsRequest struct {
+	Numbers []int `json:"numbers"`
+}
+
+// ApplyReviewSuggestionsResponse defines model for ApplyReviewSuggestionsResponse.
+type ApplyReviewSuggestionsResponse struct {
+	Applied []int `json:"applied"`
+}
+
 // ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
 type ApprovalDecisionRequest struct {
 	// Command For a host_command approval only: the exact command text the UI displayed and the user approved. The daemon runs THIS text verbatim (never re-reading the head-writable request file), which closes the TOCTOU window where an agent could swap the command after the user saw it. Ignored for every other kind.
@@ -3437,6 +3447,14 @@ type ReviewState struct {
 	UnresolvedDiscussions *int   `json:"unresolved_discussions,omitempty"`
 }
 
+// ReviewSuggestion A replacement proposed by a forge comment for its anchored line range.
+type ReviewSuggestion struct {
+	Applied     bool   `json:"applied"`
+	EndLine     int    `json:"end_line"`
+	Replacement string `json:"replacement"`
+	StartLine   int    `json:"start_line"`
+}
+
 // ReviewThread One review conversation, anchored to a file/line where the forge reports one.
 type ReviewThread struct {
 	// Id Thread handle used for replies (GitHub - the root comment id; GitLab - the discussion id).
@@ -3454,8 +3472,11 @@ type ReviewThread struct {
 	Resolved *bool `json:"resolved,omitempty"`
 
 	// ResolvedLocally Resolved in Hydra only - the forge still shows it open, because Hydra never writes a resolve to a PR.
-	ResolvedLocally *bool   `json:"resolved_locally,omitempty"`
-	Url             *string `json:"url,omitempty"`
+	ResolvedLocally *bool `json:"resolved_locally,omitempty"`
+
+	// StartLine First NEW-side line covered by the comment. Omitted for a single-line comment.
+	StartLine *int    `json:"start_line,omitempty"`
+	Url       *string `json:"url,omitempty"`
 }
 
 // ReviewThreadNote One comment in a review thread. Local notes never reach the forge.
@@ -3474,7 +3495,10 @@ type ReviewThreadNote struct {
 	// Origin "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
 	Origin ReviewThreadNoteOrigin `json:"origin"`
 	Read   *bool                  `json:"read,omitempty"`
-	Url    *string                `json:"url,omitempty"`
+
+	// Suggestion A replacement proposed by a forge comment for its anchored line range.
+	Suggestion *ReviewSuggestion `json:"suggestion,omitempty"`
+	Url        *string           `json:"url,omitempty"`
 }
 
 // ReviewThreadNoteOrigin "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
@@ -4997,6 +5021,9 @@ type UpdateReviewCommentJSONRequestBody = UpdateReviewCommentBody
 
 // ResolveReviewCommentJSONRequestBody defines body for ResolveReviewComment for application/json ContentType.
 type ResolveReviewCommentJSONRequestBody = ResolveReviewCommentBody
+
+// ApplyReviewSuggestionsJSONRequestBody defines body for ApplyReviewSuggestions for application/json ContentType.
+type ApplyReviewSuggestionsJSONRequestBody = ApplyReviewSuggestionsRequest
 
 // CreateReviewCommentJSONRequestBody defines body for CreateReviewComment for application/json ContentType.
 type CreateReviewCommentJSONRequestBody = NewReviewCommentRequest
@@ -7425,6 +7452,9 @@ type ServerInterface interface {
 	// Resolve (or reopen) a review comment by its number
 	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve)
 	ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int)
+	// Apply one or more review suggestions to a head's worktree
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply)
+	ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// The review threads on this head's MR, for the diff viewer
 	// (GET /api/projects/{project_id}/agents/{agent_id}/review/threads)
 	GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -9273,6 +9303,40 @@ func (siw *ServerInterfaceWrapper) ResolveReviewComment(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ApplyReviewSuggestions operation middleware
+func (siw *ServerInterfaceWrapper) ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyReviewSuggestions(w, r, projectId, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetReviewThreads operation middleware
 func (siw *ServerInterfaceWrapper) GetReviewThreads(w http.ResponseWriter, r *http.Request) {
 
@@ -10588,6 +10652,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}", wrapper.DeleteReviewComment)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}", wrapper.UpdateReviewComment)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve", wrapper.ResolveReviewComment)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply", wrapper.ApplyReviewSuggestions)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.GetReviewThreads)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.CreateReviewComment)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply", wrapper.ReplyToReviewThread)
@@ -12396,6 +12461,43 @@ func (response ResolveReviewComment404JSONResponse) VisitResolveReviewCommentRes
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ApplyReviewSuggestionsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+	Body      *ApplyReviewSuggestionsJSONRequestBody
+}
+
+type ApplyReviewSuggestionsResponseObject interface {
+	VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error
+}
+
+type ApplyReviewSuggestions200JSONResponse ApplyReviewSuggestionsResponse
+
+func (response ApplyReviewSuggestions200JSONResponse) VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ApplyReviewSuggestions400JSONResponse ErrorResponse
+
+func (response ApplyReviewSuggestions400JSONResponse) VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ApplyReviewSuggestions404JSONResponse ErrorResponse
+
+func (response ApplyReviewSuggestions404JSONResponse) VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetReviewThreadsRequestObject struct {
 	ProjectId string `json:"project_id"`
 	AgentId   string `json:"agent_id"`
@@ -13711,6 +13813,9 @@ type StrictServerInterface interface {
 	// Resolve (or reopen) a review comment by its number
 	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve)
 	ResolveReviewComment(ctx context.Context, request ResolveReviewCommentRequestObject) (ResolveReviewCommentResponseObject, error)
+	// Apply one or more review suggestions to a head's worktree
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply)
+	ApplyReviewSuggestions(ctx context.Context, request ApplyReviewSuggestionsRequestObject) (ApplyReviewSuggestionsResponseObject, error)
 	// The review threads on this head's MR, for the diff viewer
 	// (GET /api/projects/{project_id}/agents/{agent_id}/review/threads)
 	GetReviewThreads(ctx context.Context, request GetReviewThreadsRequestObject) (GetReviewThreadsResponseObject, error)
@@ -15148,6 +15253,40 @@ func (sh *strictHandler) ResolveReviewComment(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ResolveReviewCommentResponseObject); ok {
 		if err := validResponse.VisitResolveReviewCommentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyReviewSuggestions operation middleware
+func (sh *strictHandler) ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request ApplyReviewSuggestionsRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	var body ApplyReviewSuggestionsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyReviewSuggestions(ctx, request.(ApplyReviewSuggestionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyReviewSuggestions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyReviewSuggestionsResponseObject); ok {
+		if err := validResponse.VisitApplyReviewSuggestionsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

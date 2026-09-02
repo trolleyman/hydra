@@ -3,7 +3,7 @@ package reviewstore
 // Hydra's overlay on a head's review conversation: the numbering, what has been
 // resolved, and what has been read.
 //
-// All three exist because Hydra owns something about a comment without owning the
+// All four exist because Hydra owns something about a comment without owning the
 // comment. That distinction is the whole design (docs/review-agent.md): people
 // write, edit and delete on GitHub directly, and Hydra cannot prevent that and
 // should not try. A local copy of forge content declaring itself authoritative
@@ -17,6 +17,9 @@ package reviewstore
 //     forge (see ThreadState), so this is explicitly a local mark.
 //   - The READ flag. Who has seen what is not a fact about the comment at all -
 //     it is a fact about this Hydra install, and no forge would store it.
+//   - The APPLIED suggestion fingerprint. Hydra applies the edit to its local
+//     worktree rather than committing through the forge, so only Hydra knows it
+//     happened. Fingerprinting lets an edited suggestion become actionable again.
 //
 // One file, one writer. Every write path - the browser over HTTP, agents over
 // reviewq, the forge poller - lands in the daemon, so a plain read-modify-write of
@@ -74,6 +77,9 @@ type sidecar struct {
 	// interleave by FIRST SIGHT across origins, so "everything below N" is not a
 	// meaningful thing to have read.
 	Read map[string]bool `json:"read,omitempty"`
+	// Applied maps a forge note id to the fingerprint of the suggestion Hydra
+	// applied. Keeping the fingerprint means an edited suggestion is offered again.
+	Applied map[string]string `json:"applied,omitempty"`
 }
 
 // sidecarMu serializes read-modify-write on the file. The daemon is the only
@@ -86,13 +92,13 @@ func sidecarPath(projectRoot, id string) string {
 }
 
 func loadSidecar(projectRoot, id string) sidecar {
-	sc := sidecar{Keys: map[string]NumberedRef{}, Threads: map[string]ThreadState{}, Read: map[string]bool{}}
+	sc := sidecar{Keys: map[string]NumberedRef{}, Threads: map[string]ThreadState{}, Read: map[string]bool{}, Applied: map[string]string{}}
 	data, err := os.ReadFile(sidecarPath(projectRoot, id))
 	if err != nil {
 		return sc
 	}
 	if err := json.Unmarshal(data, &sc); err != nil {
-		return sidecar{Keys: map[string]NumberedRef{}, Threads: map[string]ThreadState{}, Read: map[string]bool{}}
+		return sidecar{Keys: map[string]NumberedRef{}, Threads: map[string]ThreadState{}, Read: map[string]bool{}, Applied: map[string]string{}}
 	}
 	if sc.Keys == nil {
 		sc.Keys = map[string]NumberedRef{}
@@ -103,7 +109,25 @@ func loadSidecar(projectRoot, id string) sidecar {
 	if sc.Read == nil {
 		sc.Read = map[string]bool{}
 	}
+	if sc.Applied == nil {
+		sc.Applied = map[string]string{}
+	}
 	return sc
+}
+
+// SuggestionApplied reports whether this exact version of a forge suggestion
+// has already been written to the head's worktree.
+func SuggestionApplied(projectRoot, id, noteID, fingerprint string) bool {
+	return loadSidecar(projectRoot, id).Applied[noteID] == fingerprint
+}
+
+// MarkSuggestionApplied records the exact suggestion version Hydra applied.
+func MarkSuggestionApplied(projectRoot, id, noteID, fingerprint string) error {
+	_, err := update(projectRoot, id, func(sc *sidecar) struct{} {
+		sc.Applied[noteID] = fingerprint
+		return struct{}{}
+	})
+	return errtrace.Wrap(err)
 }
 
 func saveSidecar(projectRoot, id string, sc sidecar) error {

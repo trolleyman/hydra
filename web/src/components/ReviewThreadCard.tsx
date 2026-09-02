@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom'
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, MessageSquare, Quote, Sparkles } from 'lucide-react'
+import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, ListPlus, LoaderCircle, Mail, MessageSquare, Quote, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
@@ -28,6 +28,11 @@ export interface ReviewThreadActions {
   // resolveWithAgent asks the head to address this thread (an agent-pull prompt,
   // the same pattern as "Fix the merge conflicts").
   resolveWithAgent: (thread: ReviewThread) => Promise<void>
+  // applySuggestion writes the replacement carried by one numbered forge note
+  // directly into the head's worktree.
+  applySuggestion: (number: number) => Promise<void>
+  suggestionsInBatch: ReadonlySet<number>
+  toggleSuggestionBatch: (number: number) => void
   // setResolved marks a thread dealt with BY NUMBER - the same call a Hydra
   // comment takes, because they share one numbering. Local to Hydra; it is never
   // sent to the forge.
@@ -117,7 +122,7 @@ function OriginBadge({ note, provider }: { note: ReviewThreadNote; provider?: st
 export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; actions: ReviewThreadActions }) {
   const [text, setText] = useState(() => actions.draft.load(thread.id))
   const [replying, setReplying] = useState(() => !!actions.draft.load(thread.id))
-  const [busy, setBusy] = useState<'forge' | 'local' | 'agent' | 'resolve' | null>(null)
+  const [busy, setBusy] = useState<'forge' | 'local' | 'agent' | 'resolve' | 'suggestion' | null>(null)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const menuAnchors = useRef(new Map<string, HTMLButtonElement>())
   const menuPanelRef = useRef<HTMLDivElement>(null)
@@ -171,7 +176,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
     actions.draft.save(thread.id, v)
   }
 
-  const run = async (kind: 'forge' | 'local' | 'agent' | 'resolve', fn: () => Promise<void>) => {
+  const run = async (kind: 'forge' | 'local' | 'agent' | 'resolve' | 'suggestion', fn: () => Promise<void>) => {
     setBusy(kind)
     setError(null)
     try {
@@ -421,6 +426,37 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                 </span>
               </div>
               <Markdown text={n.body} highlightMentions className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 break-words" />
+              {n.suggestion && n.number != null && (
+                <div className="mt-2 flex justify-end gap-2">
+                  {n.suggestion.applied ? (
+                    <span className="inline-flex items-center gap-1 text-3xs font-medium text-emerald-700 dark:text-emerald-300">
+                      <Check className="w-3 h-3" /> Applied
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        disabled={busy != null}
+                        onClick={() => actions.toggleSuggestionBatch(n.number!)}
+                        aria-pressed={actions.suggestionsInBatch.has(n.number)}
+                        className={`${btn} inline-flex items-center gap-1.5 border ${actions.suggestionsInBatch.has(n.number) ? 'border-violet-300 bg-violet-100 text-violet-800 hover:bg-violet-200 dark:border-violet-700 dark:bg-violet-900/50 dark:text-violet-200 dark:hover:bg-violet-900/70' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}`}
+                      >
+                        {actions.suggestionsInBatch.has(n.number) ? <Check className="w-3 h-3" /> : <ListPlus className="w-3 h-3" />}
+                        {actions.suggestionsInBatch.has(n.number) ? 'Added to batch' : 'Add to batch'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy != null}
+                        onClick={() => void run('suggestion', () => actions.applySuggestion(n.number!))}
+                        className={`${btn} inline-flex items-center gap-1.5 bg-violet-600 text-white hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-400`}
+                      >
+                        {busy === 'suggestion' ? <LoaderCircle className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        Apply suggestion
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               </div>
             </div>
           ))}

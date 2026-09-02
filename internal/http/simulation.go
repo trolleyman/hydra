@@ -1422,7 +1422,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "701", Number: ptr(3), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
+				{Id: "701", Number: ptr(3), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "This import can use the narrower package.\n\n```suggestion\n\"context\"\n```", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"), Suggestion: &api.ReviewSuggestion{StartLine: 5, EndLine: 5, Replacement: "\"context\"", Applied: false}},
 			},
 		},
 		{
@@ -1430,7 +1430,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_702"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "702", Number: ptr(4), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
+				{Id: "702", Number: ptr(4), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "This field name can be more explicit.\n\n```suggestion\n\tWorktreePath *string\n```", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z"), Suggestion: &api.ReviewSuggestion{StartLine: 45, EndLine: 45, Replacement: "\tWorktreePath *string", Applied: false}},
 				{Id: "703", Number: ptr(5), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
 				// Unread: an agent's reply is news, and this is what the unread dot and
 				// the next-unread jump are for.
@@ -1521,6 +1521,30 @@ func (s *SimulationServer) ReplyToReviewThread(w http.ResponseWriter, r *http.Re
 	}
 	simThreadMu.Unlock()
 	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
+func (s *SimulationServer) ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.ApplyReviewSuggestionsRequest
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simThreads(id) // seed
+	wanted := make(map[int]bool, len(body.Numbers))
+	for _, number := range body.Numbers {
+		wanted[number] = true
+	}
+	applied := []int{}
+	simThreadMu.Lock()
+	for ti := range simThreadsByHead[id] {
+		for ni := range simThreadsByHead[id][ti].Notes {
+			note := &simThreadsByHead[id][ti].Notes[ni]
+			if note.Number == nil || note.Suggestion == nil || note.Suggestion.Applied || !wanted[*note.Number] {
+				continue
+			}
+			note.Suggestion.Applied = true
+			applied = append(applied, *note.Number)
+		}
+	}
+	simThreadMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, api.ApplyReviewSuggestionsResponse{Applied: applied})
 }
 
 // Hydra-native review comments (docs/review-agent.md), in memory for the run.

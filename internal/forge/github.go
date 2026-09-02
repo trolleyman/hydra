@@ -249,7 +249,7 @@ func (p *githubProvider) Close(ctx context.Context, repoDir, _ string, id string
 // ghThreadsQuery pulls the PR's review threads with their comments. Thread
 // resolution is GraphQL-only on GitHub (see ghViewFields), and fetching the
 // comments in the same query keeps a thread render to ONE round trip.
-const ghThreadsQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated path line originalLine comments(first:100){nodes{databaseId body url createdAt author{login avatarUrl}}}}}}}}`
+const ghThreadsQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated path line startLine originalLine originalStartLine comments(first:100){nodes{databaseId body diffHunk url createdAt author{login avatarUrl}}}}}}}}`
 
 // ghThreadsResp is the shape of ghThreadsQuery's response.
 type ghThreadsResp struct {
@@ -258,15 +258,18 @@ type ghThreadsResp struct {
 			PullRequest struct {
 				ReviewThreads struct {
 					Nodes []struct {
-						IsResolved   bool   `json:"isResolved"`
-						IsOutdated   bool   `json:"isOutdated"`
-						Path         string `json:"path"`
-						Line         *int   `json:"line"`
-						OriginalLine *int   `json:"originalLine"`
-						Comments     struct {
+						IsResolved        bool   `json:"isResolved"`
+						IsOutdated        bool   `json:"isOutdated"`
+						Path              string `json:"path"`
+						Line              *int   `json:"line"`
+						StartLine         *int   `json:"startLine"`
+						OriginalLine      *int   `json:"originalLine"`
+						OriginalStartLine *int   `json:"originalStartLine"`
+						Comments          struct {
 							Nodes []struct {
 								DatabaseID int    `json:"databaseId"`
 								Body       string `json:"body"`
+								DiffHunk   string `json:"diffHunk"`
 								URL        string `json:"url"`
 								CreatedAt  string `json:"createdAt"`
 								Author     struct {
@@ -314,8 +317,14 @@ func (p *githubProvider) Threads(ctx context.Context, repoDir, _ string, id stri
 		// to where it was written, which is what the diff viewer can match on.
 		if n.Line != nil {
 			t.Line = *n.Line
+			if n.StartLine != nil {
+				t.StartLine = *n.StartLine
+			}
 		} else if n.OriginalLine != nil {
 			t.Line = *n.OriginalLine
+			if n.OriginalStartLine != nil {
+				t.StartLine = *n.OriginalStartLine
+			}
 		}
 		for _, c := range n.Comments.Nodes {
 			t.Notes = append(t.Notes, Note{
@@ -323,6 +332,7 @@ func (p *githubProvider) Threads(ctx context.Context, repoDir, _ string, id stri
 				Author:    c.Author.Login,
 				AvatarURL: c.Author.AvatarURL,
 				Body:      c.Body,
+				DiffHunk:  c.DiffHunk,
 				URL:       c.URL,
 				CreatedAt: c.CreatedAt,
 			})

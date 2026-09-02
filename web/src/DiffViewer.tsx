@@ -4719,6 +4719,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [projectId, agent.id])
 
   const [threads, setThreads] = useState<ReviewThread[]>([])
+  const [batchedSuggestionNumbers, setBatchedSuggestionNumbers] = useState<Set<number>>(new Set())
+  const [applyingSuggestions, setApplyingSuggestions] = useState(false)
 
   // Every top-level comment stop on this diff, in document order (file order,
   // then line), across both origins. Navigation uses ALL stops: resolving a
@@ -4942,6 +4944,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     try {
       const res = await api.default.getReviewThreads(projectId, agent.id)
       setThreads(res.threads ?? [])
+      const available = new Set((res.threads ?? []).flatMap((thread) => thread.notes.flatMap((note) =>
+        note.suggestion && !note.suggestion.applied && note.number != null ? [note.number] : [],
+      )))
+      setBatchedSuggestionNumbers((current) => new Set([...current].filter((number) => available.has(number))))
       if (res.stale) console.warn('review threads are stale:', res.error)
     } catch (e) {
       console.error('Failed to load review threads:', e)
@@ -4957,6 +4963,34 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const t = setTimeout(() => void refreshThreads(), 0)
     return () => clearTimeout(t)
   }, [refreshThreads])
+
+  const suggestionNumbers = useMemo(() => threads.flatMap((thread) => thread.notes.flatMap((note) =>
+    note.suggestion && !note.suggestion.applied && note.number != null ? [note.number] : [],
+  )), [threads])
+  const selectedSuggestionNumbers = useMemo(
+    () => suggestionNumbers.filter((number) => batchedSuggestionNumbers.has(number)),
+    [suggestionNumbers, batchedSuggestionNumbers],
+  )
+
+  const applySuggestions = useCallback(async (numbers: number[]) => {
+    if (!projectId || numbers.length === 0) return
+    const res = await api.default.applyReviewSuggestions(projectId, agent.id, { numbers })
+    const applied = new Set(res.applied)
+    setThreads((current) => current.map((thread) => ({
+      ...thread,
+      notes: thread.notes.map((note) => note.number != null && applied.has(note.number) && note.suggestion
+        ? { ...note, suggestion: { ...note.suggestion, applied: true } }
+        : note),
+    })))
+    setBatchedSuggestionNumbers((current) => {
+      const next = new Set(current)
+      for (const number of res.applied) next.delete(number)
+      return next
+    })
+    setRefreshKey((value) => value + 1)
+    const count = res.applied.length
+    showSentToast(count === 0 ? 'Suggestions already applied' : count === 1 ? 'Applied suggestion' : `Applied ${count} suggestions`)
+  }, [projectId, agent.id, showSentToast])
 
   // The thread actions handed to every card by context. Each write returns the
   // refreshed thread set, so the card re-renders with the reply already in place.
@@ -5014,6 +5048,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         })
         showSentToast('Sent the thread to the agent')
       },
+      applySuggestion: async (number) => applySuggestions([number]),
+      suggestionsInBatch: batchedSuggestionNumbers,
+      toggleSuggestionBatch: (number) => setBatchedSuggestionNumbers((current) => {
+        const next = new Set(current)
+        if (next.has(number)) next.delete(number)
+        else next.add(number)
+        return next
+      }),
       // In-progress replies persist like the line drafts do: a thread card
       // unmounts when it scrolls out of the virtualised diff, and losing a
       // half-written reply to a reviewer is worse than losing a note to the agent.
@@ -5023,7 +5065,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         clear: (threadId) => clearThreadDraft(projectId, agent.id, threadId),
       },
     }
-  }, [projectId, agent.id, agent.review?.provider, linkedMR, showSentToast])
+  }, [projectId, agent.id, agent.review?.provider, linkedMR, showSentToast, applySuggestions, batchedSuggestionNumbers])
 
   // Threads grouped by file, mirroring commentsByPath so each FileDiff gets only
   // its own (and files with none keep a stable empty identity for their memo).
@@ -5716,6 +5758,25 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
                           </button>
                         </Tooltip>
                       </div>
+                    )}
+                    {selectedSuggestionNumbers.length > 0 && (
+                      <Tooltip content={`Apply ${selectedSuggestionNumbers.length} selected review suggestion${selectedSuggestionNumbers.length === 1 ? '' : 's'}`} side="bottom">
+                        <button
+                          type="button"
+                          disabled={applyingSuggestions}
+                          onClick={() => {
+                            setApplyingSuggestions(true)
+                            void applySuggestions(selectedSuggestionNumbers)
+                              .catch((error) => showSentToast(formatError(error), 'error'))
+                              .finally(() => setApplyingSuggestions(false))
+                          }}
+                          className="inline-flex h-6 items-center gap-1.5 rounded-md bg-violet-600 px-2 text-3xs font-medium text-white hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-400 disabled:opacity-50 cursor-pointer"
+                        >
+                          {applyingSuggestions ? <LoaderCircle className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          <span className="optical-center">Apply batch</span>
+                          <span className="optical-center rounded bg-white/20 px-1 tabular-nums">{selectedSuggestionNumbers.length}</span>
+                        </button>
+                      </Tooltip>
                     )}
                     <ReviewDraftPopover
                       comments={queuedComments}

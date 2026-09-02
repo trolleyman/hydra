@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ReviewSuggestion } from './ReviewSuggestion';
 /**
  * One comment in a review thread. Local notes never reach the forge.
  */
@@ -24,6 +25,7 @@ export type ReviewThreadNote = {
      * "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
      */
     origin: ReviewThreadNote.origin;
+    suggestion?: ReviewSuggestion;
 };
 export namespace ReviewThreadNote {
     /**

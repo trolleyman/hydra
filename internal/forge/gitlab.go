@@ -203,9 +203,26 @@ type glabNote struct {
 		AvatarURL string `json:"avatar_url"`
 	} `json:"author"`
 	Position *struct {
-		NewPath string `json:"new_path"`
-		NewLine int    `json:"new_line"`
+		NewPath   string `json:"new_path"`
+		NewLine   int    `json:"new_line"`
+		LineRange *struct {
+			Start struct {
+				NewLine int `json:"new_line"`
+			} `json:"start"`
+			End struct {
+				NewLine int `json:"new_line"`
+			} `json:"end"`
+		} `json:"line_range"`
 	} `json:"position"`
+	Suggestions []struct {
+		ID          int    `json:"id"`
+		FromLine    int    `json:"from_line"`
+		ToLine      int    `json:"to_line"`
+		Appliable   bool   `json:"appliable"`
+		Applied     bool   `json:"applied"`
+		FromContent string `json:"from_content"`
+		ToContent   string `json:"to_content"`
+	} `json:"suggestions"`
 }
 
 func (p *gitlabProvider) Threads(ctx context.Context, repoDir, _ string, id string) ([]Thread, error) {
@@ -234,10 +251,21 @@ func (p *gitlabProvider) Threads(ctx context.Context, repoDir, _ string, id stri
 			}
 			if n.Position != nil && t.Path == "" {
 				t.Path, t.Line = n.Position.NewPath, n.Position.NewLine
+				if n.Position.LineRange != nil {
+					t.StartLine = n.Position.LineRange.Start.NewLine
+					t.Line = n.Position.LineRange.End.NewLine
+				}
 			}
 			note := Note{
 				ID: strconv.Itoa(n.ID), Author: n.Author.Username, AvatarURL: n.Author.AvatarURL,
 				Body: n.Body, CreatedAt: n.CreatedAt,
+			}
+			if len(n.Suggestions) == 1 {
+				s := n.Suggestions[0]
+				note.Suggestion = &Suggestion{
+					FromLine: s.FromLine, ToLine: s.ToLine, FromContent: s.FromContent,
+					ToContent: s.ToContent, Appliable: s.Appliable, Applied: s.Applied,
+				}
 			}
 			if webURL != "" {
 				note.URL = webURL + "#note_" + note.ID
