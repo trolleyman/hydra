@@ -8,7 +8,7 @@ import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
+import { MessageOrigin, MessageReason, type AgentResponse, type CommitInfo, type DiffFile, type DiffHunk, type DiffLine, type DiffResponse, type ReviewImageAnchor, type ReviewThread } from './api'
 import { CommitCard, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
 import { ChangeStats } from './components/ChangeStats'
 import { ChangeTypeIcon as SharedChangeTypeIcon } from './components/ChangeTypeIcon'
@@ -3291,7 +3291,10 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
     const res = await runWithToast(
-      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: mergeBaseInstruction(agent, true) }),
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, {
+        text: mergeBaseInstruction(agent, true),
+        origin: MessageOrigin.MessageOriginButton,
+      }),
       { errorPrefix: 'Failed to send fix request to agent' },
     )
     setSending(false)
@@ -3511,7 +3514,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
             text: mergeBaseInstruction(agent, false),
-            origin: 'fix_conflicts',
+            origin: MessageOrigin.MessageOriginButton,
           }),
           { errorPrefix: 'Failed to send update request to agent' },
         )
@@ -3590,16 +3593,18 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-      <Tooltip
-        content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
-        align="left"
-        className="min-w-0 flex-1"
-      >
-        <span className="text-xs truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
-          {file.path.split('/').pop()}
-        </span>
-      </Tooltip>
-      <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+      <span className="flex min-w-0 items-center gap-1.5">
+        <Tooltip
+          content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
+          align="left"
+          className="min-w-0"
+        >
+          <span className="min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">
+            {file.path.split('/').pop()}
+          </span>
+        </Tooltip>
+        <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+      </span>
       <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
     </button>
   )
@@ -4946,7 +4951,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         await api.default.sendAgentInput(projectId, agent.id, {
           text: `Address this review comment on [${where}](${where}) (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
             + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
-          origin: 'review_thread',
+          origin: MessageOrigin.MessageOriginButton,
+          reason: MessageReason.MessageReasonReviewThread,
         })
         showSentToast('Sent the thread to the agent')
       },

@@ -93,7 +93,8 @@ func simUser(id, text string) simNorm {
 
 func simAgentUser(id, source, text string) simNorm {
 	return simNorm{typ: "user_message", payload: map[string]any{
-		"id": id, "uuid": id, "content": simTextContent(text), "origin": "agent:" + source,
+		"id": id, "uuid": id, "content": simTextContent(text),
+		"origin": "agent", "source_agent_id": source,
 	}}
 }
 

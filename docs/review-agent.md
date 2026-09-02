@@ -906,19 +906,25 @@ bill rather than a feature.
 
 ### Marking an automated turn
 
-`SendAgentInput` injects a plain user turn, so the chat could not tell "you said
-this" from "Hydra said this for you". `origin` on the user message fixes that, and
-the test for what belongs in it is **"did the user type it in the composer"** -
-not "did Hydra write the words". So Fix with agent and Resolve with agent count as
-automated, even though you meant every word of them.
+`SendAgentInput` injects a plain user turn, so its payload carries provenance for
+anything not typed in the composer. `origin` is the sender category (`button`,
+`hydra`, or `agent`), `reason` is the action or event, and `source_agent_id` names
+the sender for agent-to-agent messages. Fix with agent and Send to agent use the
+`button` origin even though the user initiated them.
+
+The HTTP input request and the queued and durable chat events each carry these
+fields because they are separate wire messages. All of them reference the same
+`MessageOrigin` and `MessageReason` enums in `api/openapi.yaml`, and the queue
+copies the provenance unchanged as a held message becomes a durable turn.
 
 The bubble keeps the user's shape and side - it speaks for you, and the agent
 answers it as if you had - but takes a cooler tint, a dashed edge and a line saying
 who sent it and why.
 
-**The `[Hydra]` text prefix stays.** Metadata is invisible to an agent, which only
-ever sees the text, so it still needs to know Hydra is speaking. The prefix is for
-the model; the marker is for you.
+**Server notifications keep the `[Hydra]` text prefix.** Metadata is invisible to
+an agent, which only sees the text, so it still needs to know Hydra is speaking.
+The prefix is for the model; the marker is for you. Button prompts state their
+action directly and use provenance for the transcript attribution.
 
 ### Attachments: a field, not paths in the body
 
@@ -1108,7 +1114,7 @@ forward - silently - as the head commits (`internal/heads/reviewsync.go`), and
 ending the session from the tab (`heads.KillReviewSession`).
 
 One rule for anything that grows a new way to message the reviewer: send it
-through `ChatQueues.Submit` with an **origin**, never `reg.SendChatUser`. The
+through `ChatQueues.Submit` with **provenance**, never `reg.SendChatUser`. The
 queue appends the chat event as it writes, so the bubble lands where it was sent
 and carries the "Sent by Hydra" marker; a bare stdin write leaves the transcript
 to learn about the message from the CLI's echo, which arrives whenever the CLI

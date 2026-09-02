@@ -66,6 +66,24 @@ function file(over: Partial<DiffFile>): DiffFile {
 }
 
 describe('diff sidebar path tooltips', () => {
+  it('keeps the change type beside the filename and the line counts right aligned', () => {
+    render(
+      <FileRow
+        file={file({ path: 'docs/guide/README.md' })}
+        isActive={false}
+        onClick={() => {}}
+      />,
+    )
+
+    const filenameCluster = screen.getByText('README.md').parentElement?.parentElement
+    const changeType = screen.getByLabelText('modified')
+    const lineCounts = screen.getByLabelText('1 lines added, 1 lines removed')
+
+    expect(filenameCluster).toContainElement(changeType)
+    expect(filenameCluster).not.toContainElement(lineCounts)
+    expect(lineCounts).toHaveClass('ml-auto')
+  })
+
   it('shows the shared file-path treatment for a file row', () => {
     vi.useFakeTimers()
     const { container } = render(

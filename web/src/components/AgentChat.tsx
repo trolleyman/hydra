@@ -41,7 +41,7 @@ import {
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
 import { Link } from '@tanstack/react-router'
-import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
+import { AgentStatus, MessageOrigin, MessageReason, type ChatEventUnion, type ChatFrame, type ChatQueuedMessage } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
@@ -291,6 +291,12 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   )
 }
 
+type MessageProvenance = {
+  origin?: MessageOrigin
+  reason?: MessageReason
+  sourceAgentId?: string
+}
+
 type ChatItem =
   // sending marks a message shown optimistically in-flow (item 26): it appears
   // the instant it's sent - above the thinking/response it triggers - and the
@@ -299,7 +305,7 @@ type ChatItem =
   // suppresses the fade/slide entrance for a message that takes the place of a
   // queued bubble already on screen (item 21) - it was visible, so re-animating
   // it as it settles reads as a flicker.
-  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean; origin?: string }
+  | ({ kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean } & MessageProvenance)
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -476,12 +482,11 @@ function subCardLabels(sub: SubagentView, tool?: ToolItem): { label: string; des
 // message sent mid-turn stays here - visibly queued - until the turn ends).
 // clientId is the id sent to the daemon so a queued message can be reconciled
 // against the server's authoritative `queue` frame and targeted by a dequeue.
-interface PendingSend {
+interface PendingSend extends MessageProvenance {
   id: number
   clientId: string
   text: string
   queued: boolean
-  origin?: string
 }
 
 // Minimal shapes of the stream-json events the reducer consumes. Everything
@@ -595,10 +600,11 @@ interface ProviderEvent {
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
   // collapsed meta card / a skill card) instead of rendering them as a user turn.
   isMeta?: boolean
-  // Why a user turn exists when the user did not type it (review_comments,
-  // tests_failed, fix_conflicts, ...). Carried from the durable event so the
-  // bubble can be marked as automated - see AUTOMATED_ORIGIN.
-  origin?: string
+  // Who caused a user turn that was not typed, plus the event/action context.
+  // Carried from the durable event so the bubble can show its provenance.
+  origin?: MessageOrigin
+  reason?: MessageReason
+  sourceAgentId?: string
   // A <task-notification> bookkeeping record (a background sub-agent finishing,
   // a background command completing) arrives as a notice carrying its XML here.
   // handleProviderEvent settles the sub off it (see handleTaskNotification).
@@ -827,9 +833,16 @@ export function toProviderEvents(ev: ChatEventUnion, showEmptyReasoning = false)
         }]
       }
       const text = contentText(p.content)
-      // origin rides along so the bubble can say Hydra sent it (see
-      // AUTOMATED_ORIGIN). Absent for anything typed in the composer.
-      return text.trim() ? [{ ...base, type: 'user', origin: p.origin || undefined, message: { content: p.content as ClaudeContentBlock[] | string } }] : []
+      // Provenance rides along so the bubble can say who caused the message and
+      // why. It is absent for anything typed in the composer.
+      return text.trim() ? [{
+        ...base,
+        type: 'user',
+        origin: p.origin,
+        reason: p.reason,
+        sourceAgentId: p.source_agent_id,
+        message: { content: p.content as ClaudeContentBlock[] | string },
+      }] : []
     }
     case 'context_message':
       return [{ ...providerBase(ev, ev.payload), type: 'user', isMeta: true, message: { content: ev.payload.content as ClaudeContentBlock[] | string } }]
@@ -1907,11 +1920,9 @@ const USER_BUBBLE_CLASS =
 const AUTOMATED_BUBBLE_CLASS =
   'max-w-[85%] rounded-2xl rounded-br-md border border-dashed border-sky-300/70 dark:border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/25 px-3.5 py-2 break-words'
 
-// What each origin means, in the words the user needs. The KEY is the machine tag
-// the daemon sends (internal/http/notify.go, and the one-click callers in the diff
-// viewer); the label is short enough to sit above a bubble and the tip says what
-// caused it, because "why is this here?" is the only question this marker exists
-// to answer.
+// The label answers who caused the message; the reason-specific tip answers why.
+// Keeping those as separate protocol fields means the fixed origin enum never has
+// to encode dynamic agent IDs or grow a new value for every button.
 //
 // The test for belonging here is not "did Hydra write the words" but "did the user
 // type it in the composer" - which is why a one-click Fix with agent counts, even
@@ -1922,20 +1933,12 @@ type AutomatedOrigin = {
   settingsFragment?: string
 }
 
-const AUTOMATED_ORIGIN: Record<string, AutomatedOrigin> = {
-  review_comments: {
+const HYDRA_REASON: Partial<Record<MessageReason, AutomatedOrigin>> = {
+  [MessageReason.MessageReasonReviewComments]: {
     label: 'Sent by Hydra',
     why: <>Sent automatically when review comments were published, so the agent knows to read them. It fetches the bodies itself with <code>get_review_comments</code>.</>,
   },
-  // Nothing sends this any more - resolving a comment no longer costs a model
-  // turn (see internal/http/review_comments.go). It stays because a transcript
-  // written before that still carries the origin, and an entry missing from this
-  // map renders the turn as if the user had typed it.
-  review_resolved: {
-    label: 'Sent by Hydra',
-    why: 'Sent automatically when a review comment was resolved while the agent was working. Hydra no longer sends these: a resolved comment simply drops off the list the agent reads.',
-  },
-  tests_failed: {
+  [MessageReason.MessageReasonTestsFailed]: {
     label: 'Sent by Hydra',
     why: <>Sent automatically because this project opted in to waking an idle agent when tests fail.</>,
     settingsFragment: 'test-notifications',
@@ -1943,38 +1946,50 @@ const AUTOMATED_ORIGIN: Record<string, AutomatedOrigin> = {
   // The review slot's own. Nothing else reaches a reviewer unprompted - its
   // checkout follows the head's commits silently, precisely so that a commit
   // never costs a model turn (internal/heads/reviewsync.go).
-  review_mention: {
+  [MessageReason.MessageReasonReviewMention]: {
     label: 'Sent by Hydra',
     why: <>Sent because a review comment mentioned <code>@review</code>, so the reviewer knows it was addressed. It fetches the comment itself with <code>get_review_comments</code>.</>,
   },
-  fix_conflicts: {
-    label: 'Sent from a button',
-    why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
-  },
-  fix_test: {
+}
+
+const BUTTON_REASON: Partial<Record<MessageReason, AutomatedOrigin>> = {
+  [MessageReason.MessageReasonFixTest]: {
     label: 'Sent from a button',
     why: 'You asked the agent to fix a failing test from the tests panel - Hydra wrote the wording and sent it on your behalf.',
   },
-  review_thread: {
+  [MessageReason.MessageReasonReviewThread]: {
     label: 'Sent from a button',
     why: 'You sent a review thread to the agent - Hydra quoted it and wrote the request on your behalf.',
   },
-  unknown: {
-    label: 'Sent by Hydra',
-    why: 'Hydra sent this on your behalf rather than you typing it.',
+  [MessageReason.MessageReasonReviewComments]: {
+    label: 'Sent from a button',
+    why: 'You asked the agent to address review comments - Hydra wrote the wording and sent it on your behalf.',
   },
 }
 
-function automatedOrigin(origin?: string): AutomatedOrigin | null {
+function automatedOrigin(origin?: MessageOrigin, reason?: MessageReason, sourceAgentId?: string): AutomatedOrigin | null {
   if (!origin) return null
-  if (origin.startsWith('agent:')) {
-    const id = origin.slice('agent:'.length)
+  if (origin === MessageOrigin.MessageOriginAgent) {
     return {
-      label: `Sent by agent ${id}`,
-      why: `Hydra agent ${id} sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.`,
+      label: sourceAgentId ? `Sent by agent ${sourceAgentId}` : 'Sent by an agent',
+      why: sourceAgentId
+        ? `Hydra agent ${sourceAgentId} sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.`
+        : "A Hydra agent sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.",
     }
   }
-  return AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown
+  if (origin === MessageOrigin.MessageOriginButton) {
+    return (reason && BUTTON_REASON[reason]) || {
+      label: 'Sent from a button',
+      why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
+    }
+  }
+  if (origin === MessageOrigin.MessageOriginHydra) {
+    return (reason && HYDRA_REASON[reason]) || {
+      label: 'Sent by Hydra',
+      why: 'Hydra sent this on your behalf rather than you typing it.',
+    }
+  }
+  return null
 }
 
 // Quiet code/output panels inside tool cards.
@@ -6048,16 +6063,17 @@ const ChatUserMessage = memo(function ChatUserMessage({
   sending,
   dimmed,
   origin,
+  reason,
+  sourceAgentId,
   projectId,
   linkCtx,
 }: {
   text: string
   sending?: boolean
-  // Why this turn exists when the user did not type it. The chat could not tell
-  // "you said this" from "Hydra said this for you" - both arrive as a user turn -
-  // which mattered most for the ones that ARE actions you took, one click at a
-  // time: Fix with agent, Resolve with agent. See AUTOMATED_ORIGIN.
-  origin?: string
+  // Provenance for a turn the user did not type in the composer.
+  origin?: MessageOrigin
+  reason?: MessageReason
+  sourceAgentId?: string
   // dimmed renders the muted (opacity-75) bubble without the "Sending..." row -
   // used for a queued message pinned under the transcript, so it shows the same
   // image thumbnails / chips as a finalized turn instead of raw upload paths.
@@ -6077,7 +6093,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
-  const auto = automatedOrigin(origin)
+  const auto = automatedOrigin(origin, reason, sourceAgentId)
   return (
     <div className="flex flex-col items-end gap-1">
       {/* An automated turn is still YOUR side of the conversation - it acts on
@@ -8176,17 +8192,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // any queued bubble the server still lists, and add server-queued messages
     // we don't have (on reconnect, local pending was reset, so this restores the
     // whole queue - item 21's survive-navigation guarantee).
-    const reconcileQueue = (messages: { id?: string; content?: unknown; origin?: string }[]) => {
+    const reconcileQueue = (messages: ChatQueuedMessage[]) => {
       const server = messages
-        .filter((m): m is { id: string; content?: unknown; origin?: string } => typeof m.id === 'string')
-        .map((m) => ({ clientId: m.id, text: contentText(m.content), origin: m.origin }))
+        .filter((m) => typeof m.id === 'string')
+        .map((m) => ({
+          clientId: m.id,
+          text: contentText(m.content),
+          origin: m.origin,
+          reason: m.reason,
+          sourceAgentId: m.source_agent_id,
+        }))
       const serverIds = new Set(server.map((s) => s.clientId))
       setPendingSends((prev) => {
         const kept = prev.filter((p) => !p.queued || serverIds.has(p.clientId))
         const keptIds = new Set(kept.map((p) => p.clientId))
         const added = server
           .filter((s) => !keptIds.has(s.clientId))
-          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true, origin: s.origin }))
+          .map((s) => ({ id: sendSeqRef.current++, queued: true, ...s }))
         return [...kept, ...added]
       })
     }
@@ -8230,7 +8252,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '', origin = '') => {
+    const routeUserText = (
+      rawText: string,
+      ts?: number | null,
+      isMeta?: boolean,
+      clientId = '',
+      provenance: MessageProvenance = {},
+    ) => {
       // Machine-injected context (a Skill's SKILL.md body, the resume nudge) rides
       // in a `user` envelope but was never typed - route it to a skill/meta card
       // off the isMeta flag rather than the content-sniffing below. It doesn't
@@ -8361,7 +8389,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      push({ kind: 'user', text, noEntrance: fromQueue, origin: origin || undefined })
+      push({ kind: 'user', text, noEntrance: fromQueue, ...provenance })
     }
 
     const handleProviderEvent = (ev: ProviderEvent) => {
@@ -8500,13 +8528,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
+            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '', {
+              origin: ev.origin,
+              reason: ev.reason,
+              sourceAgentId: ev.sourceAgentId,
+            })
             return
           }
           const editPatch = eventEditPatch(ev, content ?? [])
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
+              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '', {
+                origin: ev.origin,
+                reason: ev.reason,
+                sourceAgentId: ev.sourceAgentId,
+              })
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), editPatch, ev.cwd)
@@ -10674,7 +10710,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} linkCtx={chatLinkCtx} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} reason={item.reason} sourceAgentId={item.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -11259,7 +11295,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} />
+                  <ChatUserMessage text={p.text} dimmed origin={p.origin} reason={p.reason} sourceAgentId={p.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
