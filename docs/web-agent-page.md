@@ -203,6 +203,9 @@ and `web/src/DiffViewer.tsx`):
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
+  A self-identifying search also pins the total output before it, so a bounded
+  read after that search keeps its requested line numbers, including when the
+  read is guarded with `|| true`.
   Unified diffs derive sticky file headers from each surviving `diff --git`
   boundary, so agents do not print redundant file markers around `git diff`.
   Captured Vitest and Jest failures retain the runner's structure: failure
@@ -215,7 +218,10 @@ and `web/src/DiffViewer.tsx`):
   shows the script itself. A command that ran elsewhere gets a reproducible `cd`
   preamble; when the script starts with a description comment, that comment stays
   first and the preamble follows it. Home-relative preambles keep `~` outside
-  quotes so the shell expands it.
+  quotes so the shell expands it. A whitespace prefix shared by every command
+  line is presentation indent and is removed while relative shell-block indent
+  remains intact. A trailing `&& echo ...` or `|| echo ...` stays beside the
+  command it reports instead of wrapping onto an orphaned line.
 - Edit tool previews, including Codex multi-file edits, use the repository diff's
   code composition and row metrics: syntax tokens, changed-word overlays,
   whitespace marks, gutters, and the code surface palette match the

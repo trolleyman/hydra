@@ -448,14 +448,16 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
     // Keep the conventional error-suppression suffixes attached to the command
     // they qualify. Splitting `command -v bun || true` (or `... || :`) leaves a
     // visually orphaned no-op on its own line and makes the script harder, not
-    // easier, to scan. Other control chains still split normally.
+    // easier, to scan. A trailing echo is similarly the compact result message
+    // for the command before it. Other control chains still split normally.
     const rest = cmd.slice(i + 1).trim()
     // The no-op need not be the end of the whole script. In
     // `command -v codex || true && codex --help`, it still belongs to the
     // command immediately before it; the following `&&` gets its own ordinary
     // break when the scanner reaches it.
     const trivialFallback = ch === '|' && /^(?:true|:)(?=$|\s*(?:&&|\|\||;|\n))/.test(rest)
-    pending = header || trivialFallback ? ' ' : sep()
+    const trailingEcho = (ch === '&' || ch === '|') && /^echo(?=$|[ \t])/.test(rest)
+    pending = header || trivialFallback || trailingEcho ? ' ' : sep()
   }
   return out
 }
@@ -758,8 +760,29 @@ function quoteShellPath(path: string): string {
   return /^[A-Za-z0-9_./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'"'"'`)}'`
 }
 
+// Tool callers often indent every command line after their flush-left
+// description by one space. That whitespace is harmless to the shell but reads
+// as a mysterious extra column in the numbered command panel. Remove only an
+// indent shared by every nonblank body line, preserving indentation within shell
+// blocks. The leading description is excluded because it is presentation text,
+// not part of the body's indentation baseline.
+function stripDisplayIndent(command: string): string {
+  const lines = command.split('\n')
+  const bodyStart = leadingBashComment(command) ? 1 : 0
+  const body = lines.slice(bodyStart)
+  const indents = body.filter((line) => line.trim()).map((line) => line.match(/^[ \t]*/)?.[0] ?? '')
+  if (indents.length === 0) return command
+  let common = indents[0]
+  for (const indent of indents.slice(1)) {
+    while (common && !indent.startsWith(common)) common = common.slice(0, -1)
+  }
+  if (!common) return command
+  return [...lines.slice(0, bodyStart), ...body.map((line) => line.startsWith(common) ? line.slice(common.length) : line)].join('\n')
+}
+
 export function formatBashForDisplay(command: string, cwd?: string, indent: number = DEFAULT_BASH_INDENT): string {
-  const script = dropRedundantSemicolons(splitBashChains(dropNoopCd(stripLineContinuations(unwrapBashLoginCommand(command))), indent))
+  const source = dropNoopCd(stripLineContinuations(unwrapBashLoginCommand(command)))
+  const script = dropRedundantSemicolons(splitBashChains(stripDisplayIndent(source), indent))
   if (!cwd || cwd === '.') return script
 
   // A leading comment is the tool card's human-readable description. Keep it

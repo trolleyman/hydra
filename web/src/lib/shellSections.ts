@@ -1681,6 +1681,13 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     const n = Math.min(limit, hi - lo)
     // Printed nothing, which is a count like any other.
     if (!fits(producers[head], lo)) { exact[head] = true; continue }
+    // A self-identifying search beginning exactly after the maximum-sized
+    // prefixes proves those prefixes reached their bounds. Without carrying
+    // that proof forward, a later guarded sed kept its file language but lost
+    // line numbers even though the search row fixed its exact start.
+    if (search != null) {
+      for (let i = 0; i < head; i++) exact[i] = true
+    }
     out[head] = slice.slice(lo, lo + n)
     lo += n
     if (search != null || vouched(producers[head], bounds[head])) exact[head] = true

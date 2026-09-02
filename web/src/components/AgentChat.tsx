@@ -3210,9 +3210,11 @@ function ScriptOutputHeader({ header, gutter }: {
   const label = header.kind === 'file'
     ? (
         <Tooltip
-          content={<FilePathLabel path={header.label} nativeTitle={false} />}
+          content={<FilePathLabel path={header.label} nativeTitle={false} wrap />}
           align="left"
           className="min-w-0 flex-1"
+          onlyWhenOverflowing
+          anchorX="pointer"
         >
           <FilePathLabel path={header.label} nativeTitle={false} wrap className="min-w-0 flex-1 font-sans" />
         </Tooltip>

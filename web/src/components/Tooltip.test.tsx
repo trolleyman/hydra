@@ -84,6 +84,55 @@ describe('Tooltip', () => {
       vi.useRealTimers()
     }
   })
+
+  it('suppresses an overflow-only tooltip while its marked label stays on one line', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip content="full path" onlyWhenOverflowing>
+          <span data-tooltip-overflow style={{ lineHeight: '16px' }}>short.ts</span>
+        </Tooltip>,
+      )
+      const label = container.querySelector('[data-tooltip-overflow]') as HTMLElement
+      Object.defineProperties(label, {
+        clientWidth: { configurable: true, value: 100 },
+        scrollWidth: { configurable: true, value: 100 },
+        clientHeight: { configurable: true, value: 16 },
+        scrollHeight: { configurable: true, value: 16 },
+      })
+
+      fireEvent.mouseEnter(wrapper(container), { clientX: 120 })
+      act(() => void vi.advanceTimersByTime(600))
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('anchors a wrapped label tooltip to the pointer on the x axis', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip content="full path" onlyWhenOverflowing anchorX="pointer">
+          <span data-tooltip-overflow style={{ lineHeight: '16px' }}>long/path/to/file.ts</span>
+        </Tooltip>,
+      )
+      const label = container.querySelector('[data-tooltip-overflow]') as HTMLElement
+      Object.defineProperties(label, {
+        clientWidth: { configurable: true, value: 100 },
+        scrollWidth: { configurable: true, value: 100 },
+        clientHeight: { configurable: true, value: 32 },
+        scrollHeight: { configurable: true, value: 32 },
+      })
+
+      fireEvent.mouseEnter(wrapper(container), { clientX: 321 })
+      act(() => void vi.advanceTimersByTime(600))
+      expect(screen.getByRole('tooltip')).toHaveStyle({ left: '321px' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('centers compact hints and keeps shortcut keycaps on the label row', () => {
     vi.useFakeTimers()
     try {
