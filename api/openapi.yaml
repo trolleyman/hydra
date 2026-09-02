@@ -1047,6 +1047,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{agent_id}/publish/close:
+    post:
+      summary: Close a head's linked MR/PR and detach it from the head
+      operationId: closeReview
+      description: >-
+        Closes the review on its forge, clears the head's review link, and
+        disables automatic pushing. The head, local branch, downstream branch
+        name, and remote branch remain intact.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Closed (returns the updated, unlinked agent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request (not linked, adopted review, or forge rejected the close)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{agent_id}/downstream-branch:
     patch:
       summary: Set a head's downstream branch name (the name it is pushed AS)

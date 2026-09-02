@@ -405,6 +405,54 @@ func (s *Server) PullFromMr(ctx context.Context, request api.PullFromMrRequestOb
 	return api.PullFromMr200JSONResponse(s.agentResponseWithReview(*updated)), nil
 }
 
+// CloseReview closes a Hydra-created MR/PR on its forge, detaches it from the
+// head, and disables automatic pushing. Branches are deliberately left intact:
+// closing a review is reversible and must not discard either copy of the work.
+func (s *Server) CloseReview(ctx context.Context, request api.CloseReviewRequestObject) (api.CloseReviewResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.CloseReview404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
+	}
+	if !head.IsLinked() {
+		return api.CloseReview400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "agent is not linked to an MR"}, nil
+	}
+	if head.ReviewAdopted {
+		return api.CloseReview400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "this head is working on a PR Hydra did not create; close it on the forge or detach the head instead"}, nil
+	}
+	provider, remote, err := s.reviewProviderFor(projectRoot, *head)
+	if err != nil {
+		return api.CloseReview400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: err.Error()}, nil
+	}
+	callCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
+	defer cancel()
+	if err := provider.Close(callCtx, projectRoot, remote, head.ReviewID); err != nil {
+		return api.CloseReview400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fmt.Sprintf("close failed: %v", err)}, nil
+	}
+	if s.DB != nil {
+		if err := s.DB.ClearReviewLink(head.ID); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+	}
+	s.notifyAgentsChanged(projectRoot, false)
+	updated, _ := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, head.ID)
+	if updated == nil {
+		updated = head
+		updated.ReviewURL = ""
+		updated.ReviewID = ""
+		updated.ReviewProvider = ""
+		updated.ReviewTargetBranch = ""
+		updated.AutoPush = false
+	}
+	return api.CloseReview200JSONResponse(s.agentResponseWithReview(*updated)), nil
+}
+
 // SetDownstreamBranch edits a head's downstream branch. Soft-locked after first
 // publish: on GitLab/GitHub the source branch IS the MR's identity, so renaming
 // orphans the MR - the linked case is rejected with a hint.

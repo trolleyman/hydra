@@ -7309,6 +7309,9 @@ type ServerInterface interface {
 	// Arm automatic publishing - auto-open after tests / auto-push linked heads
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
 	ArmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmAutoPushParams)
+	// Close a head's linked MR/PR and detach it from the head
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/close)
+	CloseReview(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -8645,6 +8648,40 @@ func (siw *ServerInterfaceWrapper) ArmAutoPush(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArmAutoPush(w, r, projectId, agentId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CloseReview operation middleware
+func (siw *ServerInterfaceWrapper) CloseReview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CloseReview(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10457,6 +10494,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish", wrapper.PublishAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.DisarmAutoPush)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.ArmAutoPush)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/close", wrapper.CloseReview)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/pull", wrapper.PullFromMr)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/push", wrapper.PushToMr)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/purge", wrapper.PurgeAgent)
@@ -11674,6 +11712,51 @@ func (response ArmAutoPush404JSONResponse) VisitArmAutoPushResponse(w http.Respo
 type ArmAutoPush500JSONResponse ErrorResponse
 
 func (response ArmAutoPush500JSONResponse) VisitArmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReviewRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+}
+
+type CloseReviewResponseObject interface {
+	VisitCloseReviewResponse(w http.ResponseWriter) error
+}
+
+type CloseReview200JSONResponse AgentResponse
+
+func (response CloseReview200JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview400JSONResponse ErrorResponse
+
+func (response CloseReview400JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview404JSONResponse ErrorResponse
+
+func (response CloseReview404JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview500JSONResponse ErrorResponse
+
+func (response CloseReview500JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -13504,6 +13587,9 @@ type StrictServerInterface interface {
 	// Arm automatic publishing - auto-open after tests / auto-push linked heads
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
 	ArmAutoPush(ctx context.Context, request ArmAutoPushRequestObject) (ArmAutoPushResponseObject, error)
+	// Close a head's linked MR/PR and detach it from the head
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/close)
+	CloseReview(ctx context.Context, request CloseReviewRequestObject) (CloseReviewResponseObject, error)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(ctx context.Context, request PullFromMrRequestObject) (PullFromMrResponseObject, error)
@@ -14540,6 +14626,33 @@ func (sh *strictHandler) ArmAutoPush(w http.ResponseWriter, r *http.Request, pro
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArmAutoPushResponseObject); ok {
 		if err := validResponse.VisitArmAutoPushResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CloseReview operation middleware
+func (sh *strictHandler) CloseReview(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request CloseReviewRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CloseReview(ctx, request.(CloseReviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CloseReview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CloseReviewResponseObject); ok {
+		if err := validResponse.VisitCloseReviewResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
