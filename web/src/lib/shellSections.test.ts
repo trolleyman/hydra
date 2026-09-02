@@ -853,6 +853,35 @@ describe('splitScriptOutput', () => {
     })
   })
 
+  it('attributes marked git blob reads to each following file', () => {
+    const script = [
+      "printf '%s\\n' '--- [file] internal/heads/environment.go ---'",
+      'git show ffc83b5e:internal/heads/environment.go',
+      "printf '%s\\n' '--- [file] internal/heads/environment_test.go ---'",
+      'git show ffc83b5e:internal/heads/environment_test.go',
+      "printf '%s\\n' '--- [file] docs/head-environment-isolation.md ---'",
+      'git show ffc83b5e:docs/head-environment-isolation.md',
+    ].join('\n')
+    const output = [
+      '--- [file] internal/heads/environment.go ---',
+      'package heads',
+      '--- [file] internal/heads/environment_test.go ---',
+      'package heads',
+      '--- [file] docs/head-environment-isolation.md ---',
+      '# Head environment isolation',
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+
+    expect(sections?.map((section) => section.kind)).toEqual([
+      'section', 'view', 'section', 'view', 'section', 'view',
+    ])
+    expect(sections?.filter((section) => section.kind === 'view').map((section) => section.view.path)).toEqual([
+      'internal/heads/environment.go',
+      'internal/heads/environment_test.go',
+      'docs/head-environment-isolation.md',
+    ])
+  })
+
   it('does not guess which duplicate typed marker came from printf', () => {
     const script = "cat notes.txt\nprintf '%s\\n' '--- [text] repeated ---'\nmage build"
     const output = 'before\n--- [text] repeated ---\nafter\n--- [text] repeated ---\nbuild output'

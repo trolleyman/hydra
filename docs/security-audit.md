@@ -7,16 +7,6 @@ MCP governance. Compared throughout against the reference `claude-sbx` wrapper
 
 Date: 2026-06-28 · Branch: `hydra/about-the-security-of-this-agent-head`
 
-> **Current hardening note (2026-09-02).** Sandboxed heads inherit ordinary
-> developer-tool environment from the Hydra daemon, but `agentEnv` removes
-> credential-shaped variables before launch. Whole name components such as
-> `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `CREDENTIALS`, `ASKPASS`, and `JWT`, plus
-> common `*_API_KEY` / `*_ACCESS_KEY` / `*_PRIVATE_KEY` spellings, are scrubbed.
-> This prevents ambient credentials such as `MISE_GITHUB_TOKEN`, askpass helpers,
-> and agent sockets from bypassing filesystem masks. A trusted
-> `pre_spawn_script` can explicitly provide a value through `$HYDRA_ENV` when a
-> project intentionally grants it to the head.
-
 ---
 
 ## TL;DR

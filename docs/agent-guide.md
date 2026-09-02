@@ -110,11 +110,15 @@ rules carry `data-copy-skip`, leaving copied source free of presentation chrome.
 
 Agents introduce a boundary the command cannot otherwise prove by printing one
 static marker: `printf '%s\n' '--- [text] <text> ---'`, `--- [file] <path> ---`,
-or `--- [dir] <path> ---`. The value is displayed exactly as written. A constant
-`echo` is accepted, but `printf` is the canonical cross-shell spelling. The
-parser correlates the marker with that constant-printing command; a marker-shaped
-line read from a file is source, and an ambiguous duplicate typed marker is left
-as ordinary output rather than guessed.
+or `--- [dir] <path> ---`. In a Bash call that prints several sections, the
+marker goes immediately before every section-producing command, including the
+first: it introduces the output that follows rather than terminating the output
+above it. Reads stay bounded so a provider cannot truncate the marker away from
+the content it identifies. The value is displayed exactly as written. A
+constant `echo` is accepted, but `printf` is the canonical cross-shell spelling.
+The parser correlates the marker with that constant-printing command; a
+marker-shaped line read from a file is source, and an ambiguous duplicate typed
+marker is left as ordinary output rather than guessed.
 
 ### Test status wording: three layers, three vocabularies
 
@@ -442,7 +446,9 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `internal/egress`, MCP stripping, the `--dangerously-skip-permissions` posture)
   -> [docs/security-audit.md](security-audit.md) (the original sandbox audit;
   its three main recommendations - gate, MCP allow-list, filtering egress proxy -
-  are now BUILT for Claude)
+  are now BUILT for Claude). Changes to which daemon environment variables a
+  head receives are covered by
+  [docs/head-environment-isolation.md](head-environment-isolation.md).
 - **User-checkoutable head branches** (the `hydra/<id>` vs `hydra-wt/<id>`
   branch-split + ff-only mirror design) ->
   [docs/user-branch-mirror.md](user-branch-mirror.md) (proposed, unbuilt

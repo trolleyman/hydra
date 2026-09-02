@@ -15,6 +15,10 @@ export type SandboxConfig = {
      */
     cow_paths?: Array<string> | null;
     /**
+     * Additional daemon environment variable names passed into heads. Additive across config layers; values are resolved at launch and are never stored. Hydra-owned names, including every HYDRA_* variable, cannot be inherited.
+     */
+    inherit_env?: Array<string> | null;
+    /**
      * Bash script run inside the sandbox before every agent launch - both spawn and resume - so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
      */
     pre_spawn_script?: string | null;

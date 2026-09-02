@@ -29,6 +29,11 @@ func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 			t.Errorf("final pre-prompt does not document %q", command)
 		}
 	}
+	for _, guidance := range []string{"immediately before every command", "including the first", "Keep file reads bounded"} {
+		if !strings.Contains(prompt, guidance) {
+			t.Errorf("final pre-prompt does not document output-section guidance %q", guidance)
+		}
+	}
 }
 
 func TestDefaultPrePromptAllowsGuardedHeadCollaboration(t *testing.T) {
@@ -1441,12 +1446,14 @@ func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 		MaskedPaths:   []string{"~/.ssh"},
 		RestoreRO:     []string{"~/.config/git"},
 		CowPaths:      []string{"pipeline/out"},
+		InheritEnv:    []string{"ANDROID_HOME"},
 	}
 	base.Merge(SandboxConfig{
 		WritablePaths: []string{"~/.npm", "~/.gradle"}, // ~/.npm is a duplicate
 		MaskedPaths:   []string{"~/.aws"},
 		RestoreRO:     []string{"~/.config/gh"},
 		CowPaths:      []string{"~/.gradle"},
+		InheritEnv:    []string{"ANDROID_HOME", "SSH_AUTH_SOCK"},
 	})
 
 	eq := func(name string, got, want []string) {
@@ -1458,6 +1465,7 @@ func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 	eq("MaskedPaths", base.MaskedPaths, []string{"~/.ssh", "~/.aws"})
 	eq("RestoreRO", base.RestoreRO, []string{"~/.config/git", "~/.config/gh"})
 	eq("CowPaths", base.CowPaths, []string{"pipeline/out", "~/.gradle"})
+	eq("InheritEnv", base.InheritEnv, []string{"ANDROID_HOME", "SSH_AUTH_SOCK"})
 }
 
 // TestAgentConfigMergePrePromptUnions verifies pre-prompts union across config

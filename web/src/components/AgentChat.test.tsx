@@ -261,6 +261,31 @@ describe('sectioned search output', () => {
     }
   })
 
+  it('highlights marked Markdown and Go sections by their file headings', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'file', label: 'docs/policy.md' }, lines: ['marker'] },
+      {
+        kind: 'view',
+        view: { path: 'docs/policy.md', start: 1, end: null, numbered: false, command: 'git show HEAD:docs/policy.md' },
+        lines: ['# Policy', 'Status: **implemented.**'],
+      },
+      { kind: 'section', section: { kind: 'file', label: 'internal/policy.go' }, lines: ['marker'] },
+      {
+        kind: 'view',
+        view: { path: 'internal/policy.go', start: 1, end: null, numbered: false, command: 'git show HEAD:internal/policy.go' },
+        lines: ['package policy'],
+      },
+    ])
+
+    expect(rows.map((row) => row.header?.label ?? row.html)).toEqual([
+      'docs/policy.md',
+      expect.stringContaining('token title important'),
+      expect.stringContaining('token bold'),
+      'internal/policy.go',
+      expect.stringContaining('token keyword'),
+    ])
+  })
+
   it('renders one inset rule between nonconsecutive matches in the same file', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',

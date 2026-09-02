@@ -662,79 +662,6 @@ func readHostFile(p string) []byte {
 	return data
 }
 
-// envKeysHydraOwns are environment variables Hydra controls per-head and must
-// not inherit from the daemon's own environment, or they leak into every agent.
-// In particular GEMINI_SYSTEM_MD / GEMINI_WRITE_SYSTEM_MD drive where the Gemini
-// CLI reads/writes its system prompt: an inherited GEMINI_WRITE_SYSTEM_MD makes
-// Gemini try to write into the read-only `.hydra/local/cache` inside the sandbox and
-// crash with EROFS. seedGeminiPrePrompt sets the ones it wants explicitly.
-var envKeysHydraOwns = map[string]bool{
-	"CLAUDE_CONFIG_DIR":      true,
-	"CODEX_HOME":             true,
-	"GEMINI_SYSTEM_MD":       true,
-	"GEMINI_WRITE_SYSTEM_MD": true,
-	// HYDRA_* head-context variables (see headContextEnv): set per-head, so
-	// never inherit a stale value from the daemon's own environment.
-	"HYDRA_HEAD_ID":      true,
-	"HYDRA_AGENT_TYPE":   true,
-	"HYDRA_PROJECT_ROOT": true,
-	"HYDRA_WORKTREE":     true,
-	"HYDRA_BRANCH":       true,
-	"HYDRA_BASE_BRANCH":  true,
-	// A daemon may itself be launched with a project-local TMPDIR (notably an
-	// isolated test server). That host path is not the head's temp directory and
-	// is normally read-only in its sandbox. Every Linux head instead gets a
-	// private directory bound at /tmp, so always give child tools that path.
-	"TMPDIR": true,
-	"TMP":    true,
-	"TEMP":   true,
-}
-
-// inheritedSecretEnvWords are credential-shaped components that must never
-// flow from the Hydra daemon's environment into an agent by accident. Agent
-// launches still inherit ordinary toolchain and terminal configuration; users
-// who deliberately need a credential can opt in through the trusted
-// pre_spawn_script + $HYDRA_ENV channel.
-var inheritedSecretEnvWords = map[string]bool{
-	"ASKPASS":     true,
-	"AUTH":        true,
-	"COOKIE":      true,
-	"CREDENTIAL":  true,
-	"CREDENTIALS": true,
-	"JWT":         true,
-	"PASSWD":      true,
-	"PASSWORD":    true,
-	"SECRET":      true,
-	"TOKEN":       true,
-}
-
-// sensitiveInheritedEnvKey reports whether a daemon environment key is likely
-// to carry a reusable credential or access to a credential broker. This is
-// intentionally name-based: values are never inspected or logged. Matching
-// whole underscore-delimited words avoids false positives such as
-// MAX_THINKING_TOKENS, while the suffix check catches conventional compact
-// spellings such as PGPASSWORD.
-func sensitiveInheritedEnvKey(key string) bool {
-	upper := strings.ToUpper(key)
-	for _, word := range strings.FieldsFunc(upper, func(r rune) bool {
-		return r < 'A' || r > 'Z'
-	}) {
-		if inheritedSecretEnvWords[word] {
-			return true
-		}
-	}
-	if strings.HasSuffix(upper, "PASSWORD") || strings.HasSuffix(upper, "PASSWD") || strings.HasSuffix(upper, "_PWD") {
-		return true
-	}
-	padded := "_" + upper + "_"
-	for _, marker := range []string{"_API_KEY_", "_ACCESS_KEY_", "_PRIVATE_KEY_", "_SIGNING_KEY_", "_ENCRYPTION_KEY_"} {
-		if strings.Contains(padded, marker) {
-			return true
-		}
-	}
-	return false
-}
-
 // headContextEnv returns the HYDRA_* environment variables describing the head
 // being launched. They are exposed to the pre-spawn script (and, since they
 // share the same environment, the agent/shell process) so per-spawn setup can
@@ -742,9 +669,9 @@ func sensitiveInheritedEnvKey(key string) bool {
 // for a given agent, or copying files into the worktree. The pre-spawn script is
 // additionally given $HYDRA_ENV (a file it appends KEY=value lines to, exported
 // into the agent - see sandbox.preSpawnEnvSetup); that one is set by the wrapper,
-// not here, so it is not listed below or in envKeysHydraOwns.
+// not here, so it is not listed below.
 //
-// Keep this set, envKeysHydraOwns above, and the Pre-Spawn Script tooltip in
+// Keep this set and the Pre-Spawn Script tooltip in
 // web/src/components/settings/ConfigForm.tsx in sync.
 // derefStr returns the pointed-to string, or "" when the pointer is nil.
 func derefStr(s *string) string {
@@ -808,58 +735,6 @@ func claudeRenderingEnv(agentType sandbox.AgentType, fullscreen bool) []string {
 		return []string{"CLAUDE_CODE_NO_FLICKER=1"}
 	}
 	return []string{"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"}
-}
-
-// agentEnv builds the environment for the sandboxed agent process. It inherits
-// ordinary host configuration needed by developer tools, but drops
-// credential-shaped variables. Filesystem masking cannot protect a secret that
-// is already present in a process environment, and allowed provider/git hosts
-// would remain an exfiltration route even under hard egress filtering.
-func agentEnv(home, username string, gitAuthorName, gitAuthorEmail string) []string {
-	return buildAgentEnv(home, username, gitAuthorName, gitAuthorEmail, true)
-}
-
-// regularShellEnv preserves the daemon's full environment for the explicitly
-// unsandboxed "Regular shell" terminal. That shell is a user-selected host
-// process, not an agent security boundary; silently removing its credentials
-// would break the host workflows it exists to provide.
-func regularShellEnv(home, username string, gitAuthorName, gitAuthorEmail string) []string {
-	return buildAgentEnv(home, username, gitAuthorName, gitAuthorEmail, false)
-}
-
-func buildAgentEnv(home, username string, gitAuthorName, gitAuthorEmail string, scrubSecrets bool) []string {
-	env := make([]string, 0, len(os.Environ()))
-	for _, kv := range os.Environ() {
-		if k, _, ok := strings.Cut(kv, "="); ok {
-			if envKeysHydraOwns[k] || (scrubSecrets && sensitiveInheritedEnvKey(k)) {
-				continue
-			}
-		}
-		env = append(env, kv)
-	}
-	env = append(env,
-		"HOME="+home,
-		"USER="+username,
-		"LANG=C.UTF-8",
-		"TERM=xterm-256color",
-		"COLORTERM=truecolor",
-		"TMPDIR=/tmp",
-		"TMP=/tmp",
-		"TEMP=/tmp",
-	)
-	if gitAuthorName != "" {
-		env = append(env,
-			"GIT_AUTHOR_NAME="+gitAuthorName,
-			"GIT_COMMITTER_NAME="+gitAuthorName,
-		)
-	}
-	if gitAuthorEmail != "" {
-		env = append(env,
-			"GIT_AUTHOR_EMAIL="+gitAuthorEmail,
-			"GIT_COMMITTER_EMAIL="+gitAuthorEmail,
-		)
-	}
-	return env
 }
 
 // readGitConfigVal reads a single git config value from the project.

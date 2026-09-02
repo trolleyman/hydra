@@ -187,10 +187,13 @@ and `web/src/DiffViewer.tsx`):
   account for all returned lines. When a boundary may fall at EOF, agents print
   a static typed marker such as
   `printf '%s\n' '--- [file] web/src/App.tsx ---'`; `[text]` preserves an ordinary
-  heading exactly and `[dir]` selects the shared directory treatment. A constant
-  `echo` is accepted, while `printf` is the canonical cross-shell spelling. The
-  parser only consumes a typed marker when it can correlate it unambiguously with
-  the constant-printing command. In a script where a numbered search immediately
+  heading exactly and `[dir]` selects the shared directory treatment. A Bash
+  call with several sections puts the marker immediately before every command
+  that produces one, including the first, and keeps reads bounded so truncation
+  cannot separate a marker from its content. A constant `echo` is accepted,
+  while `printf` is the canonical cross-shell spelling. The parser only consumes
+  a typed marker when it can correlate it unambiguously with the constant-printing
+  command. In a script where a numbered search immediately
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
