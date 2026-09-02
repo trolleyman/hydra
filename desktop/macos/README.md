@@ -40,10 +40,8 @@ from a terminal. Finder launches do not inherit shell environment variables.
 - Project-directory windows expose project and live/loaded archived history controls plus
   Stop Session and Close / Close and Keep Running / Cancel for an active turn.
   Stopping retains the head, worktree, branch and conversation.
-- Closing all windows leaves the app and app-owned backend running. Use the Dock
-  or File menu to open another window.
-- Explicit Quit stops an app-owned backend. If active sessions are found, Hydra
-  confirms first. A server that was already running is never stopped by the app.
+- Closing all windows leaves the app running; quitting the native shell still
+  leaves the shared backend and running work available to another Hydra client.
 - Backend output is appended to
   `~/Library/Application Support/Hydra/logs/backend.log`.
 
@@ -55,8 +53,6 @@ Before treating this as a shippable app, verify on a real Mac:
   live session state;
 - the shared daemon's PID-bound endpoint record appears atomically, stale
   records are rejected, and a reused service-owned daemon survives app Quit;
-- the private ready-file compatibility fallback starts on an OS-selected port
-  and an app-owned fallback server exits cleanly on Quit;
 - Cmd+N/Cmd+Shift+N, window tabbing, text input, IME, paste, file upload, shell
   tabs, and external links behave correctly;
 - closing the final window leaves running work attached and reopening a window

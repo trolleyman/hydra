@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/desktopcontract"
-	"github.com/trolleyman/hydra/internal/paths"
 )
 
 var desktopConnectProject string
@@ -25,13 +24,9 @@ var desktopConnectCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		projectRoot := desktopConnectProject
-		if projectRoot == "" {
-			var err error
-			projectRoot, err = paths.GetProjectRootFromCwd()
-			if err != nil {
-				return errtrace.Wrap(err)
-			}
+		projectRoot, err := desktopProjectRoot(desktopConnectProject)
+		if err != nil {
+			return errtrace.Wrap(err)
 		}
 		ctx := cmd.Context()
 		client, err := daemon.ConnectDesktop(ctx, projectRoot)

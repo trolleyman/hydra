@@ -7,7 +7,6 @@ import (
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/daemon"
-	"github.com/trolleyman/hydra/internal/paths"
 )
 
 var desktopActiveProject string
@@ -22,13 +21,9 @@ var desktopActiveCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		projectRoot := desktopActiveProject
-		if projectRoot == "" {
-			var err error
-			projectRoot, err = paths.GetProjectRootFromCwd()
-			if err != nil {
-				return errtrace.Wrap(err)
-			}
+		projectRoot, err := desktopProjectRoot(desktopActiveProject)
+		if err != nil {
+			return errtrace.Wrap(err)
 		}
 		client, err := daemon.ConnectDesktop(cmd.Context(), projectRoot)
 		if err != nil {

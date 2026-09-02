@@ -4,18 +4,11 @@ import WebKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, HydraWindowControllerDelegate {
     private let backend = BackendController()
     private var windows: [HydraWindowController] = []
-    private var terminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(backendExited(_:)),
-            name: .hydraBackendExited,
-            object: backend
-        )
 
-        backend.start(projectRoot: { [weak self] in self?.chooseProjectRootIfNeeded() }) { [weak self] result in
+        backend.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
@@ -30,55 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         false
     }
 
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if terminating || !backend.ownsProcess {
-            return .terminateNow
-        }
-        backend.hasActiveSessions { [weak self] active in
-            guard let self else {
-                sender.reply(toApplicationShouldTerminate: false)
-                return
-            }
-            if active {
-                let alert = NSAlert()
-                alert.messageText = "Quit Hydra while agents are running?"
-                alert.informativeText = "Quitting stops the app-owned backend and every running agent. Close the windows instead to leave work running in the background."
-                alert.addButton(withTitle: "Cancel")
-                alert.addButton(withTitle: "Quit and stop agents")
-                if alert.runModal() != .alertSecondButtonReturn {
-                    sender.reply(toApplicationShouldTerminate: false)
-                    return
-                }
-            }
-            self.terminating = true
-            self.backend.stopOwnedBackend()
-            sender.reply(toApplicationShouldTerminate: true)
-        }
-        return .terminateLater
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        if backend.ownsProcess {
-            backend.stopOwnedBackend()
-        }
-    }
-
     @objc private func newFullWindow() {
         openWindow(kind: .full)
     }
 
     @objc private func newProjectDirectoryWindow() {
         openWindow(kind: .projectDirectory)
-    }
-
-    @objc private func backendExited(_ notification: Notification) {
-        guard !terminating else { return }
-        let status = notification.userInfo?["status"] ?? "unknown"
-        let log = notification.userInfo?["log"] ?? "the backend log"
-        let alert = NSAlert()
-        alert.messageText = "The Hydra backend stopped"
-        alert.informativeText = "Exit status: \(status). See \(log)."
-        alert.runModal()
     }
 
     private func openWindow(kind: HydraWindowKind, projectID: String? = nil, agentID: String? = nil) {
@@ -128,24 +78,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
             return false
         }
         return answer == .alertSecondButtonReturn
-    }
-
-    private func chooseProjectRootIfNeeded() -> URL? {
-        let defaults = UserDefaults.standard
-        if let saved = defaults.string(forKey: "HydraLastProject"),
-           FileManager.default.fileExists(atPath: saved) {
-            return URL(fileURLWithPath: saved, isDirectory: true)
-        }
-        let panel = NSOpenPanel()
-        panel.title = "Choose a project for Hydra"
-        panel.message = "Hydra uses this project to start its shared local backend. You can add and switch projects inside the app."
-        panel.prompt = "Open project"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        defaults.set(url.path, forKey: "HydraLastProject")
-        return url
     }
 
     private func buildMenu() {
