@@ -57,13 +57,14 @@ import {
   hunkContext, regionAfterHunk, regionKey, LEAD_REGION_ID, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
   type RenderSeg, type RevealMap,
 } from './lib/diffBody'
-import { DIFF_CONTEXT_OPTIONS, parseDiffContextLines } from './lib/diffPrefs'
+import { parseDiffContextLines } from './lib/diffPrefs'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
 import { TestsPanel } from './components/TestsPanel'
 import { PreviewPanel } from './components/PreviewPanel'
 import { ImageDiffView, type ImageDiffMode } from './components/ArtifactImageDiff'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './components/SettingsPopover'
+import { DiffContextSelect } from './components/DiffContextSelect'
 import { InfoTooltip } from './components/InfoTooltip'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
@@ -5238,13 +5239,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             checked={fileView === opt.value} onChange={() => setFileView(opt.value)} label={opt.label} />
         ))}
       </div>
-      <SettingsGroupLabel className="mb-2"># lines context</SettingsGroupLabel>
-      <div className="flex flex-col gap-0.5 mb-3">
-        {DIFF_CONTEXT_OPTIONS.map((option) => (
-          <SettingsOptionRow key={option} type="radio" name="hydra-diff-context-lines"
-            checked={contextLines === option} onChange={() => setContextLines(option)} label={String(option)} />
-        ))}
-      </div>
+      <DiffContextSelect value={contextLines} onChange={setContextLines} className="mb-3" />
       <SettingsGroupLabel className="mb-2">Options</SettingsGroupLabel>
       <div className="flex flex-col gap-0.5">
         <SettingsOptionRow type="checkbox" checked={sideBySide} onChange={setSideBySide} label="Side by side" />

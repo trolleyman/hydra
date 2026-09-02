@@ -9,7 +9,8 @@ import { apiErrorBody, formatError } from '../api/format_error'
 import { ApiError, ErrorResponse } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch, DiffFile, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
-import { DIFF_CONTEXT_OPTIONS, parseDiffContextLines, type DiffContextLines } from '../lib/diffPrefs'
+import { parseDiffContextLines, type DiffContextLines } from '../lib/diffPrefs'
+import { DiffContextSelect } from './DiffContextSelect'
 import {
   ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
   GitCompareArrows, ArrowRightLeft, Menu,
@@ -382,21 +383,11 @@ function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; on
           </label>
         ))}
       </div>
-      <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2"># lines context</p>
-      <div className="flex flex-col gap-0.5">
-        {DIFF_CONTEXT_OPTIONS.map((option) => (
-          <label key={option} className="flex items-center gap-2 py-0.5 cursor-pointer">
-            <input
-              type="radio"
-              name="hydra-repo-diff-context-lines"
-              checked={settings.contextLines === option}
-              onChange={() => onChange({ ...settings, contextLines: option })}
-              className="w-3 h-3 accent-blue-500"
-            />
-            <span className="text-xs text-gray-700 dark:text-gray-300">{option}</span>
-          </label>
-        ))}
-      </div>
+      <DiffContextSelect
+        value={settings.contextLines}
+        onChange={(contextLines) => onChange({ ...settings, contextLines })}
+        className="mt-3"
+      />
       {/* Image diff mode - applies to in-tree images in the diff, mirroring the
           agent diff viewer's settings (shared storage key). */}
       <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
