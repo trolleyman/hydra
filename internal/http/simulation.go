@@ -1309,6 +1309,10 @@ func (s *SimulationServer) PullFromMr(w http.ResponseWriter, r *http.Request, pr
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+func (s *SimulationServer) CloseReview(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, simAgentByID(id))
+}
+
 func (s *SimulationServer) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	var body api.SetDownstreamBranchJSONBody
 	_ = json.NewDecoder(r.Body).Decode(&body)

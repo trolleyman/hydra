@@ -147,6 +147,10 @@ between `hydra/<id>` and its upstream review ref and offers:
   into the head branch, so conflicts surface through the existing conflict UI
   and no history is rewritten. The agent needs no notification: its worktree IS
   the branch.
+- **Close PR/MR** from the linked review button's menu. Hydra closes the review
+  on the forge, detaches it from the head, and disables automatic pushing. The
+  local and remote branches remain intact, and the downstream branch name is
+  preserved for a later publish.
 - Diverged -> pull first, then push. The only `--force-with-lease` case is a
   head that rewrote its own history where the remote tip still matches what this
   head last pushed; foreign commits always win a pull-first.
@@ -362,11 +366,12 @@ Approving, resolving and everything else still happen on the forge.
   with no callers; the only arm endpoint is the local-tests one. Wants an arm
   endpoint/UI plus a watcher branch that prefers the forge's own auto-merge
   (it respects merge trains and protected-branch rules Hydra cannot replicate).
-- **Linked-head kill / local-merge close-or-detach dialog.** Killing or locally
-  merging a head with a linked MR currently does nothing about the MR or the
-  remote branch. It should offer "close the MR and delete the remote branch" or
-  "detach - leave it open", and locally merging a head whose MR is open should
-  be blocked-with-override like a failing test gate.
+- **Linked-head kill / local-merge close-or-detach dialog.** The review button
+  can close a Hydra-created MR/PR while keeping the head and branches. Killing or
+  locally merging a linked head still does nothing about the review or remote
+  branch. Those flows should offer a close-or-detach choice, and locally merging
+  a head whose review is open should be blocked-with-override like a failing
+  test gate.
 - **Fetch-fresh spawn base.** The spawn UI defaults to the repository's stable
   default branch (remote `origin/HEAD`, then `main`/`master`) rather than whichever
   incidental branch the project checkout currently has. There is still no

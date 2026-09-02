@@ -206,3 +206,25 @@ func TestGlabMergeArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewCloseArgs(t *testing.T) {
+	t.Run("github", func(t *testing.T) {
+		f := &fakeRunner{}
+		if err := (&githubProvider{run: f.run}).Close(context.Background(), "/repo", "origin", "17"); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.calls) != 1 || f.calls[0] != "gh pr close 17" {
+			t.Fatalf("calls = %v, want [gh pr close 17]", f.calls)
+		}
+	})
+
+	t.Run("gitlab", func(t *testing.T) {
+		f := &fakeRunner{}
+		if err := (&gitlabProvider{run: f.run}).Close(context.Background(), "/repo", "origin", "23"); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.calls) != 1 || f.calls[0] != "glab mr close 23" {
+			t.Fatalf("calls = %v, want [glab mr close 23]", f.calls)
+		}
+	})
+}
