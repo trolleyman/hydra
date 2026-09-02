@@ -5239,13 +5239,13 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             checked={fileView === opt.value} onChange={() => setFileView(opt.value)} label={opt.label} />
         ))}
       </div>
-      <DiffContextSelect value={contextLines} onChange={setContextLines} className="mb-3" />
       <SettingsGroupLabel className="mb-2">Options</SettingsGroupLabel>
       <div className="flex flex-col gap-0.5">
         <SettingsOptionRow type="checkbox" checked={sideBySide} onChange={setSideBySide} label="Side by side" />
         <SettingsOptionRow type="checkbox" checked={wordHighlight} onChange={setWordHighlight} label="Highlight changed words" />
         <SettingsOptionRow type="checkbox" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} label="Ignore whitespace" />
         <SettingsOptionRow type="checkbox" checked={singleFile} onChange={handleSingleFileChange} label="One file at a time" />
+        <DiffContextSelect value={contextLines} onChange={setContextLines} className="mt-2" />
       </div>
     </SettingsPopover>
   )

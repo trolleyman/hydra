@@ -382,12 +382,12 @@ function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; on
             <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
           </label>
         ))}
+        <DiffContextSelect
+          value={settings.contextLines}
+          onChange={(contextLines) => onChange({ ...settings, contextLines })}
+          className="mt-2"
+        />
       </div>
-      <DiffContextSelect
-        value={settings.contextLines}
-        onChange={(contextLines) => onChange({ ...settings, contextLines })}
-        className="mt-3"
-      />
       {/* Image diff mode - applies to in-tree images in the diff, mirroring the
           agent diff viewer's settings (shared storage key). */}
       <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
