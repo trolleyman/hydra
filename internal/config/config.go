@@ -311,11 +311,11 @@ type SandboxConfig struct {
 	// never touch the real files. A worktree-relative entry ("pipeline/out")
 	// mirrors that path from the project root into the worktree; a home/absolute
 	// entry ("~/.gradle", "/opt/cache") - resolved against HOME like the other
-	// path lists - is overlaid in place and supersedes any default writable bind
-	// on it (so per-head builds share the real cache read-only but keep their
-	// writes and lock files private). Useful for large gitignored build
-	// inputs/outputs or shared tool caches too big to copy. See sandbox.CowMount;
-	// on Linux this needs an overlay-capable bwrap.
+	// path lists - is overlaid in place on Linux and supersedes a writable bind.
+	// macOS can clone only worktree-relative paths into a distinct destination;
+	// an in-place home/absolute writable CoW request fails explicitly. Useful for
+	// large gitignored build inputs/outputs or shared tool caches too big to copy.
+	// See sandbox.CowMount; Linux needs an overlay-capable bwrap.
 	CowPaths []string `toml:"cow_paths"`
 	// InheritEnv names additional variables copied from the Hydra daemon's
 	// environment into this agent. The head otherwise receives only Hydra's
@@ -355,6 +355,9 @@ var inheritedEnvReserved = map[string]bool{
 	"HOME": true, "USER": true, "LOGNAME": true, "PATH": true, "SHELL": true,
 	"LANG": true, "LC_ALL": true, "TERM": true, "COLORTERM": true,
 	"TMPDIR": true, "TMP": true, "TEMP": true,
+	"XDG_CACHE_HOME": true, "XDG_STATE_HOME": true,
+	"GOCACHE": true, "GOMODCACHE": true, "GOPATH": true, "GOBIN": true,
+	"MAGEFILE_CACHE": true, "MISE_CACHE_DIR": true, "MISE_STATE_DIR": true,
 	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
 	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
 	"CLAUDE_CONFIG_DIR": true, "CODEX_HOME": true,
@@ -2523,7 +2526,7 @@ func writablePathsDoc() string {
 	b.WriteString("config.toml applies to every project; a project's own list adds to it).\n")
 	b.WriteString("A path can be ~ (HOME), absolute, or a $VAR. Secrets are hidden separately\n")
 	b.WriteString("via masked_paths, so nothing here holds credentials.\n")
-	b.WriteString("Built-in defaults, always writable (broad caches + toolchain + agent state):")
+	b.WriteString("Built-in defaults, always writable (agent state only; shared caches and toolchains are read-only):")
 	for _, line := range wrapHosts(sandbox.Defaults().WritablePaths) {
 		b.WriteString("\n    ")
 		b.WriteString(line)
@@ -2599,7 +2602,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "cow_paths",
-			doc: "paths mounted copy-on-write (read source, writes kept per-head): worktree-relative (mirrored from project root) or home/absolute like ~/.gradle (overlaid in place, supersedes its writable bind).",
+			doc: "paths exposed copy-on-write (read source, writes kept per-head): worktree-relative paths are cloned/mirrored into the worktree. Linux can also overlay home/absolute paths like ~/.gradle in place; macOS cannot mount over those paths and rejects writable requests for them.",
 			def: func() string { return "[]" },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.CowPaths }),
 		},

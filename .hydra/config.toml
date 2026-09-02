@@ -59,10 +59,6 @@ test_concurrency = 2
 # preview_ports = "26601-26699"
 
 [sandbox]
-# ~/.local/share/go/pkg/sumdb is GOPATH/pkg/sumdb (GOPATH stays ~/.local/share/go
-# even though GOMODCACHE is redirected to ~/.cache/go); `go`/`go tool` writes the
-# checksum-db tree head there when fetching a new module, so without it fetching a
-# tool dep (e.g. gotestsum) fails with a read-only-filesystem error on sum.golang.org.
 # The web build installs deps and runs `generate-openapi` via `npx` (or aube), so
 # their caches/stores must be writable: ~/.npm for npm/npx, and ~/.local/share/aube
 # for aube's global content-addressed store. Hence those two entries below.
@@ -71,9 +67,9 @@ test_concurrency = 2
 ## config.toml applies to every project; a project's own list adds to it).
 ## A path can be ~ (HOME), absolute, or a $VAR. Secrets are hidden separately
 ## via masked_paths, so nothing here holds credentials.
-## Built-in defaults, always writable (broad caches + toolchain + agent state):
-##     ~/.cache, ~/.local/share/mise, ~/.local/share/hydra/logs, ~/.claude,
-##     ~/.claude.json, ~/.gemini, ~/.copilot, ~/.codex
+## Built-in defaults, always writable (agent state only; shared caches and toolchains are read-only):
+##     ~/.local/share/hydra/logs, ~/.claude, ~/.claude.json, ~/.gemini,
+##     ~/.copilot, ~/.codex
 ## Common per-project additions (NOT writable by default - add the ones you use
 ## here, or to cow_paths for per-head copy-on-write isolation):
 ##     ~/.cargo - Rust registry + toolchain cache
@@ -82,18 +78,17 @@ test_concurrency = 2
 ##     ~/.local/share/kotlin - Kotlin compiler cache
 ##     ~/.local/share/JetBrains - JetBrains toolbox
 ##     ~/.local/state - XDG state (some tools persist logs/history here)
-writable_paths = ["~/.cache/go", "~/.npm", "~/.cache/goimports", "~/.magefile", "~/.local/share/go/pkg/sumdb", "~/.local/share/aube"]
+writable_paths = ["~/.npm", "~/.local/share/aube"]
 
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
 
-# ~/.config/go holds `go env -w` settings (GOMODCACHE=~/.cache/go/pkg/mod,
-# GOCACHE=~/.cache/go/build, GOPATH=~/.local/share/go); ~/.config is masked by
-# default, so re-expose it or the sandboxed `go` falls back to ~/go/pkg/mod (not writable).
+# Preserve non-secret Go settings read-only. Hydra overrides Go's cache, module,
+# GOPATH, and binary-output paths with private per-sandbox directories.
 ## paths re-exposed read-only after a masked parent (added to the built-in defaults).
 restore_ro = ["~/.config/go"]
 
-## paths mounted copy-on-write (read source, writes kept per-head): worktree-relative (mirrored from project root) or home/absolute like ~/.gradle (overlaid in place, supersedes its writable bind).
+## paths exposed copy-on-write (read source, writes kept per-head): worktree-relative paths are cloned/mirrored into the worktree. Linux can also overlay home/absolute paths like ~/.gradle in place; macOS cannot mount over those paths and rejects writable requests for them.
 # cow_paths = []
 
 ## shell script run in the sandbox before every agent launch - spawn and resume, so it must be idempotent (e.g. mise trust). To set environment variables for the agent, append `KEY=value` lines to the file at $HYDRA_ENV (e.g. `echo "GRADLE_USER_HOME=/tmp/gradle-iso" >> "$HYDRA_ENV"`); each is exported into the agent and every command it runs, overriding any inherited value (the GitHub Actions $GITHUB_ENV model). Those same vars are also injected into the head's sandboxed bash shells (the terminal '+' tabs) so a shell shares the agent's environment - the script is not re-run there; the non-sandboxed 'Regular shell' is left out. It also gets the HYDRA_* head-context vars (HYDRA_HEAD_ID, HYDRA_WORKTREE, ...).

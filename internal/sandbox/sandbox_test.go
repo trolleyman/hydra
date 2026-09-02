@@ -78,9 +78,29 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 		"TMP=/shared/two",
 		"TEMP=/shared/three",
 		"TMPDIR=/duplicate",
+		"GOCACHE=/shared/go-build",
+		"GOMODCACHE=/shared/go-mod",
+		"GOPATH=/shared/go",
+		"GOBIN=/shared/go/bin",
+		"XDG_CACHE_HOME=/shared/cache",
+		"MISE_CACHE_DIR=/shared/mise-cache",
 	}, hostTmp)
 	wantTmp := SandboxTempDir(hostTmp)
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+	wants := map[string]string{
+		"TMPDIR":         wantTmp,
+		"TMP":            wantTmp,
+		"TEMP":           wantTmp,
+		"XDG_CACHE_HOME": filepath.Join(wantTmp, "cache"),
+		"XDG_STATE_HOME": filepath.Join(wantTmp, "state"),
+		"GOCACHE":        filepath.Join(wantTmp, "cache", "go-build"),
+		"GOMODCACHE":     filepath.Join(wantTmp, "go", "pkg", "mod"),
+		"GOPATH":         filepath.Join(wantTmp, "go"),
+		"GOBIN":          filepath.Join(wantTmp, "go", "bin"),
+		"MAGEFILE_CACHE": filepath.Join(wantTmp, "cache", "mage"),
+		"MISE_CACHE_DIR": filepath.Join(wantTmp, "cache", "mise"),
+		"MISE_STATE_DIR": filepath.Join(wantTmp, "state", "mise"),
+	}
+	for key, want := range wants {
 		prefix := key + "="
 		matches := make([]string, 0, 1)
 		for _, entry := range got {
@@ -88,8 +108,8 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 				matches = append(matches, entry)
 			}
 		}
-		if len(matches) != 1 || matches[0] != prefix+wantTmp {
-			t.Errorf("%s entries = %v, want [%s]", key, matches, prefix+wantTmp)
+		if len(matches) != 1 || matches[0] != prefix+want {
+			t.Errorf("%s entries = %v, want [%s]", key, matches, prefix+want)
 		}
 	}
 	if !slices.Contains(got, "PATH=/usr/bin") {

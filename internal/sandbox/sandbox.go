@@ -468,22 +468,42 @@ func HostPreSpawnEnvFile(tmpDir string) string {
 	return filepath.Join(tmpDir, PreSpawnEnvFileName)
 }
 
-// RuntimeEnv returns env with the platform-visible private temporary directory
-// selected consistently for standard temp APIs and pre-spawn scripts.
+// RuntimeEnv returns env with platform-visible private temporary, cache, and
+// state directories. These values are Hydra-owned defaults because pointing a
+// sandbox at a shared writable compiler cache or tool-manager state creates a
+// persistence channel into later heads and host builds. A trusted pre-spawn
+// script still runs after this setup and may deliberately override them.
 func RuntimeEnv(env []string, hostTmpDir string) []string {
 	tmpDir := SandboxTempDir(hostTmpDir)
 	if tmpDir == "" {
 		return env
 	}
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		prefix := key + "="
+	private := []struct {
+		key   string
+		value string
+	}{
+		{"TMPDIR", tmpDir},
+		{"TMP", tmpDir},
+		{"TEMP", tmpDir},
+		{"XDG_CACHE_HOME", filepath.Join(tmpDir, "cache")},
+		{"XDG_STATE_HOME", filepath.Join(tmpDir, "state")},
+		{"GOCACHE", filepath.Join(tmpDir, "cache", "go-build")},
+		{"GOMODCACHE", filepath.Join(tmpDir, "go", "pkg", "mod")},
+		{"GOPATH", filepath.Join(tmpDir, "go")},
+		{"GOBIN", filepath.Join(tmpDir, "go", "bin")},
+		{"MAGEFILE_CACHE", filepath.Join(tmpDir, "cache", "mage")},
+		{"MISE_CACHE_DIR", filepath.Join(tmpDir, "cache", "mise")},
+		{"MISE_STATE_DIR", filepath.Join(tmpDir, "state", "mise")},
+	}
+	for _, item := range private {
+		prefix := item.key + "="
 		filtered := make([]string, 0, len(env)+1)
 		for _, entry := range env {
 			if !strings.HasPrefix(entry, prefix) {
 				filtered = append(filtered, entry)
 			}
 		}
-		env = append(filtered, prefix+tmpDir)
+		env = append(filtered, prefix+item.value)
 	}
 	return env
 }

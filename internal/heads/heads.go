@@ -1154,9 +1154,11 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			// same HTTP_PROXY the agent got. The supervisor is live here, so its proxy
 			// is running; nil in unrestricted/off modes, where the shell needs none.
 			tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
-			shellEnv := append(append([]string(nil), env...), preSpawnEnv...)
+			shellEnv := sandbox.RuntimeEnv(append([]string(nil), env...), tmpDir)
+			// Persisted pre-spawn values are trusted project policy and intentionally
+			// override Hydra's private cache defaults, just as they do for the agent.
+			shellEnv = append(shellEnv, preSpawnEnv...)
 			shellEnv = append(shellEnv, EgressProxyEnvFor(head.ID)...)
-			shellEnv = sandbox.RuntimeEnv(shellEnv, tmpDir)
 			sp, err := host.client.Spawn(nshost.SpawnRequest{
 				Argv: []string{"/bin/bash"},
 				Env:  shellEnv,

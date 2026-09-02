@@ -31,7 +31,7 @@ func Available() (bool, string) {
 // BuildSpec assembles a sandbox-exec command line. It materializes the embedded
 // Seatbelt profile to a temp file, appends config-driven allow/deny rules, and
 // invokes sandbox-exec with WORK_DIR/HOME_DIR params.
-func BuildSpec(opts Options) (*Spec, error) {
+func BuildSpec(opts Options) (spec *Spec, retErr error) {
 	if opts.NoSandbox {
 		return errtrace.Wrap2(rawSpec(opts))
 	}
@@ -46,6 +46,24 @@ func BuildSpec(opts Options) (*Spec, error) {
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("sandbox-exec not found: %w", err))
 	}
+
+	// One-shot test, artifact, preview, and command sandboxes do not have a
+	// persistent head temp directory. Give them an ephemeral private directory so
+	// standard temp APIs and Hydra's private cache redirects never fall back to
+	// the shared macOS user temp root.
+	ownedTmpDir := ""
+	if opts.TmpDir == "" {
+		ownedTmpDir, err = os.MkdirTemp("", "hydra-sandbox-run-")
+		if err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("create private sandbox temp: %w", err))
+		}
+		opts.TmpDir = ownedTmpDir
+	}
+	defer func() {
+		if retErr != nil && ownedTmpDir != "" {
+			_ = os.RemoveAll(ownedTmpDir)
+		}
+	}()
 
 	home := canonicalSBPath(opts.Home)
 	worktree := canonicalSBPath(opts.WorktreePath)
@@ -162,13 +180,13 @@ func BuildSpec(opts Options) (*Spec, error) {
 		}
 	}
 
-	// Copy-on-write mounts. macOS has no overlay primitive in Seatbelt, but APFS
-	// has block-level copy-on-write clones, so we clone Lower into Dest (instant,
-	// only changed blocks ever cost space). Dest is under WORK_DIR, so it is
-	// already writable; the agent edits its private clone and Lower is untouched.
+	// Copy-on-write paths. macOS has no overlay primitive in Seatbelt, but APFS
+	// has block-level copy-on-write clones when Lower and Dest are distinct. An
+	// in-place home/absolute overlay is impossible and must fail instead of
+	// silently exposing the shared source as writable.
 	for _, m := range opts.CowMounts {
 		if err := cowClone(m); err != nil {
-			fmt.Fprintf(os.Stderr, "hydra: COW clone %s -> %s failed, continuing without it: %v\n", m.Lower, m.Dest, err)
+			return nil, errtrace.Wrap(fmt.Errorf("prepare COW path %s -> %s: %w", m.Lower, m.Dest, err))
 		}
 	}
 
@@ -203,11 +221,16 @@ func BuildSpec(opts Options) (*Spec, error) {
 	args = append(args, withPreSpawn(opts.PreSpawnScript, SandboxPreSpawnEnvFile(opts.TmpDir), opts.Argv)...)
 
 	return &Spec{
-		Path:    sandboxExec,
-		Args:    args,
-		Env:     env,
-		Dir:     opts.WorktreePath,
-		Cleanup: func() { _ = os.Remove(profilePath) },
+		Path: sandboxExec,
+		Args: args,
+		Env:  env,
+		Dir:  opts.WorktreePath,
+		Cleanup: func() {
+			_ = os.Remove(profilePath)
+			if ownedTmpDir != "" {
+				_ = os.RemoveAll(ownedTmpDir)
+			}
+		},
 	}, nil
 }
 
@@ -222,6 +245,9 @@ func cowClone(m CowMount) error {
 	// here - skip rather than make a writable clone.
 	if m.Lower == "" || m.Dest == "" || m.Upper == "" {
 		return nil
+	}
+	if canonicalSBPath(m.Lower) == canonicalSBPath(m.Dest) {
+		return errtrace.Errorf("macOS cannot provide an in-place writable CoW overlay; use a worktree-relative cow_path or redirect the tool to private storage")
 	}
 	if _, err := os.Stat(m.Lower); err != nil {
 		return nil

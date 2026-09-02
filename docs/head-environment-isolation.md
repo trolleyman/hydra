@@ -14,8 +14,12 @@ The effective environment is assembled in this order, with later entries
 overriding earlier ones:
 
 1. A Hydra-owned baseline provides `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`,
-   `LANG`, `TERM`, `COLORTERM`, and private temporary-directory variables. Git
-   author and committer identity comes from the trusted project Git config.
+   `LANG`, `TERM`, `COLORTERM`, and private temporary-directory variables. At
+   sandbox construction, Hydra also redirects XDG cache/state, Go build/module/
+   workspace/output, mage cache, and mise cache/state variables beneath that
+   sandbox's private temporary directory. Shared `~/.cache` and mise installation
+   trees remain readable but are not writable by default. Git author and
+   committer identity comes from the trusted project Git config.
 2. A small provider-specific list preserves conventional direct authentication
    variables for only the selected agent type. Credentials for other providers
    are absent:
@@ -45,7 +49,8 @@ overriding earlier ones:
 
 Hydra rejects invalid or reserved names in `inherit_env`: all `HYDRA_*` names,
 temporary-directory and identity variables, agent configuration variables, and
-HTTP proxy variables that Hydra owns for egress enforcement. In particular,
+private cache/state variables, plus HTTP proxy variables that Hydra owns for
+egress enforcement. In particular,
 daemon settings such as `HYDRA_STATE_DIR`, `HYDRA_API_ADDR`, and `HYDRA_BWRAP`
 never reach a sandboxed head.
 
@@ -77,6 +82,9 @@ their config trust and credential requirements differ from a head session.
 - `heads.buildAgentEnv` is the pure allow-list builder. Hydra-generated seed,
   head-context, rendering, egress, and `$HYDRA_ENV` values are appended through
   their existing explicit channels.
+- `sandbox.RuntimeEnv` maps temporary and mutable cache/state paths to the
+  platform-visible private temp directory. Linux uses its per-sandbox `/tmp`;
+  macOS uses the protected real per-head or per-command directory.
 - Config decoding and saving reject reserved names before a head launches. The
   launch builder repeats that check defensively for programmatically assembled
   config values.

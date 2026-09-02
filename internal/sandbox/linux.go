@@ -459,7 +459,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	return &Spec{
 		Path:       path,
 		Args:       finalArgs,
-		Env:        opts.Env,
+		Env:        RuntimeEnv(opts.Env, opts.TmpDir),
 		Dir:        opts.WorktreePath,
 		ExtraFiles: extraFiles,
 		Cleanup:    cleanup,

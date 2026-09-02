@@ -413,6 +413,122 @@ func TestCowCloneDarwinCreatesPrivateWritableCopy(t *testing.T) {
 	}
 }
 
+func TestCowCloneDarwinRejectsInPlaceWritableOverlay(t *testing.T) {
+	root := t.TempDir()
+	mount := CowMount{
+		Lower: root,
+		Dest:  root,
+		Upper: filepath.Join(t.TempDir(), "writable-marker"),
+	}
+	if err := cowClone(mount); err == nil || !strings.Contains(err.Error(), "in-place writable CoW overlay") {
+		t.Fatalf("cowClone() error = %v, want explicit in-place overlay rejection", err)
+	}
+}
+
+func TestBuildSpecDarwinFailsClosedForInPlaceWritableCow(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktree")
+	sharedCache := filepath.Join(root, "shared-cache")
+	for _, dir := range []string{worktree, sharedCache} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := BuildSpec(Options{
+		WorktreePath: worktree,
+		Home:         root,
+		CowMounts: []CowMount{{
+			Lower: sharedCache,
+			Dest:  sharedCache,
+			Upper: filepath.Join(root, "cow", "upper"),
+		}},
+		Env:  []string{"PATH=/usr/bin:/bin"},
+		Argv: []string{"/usr/bin/true"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "in-place writable CoW overlay") {
+		t.Fatalf("BuildSpec() error = %v, want explicit in-place overlay rejection", err)
+	}
+}
+
+func TestBuildSpecDarwinCreatesPrivateRuntimeStorageForOneShotCommands(t *testing.T) {
+	worktree := t.TempDir()
+	home := t.TempDir()
+	spec, err := BuildSpec(Options{
+		WorktreePath: worktree,
+		Home:         home,
+		Env: []string{
+			"PATH=/usr/bin:/bin",
+			"GOCACHE=" + filepath.Join(home, ".cache", "go-build"),
+			"MISE_CACHE_DIR=" + filepath.Join(home, ".cache", "mise"),
+		},
+		Argv: []string{"/usr/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateTmp := envValue(spec.Env, "TMPDIR")
+	if privateTmp == "" || privateTmp == "/tmp" {
+		t.Fatalf("one-shot TMPDIR = %q, want private host path", privateTmp)
+	}
+	for key, want := range map[string]string{
+		"GOCACHE":        filepath.Join(privateTmp, "cache", "go-build"),
+		"MISE_CACHE_DIR": filepath.Join(privateTmp, "cache", "mise"),
+	} {
+		if got := envValue(spec.Env, key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+	if _, err := os.Stat(privateTmp); err != nil {
+		t.Fatalf("private runtime dir missing before cleanup: %v", err)
+	}
+	spec.Cleanup()
+	if _, err := os.Stat(privateTmp); !os.IsNotExist(err) {
+		t.Fatalf("private runtime dir survived cleanup: %v", err)
+	}
+}
+
+func TestBuildSpecDarwinKeepsSharedCachesAndMiseReadOnly(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktree")
+	home := filepath.Join(root, "home")
+	sharedCache := filepath.Join(home, ".cache")
+	sharedMise := filepath.Join(home, ".local", "share", "mise")
+	for _, dir := range []string{worktree, sharedCache, sharedMise} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec, err := BuildSpec(Options{
+		WorktreePath:  worktree,
+		Home:          home,
+		WritablePaths: Defaults().WritablePaths,
+		Env:           []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+		Argv: []string{"/bin/sh", "-c", `
+mkdir -p "$GOCACHE" "$MISE_CACHE_DIR" || exit 41
+: > "$GOCACHE/probe" || exit 42
+: > "$MISE_CACHE_DIR/probe" || exit 43
+if : > "$HOME/.cache/shared-probe" 2>/dev/null; then exit 44; fi
+if : > "$HOME/.local/share/mise/shared-probe" 2>/dev/null; then exit 45; fi
+`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	cmd := exec.Command(spec.Path, spec.Args[1:]...)
+	cmd.Env = spec.Env
+	cmd.Dir = spec.Dir
+	output, runErr := cmd.CombinedOutput()
+	if nestedSandboxDenied(output) {
+		t.Skip("sandbox-exec cannot nest inside the test runner's existing sandbox")
+	}
+	if runErr != nil {
+		t.Fatalf("private/shared cache boundary probe failed: %v\n%s", runErr, output)
+	}
+}
+
 func containsExact(entries []string, want string) bool {
 	for _, entry := range entries {
 		if entry == want {
@@ -420,6 +536,16 @@ func containsExact(entries []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func envValue(entries []string, key string) string {
+	prefix := key + "="
+	for i := len(entries) - 1; i >= 0; i-- {
+		if strings.HasPrefix(entries[i], prefix) {
+			return strings.TrimPrefix(entries[i], prefix)
+		}
+	}
+	return ""
 }
 
 func nestedSandboxDenied(output []byte) bool {

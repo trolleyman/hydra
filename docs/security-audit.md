@@ -213,6 +213,12 @@ in the loop.
 >   **advisory** mode (proxy via `HTTP(S)_PROXY` — filters every well-behaved
 >   client but a determined process can bypass it), surfaced as a UI warning.
 >   `network.enabled=false` stays the hard off-switch.
+> - **Rec 7 (writable scope):** shared `~/.cache` and
+>   `~/.local/share/mise` are read-only by default. Hydra redirects XDG, Go,
+>   mage, and mise mutable cache/state paths beneath each sandbox's private temp
+>   directory. Linux still supports explicit home/absolute `cow_paths` through
+>   overlayfs; macOS rejects those in-place writable requests and supports APFS
+>   clones only when the destination is a distinct private directory.
 >
 > Policy lives in per-agent `[<agent>.policy]` / `[<agent>.sandbox.network]` config,
 > resolved from the trusted project root. The original audit follows unchanged.
@@ -263,10 +269,10 @@ in the loop.
    touched, network/MCP attempts) so the user has visibility into an unattended
    head without reading logs. Cheap, high trust value.
 
-7. **Tighten default writable scope (F5).** Review whether every entry in
-   `Defaults().WritablePaths` needs to be writable by every agent type, and
-   prefer per-head COW (already supported via `cow_paths`) over shared writable
-   caches where a poisoned cache could affect later runs.
+7. **Tighten default writable scope (F5).** Shared caches and toolchain
+   installations are read-only by default. Mutable cache/state paths use
+   per-sandbox private storage. Explicit `cow_paths` remain available where the
+   platform can provide a real private destination or overlay.
 
 ### Suggested priority order
 F1 hook-gate → F3 MCP allow-list + UI → F2 egress → F4 read-only policy →
