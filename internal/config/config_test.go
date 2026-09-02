@@ -177,8 +177,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			PrePrompt: ptr(prePrompt),
 			Sandbox: &SandboxConfig{
 				WritablePaths: []string{"~/.cache", "/tmp"},
+				ReadablePaths: []string{"~/.config/git"},
 				MaskedPaths:   []string{"~/.ssh"},
-				RestoreRO:     []string{"~/.config/git"},
 				CowPaths:      []string{"pipeline/out", "pipeline/build/input"},
 				Network:       &NetworkConfig{Enabled: &enabled, AllowedHosts: []string{"example.com"}},
 			},
@@ -206,6 +206,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.Defaults.Sandbox == nil {
 		t.Fatal("sandbox config not round-tripped")
+	}
+	if got := loaded.Defaults.Sandbox.ReadablePaths; len(got) != 1 || got[0] != "~/.config/git" {
+		t.Errorf("ReadablePaths mismatch: %v", got)
 	}
 	if len(loaded.Defaults.Sandbox.MaskedPaths) != 1 || loaded.Defaults.Sandbox.MaskedPaths[0] != "~/.ssh" {
 		t.Errorf("MaskedPaths mismatch: %v", loaded.Defaults.Sandbox.MaskedPaths)
@@ -1461,15 +1464,15 @@ func splitLines(s string) []string {
 func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 	base := SandboxConfig{
 		WritablePaths: []string{"~/.cache", "~/.npm"},
+		ReadablePaths: []string{"~/.config/git"},
 		MaskedPaths:   []string{"~/.ssh"},
-		RestoreRO:     []string{"~/.config/git"},
 		CowPaths:      []string{"pipeline/out"},
 		InheritEnv:    []string{"ANDROID_HOME"},
 	}
 	base.Merge(SandboxConfig{
 		WritablePaths: []string{"~/.npm", "~/.gradle"}, // ~/.npm is a duplicate
+		ReadablePaths: []string{"~/.config/gh"},
 		MaskedPaths:   []string{"~/.aws"},
-		RestoreRO:     []string{"~/.config/gh"},
 		CowPaths:      []string{"~/.gradle"},
 		InheritEnv:    []string{"ANDROID_HOME", "SSH_AUTH_SOCK"},
 	})
@@ -1480,8 +1483,8 @@ func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 		}
 	}
 	eq("WritablePaths", base.WritablePaths, []string{"~/.cache", "~/.npm", "~/.gradle"})
+	eq("ReadablePaths", base.ReadablePaths, []string{"~/.config/git", "~/.config/gh"})
 	eq("MaskedPaths", base.MaskedPaths, []string{"~/.ssh", "~/.aws"})
-	eq("RestoreRO", base.RestoreRO, []string{"~/.config/git", "~/.config/gh"})
 	eq("CowPaths", base.CowPaths, []string{"pipeline/out", "~/.gradle"})
 	eq("InheritEnv", base.InheritEnv, []string{"ANDROID_HOME", "SSH_AUTH_SOCK"})
 }

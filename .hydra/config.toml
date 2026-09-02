@@ -78,13 +78,14 @@ test_prefetch = false
 ##     ~/.local/state - XDG state (some tools persist logs/history here)
 # writable_paths = []
 
-## extra paths hidden in the sandbox (added to the built-in defaults).
-# masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
+## extra host paths exposed read-only in the sandbox, unioned on top of the
+## built-in developer/tool allow-list and across config layers. Known credential
+## paths stay masked even when they sit below an allowed parent.
+readable_paths = ["~/.config/go"]
 
-# Preserve non-secret Go settings read-only. Hydra overrides Go's cache, module,
-# GOPATH, and binary-output paths with private per-sandbox directories.
-## paths re-exposed read-only after a masked parent (added to the built-in defaults).
-restore_ro = ["~/.config/go"]
+## extra paths hidden in the sandbox (added to the built-in fail-safe masks and
+## applied after all read/write allowances).
+# masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config/gh", "~/.config/glab-cli", "~/.cargo/credentials", "~/.cargo/credentials.toml", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml", "~/Library/Keychains", "~/Library/Mail", "~/Library/Messages", "/Volumes"]
 
 ## paths exposed copy-on-write (read source, writes kept per-head): worktree-relative paths are cloned/mirrored into the worktree. Linux can also overlay home/absolute paths like ~/.gradle in place; macOS cannot mount over those paths and rejects writable requests for them.
 # cow_paths = []

@@ -97,9 +97,9 @@ Every forge call runs **host-side in the daemon** with the user's own
 credentials - `gh`/`glab` for the API, the normal git credential helper /
 ssh-agent for pushes. Nothing token-shaped is ever mounted into a sandbox:
 
-- `~/.config/gh` is NOT restored into the sandbox (it once was, which quietly
-  handed every head the user's GitHub identity - `gh auth token` from Bash is
-  not gated). Forge credentials in-sandbox are opt-in via `restore_ro`.
+- `~/.config/gh` and other forge credential locations remain masked even below
+  a broader `readable_paths` entry. Raw CLI tokens are never available to a
+  head.
 - In-sandbox `git push` is gate-denied outright; publishing is a daemon action.
 - `.hydra/deploy.toml` and `.hydra/config.local.toml` are shipped mask defaults,
   since Hydra's own tooling creates the first of them.
@@ -408,10 +408,9 @@ The manual route still works and needs no config: push the head branch yourself
 keep the head alive for review iteration - its branch and worktree survive as
 long as you do not merge or kill it. For head-side forge access, prefer a forge
 MCP server with `[policy] mcp_tools_allowed` (the gate parks every non-allowed
-call for approval, even under `--dangerously-skip-permissions`) over
-`restore_ro = ["~/.config/gh"]`, which makes the head *you* on the forge with no
-approval step. JIRA reads are the same story: an Atlassian MCP server plus the
-host on the network allow-list is likely the permanently correct answer.
+call for approval, even under `--dangerously-skip-permissions`). JIRA reads are
+the same story: an Atlassian MCP server plus the host on the network allow-list
+is likely the permanently correct answer.
 
 Direct local merge also remains the right tool for *local integration branches*:
 merge several stacked heads into `integration/foo`, test the combination, and

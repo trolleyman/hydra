@@ -86,8 +86,8 @@ type seedResult struct {
 // conversation history (~/.claude, ~/.gemini, ...) come from the host (made
 // writable by the sandbox defaults). The status files stay at their real host
 // paths (made writable + pointed at via HYDRA_STATUS_PATH) so reporting works on
-// both Linux and macOS. Hooks invoke the hydra binary at its real path, visible
-// inside the sandbox via the read-only root bind.
+// both Linux and macOS. Hooks invoke the Hydra binary through an explicit
+// read-only sandbox input.
 //
 // prePrompt holds the standing Hydra instructions delivered as a system prompt.
 // Claude receives them via --append-system-prompt (see sandbox.AgentArgv), but

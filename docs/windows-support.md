@@ -32,9 +32,11 @@ has neither, and the primitives it does have change the shape of the port:
   `ALL APPLICATION PACKAGES`-ACLed locations and write nowhere until granted.
   That polarity is wrong for open-ended developer workflows (shells, git,
   Python, package managers, build tools all read broadly across the host),
-  which is exactly why Codex rejected it after evaluation. A write-restricted
-  token has the same polarity as Linux: reads work as normal, writes only
-  where the sandbox identity is granted.
+  which is exactly why Codex rejected it after evaluation. Hydra's portable
+  policy nevertheless names readable roots explicitly. A dedicated sandbox
+  principal naturally denies the developer profile, then receives read ACLs
+  for `readable_paths` and write ACLs for `writable_paths`; world-readable
+  Windows system and toolchain roots form the backend's system inventory.
 - **Windows Sandbox** (the feature the current stub's error message mentions)
   is a full utility VM: GB-scale overhead, slow start, awkward host file
   sharing, no clean per-head lifecycle. Rejected for per-head use (by Codex
@@ -159,7 +161,7 @@ Linux-only.
 | PTY sessions | feasible | ConPTY via `x/sys/windows` |
 | Daemon (socket, autostart, upgrade) | feasible | AF_UNIX + `LockFileEx` + shutdown endpoint |
 | Script runners (tests/artifacts/services) | feasible | Git for Windows bash (already a Claude Code prereq) |
-| FS sandbox (writable/masked) | feasible, proven by Codex | sandbox-user principal + ACL grants/denies |
+| FS sandbox (readable/writable/masked) | feasible, proven by Codex | sandbox-user principal + ACL grants/denies |
 | Config seeding (Binds/ROOverlays) | feasible, shared with macOS | copy + env redirection intent layer |
 | Network off | feasible, proven by Codex | per-user firewall deny-outbound |
 | Hard network egress | feasible, needs one-time admin | deny-outbound user + loopback CONNECT proxy |
@@ -231,7 +233,8 @@ never a silent fallback.
 
 Goal: `sandbox.BuildSpec` on Windows returns a real confined spec: a child
 run as a dedicated sandbox principal, in a job object, with ACL-enforced
-write boundaries. Follow the Codex architecture rather than inventing one.
+read and write boundaries. Follow the Codex architecture rather than inventing
+one.
 
 - [ ] One-time elevated `hydra setup` (a separate small binary, so the main
       harness never elevates): create the local sandbox users, grant logon
@@ -254,10 +257,11 @@ write boundaries. Follow the Codex architecture rather than inventing one.
       shared-user model when the pool is exhausted, documented as a weaker
       boundary. Per-head ACL grants make even the shared-user case
       write-bounded.
-- [ ] FS policy: write-restricted-token polarity, same as Linux - reads work
-      broadly (system dirs, toolchains, Program Files are world-readable),
-      writes only where granted. Stamp write-allow ACEs for the head's
-      principal on the worktree, head state dir, per-head temp, and
+- [ ] FS policy: preserve the shared `readable_paths` / `writable_paths` /
+      `masked_paths` model. The sandbox principal can read the Windows system
+      and toolchain inventory (including Program Files), receives explicit read
+      ACEs for configured readable roots, and receives write ACEs for the
+      worktree, head state dir, per-head temp, and
       `writable_paths`; explicit deny-write ACEs for `masked_paths`-style
       protections inside writable trees (Codex does exactly this for `.git`
       and its config dir). `masked_paths` *read*-masking of secrets is

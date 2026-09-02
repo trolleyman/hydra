@@ -739,7 +739,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	setStatus(api.Starting)
 
 	// Build the sandbox launch options.
-	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
+	writable, readable, masked, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
 	// Pre-spawn is per-launch sandbox setup, not a once-per-head constructor: it
 	// runs on every agent launch - spawn and resume alike (see ResumeHead) - so a
 	// configured script must be idempotent.
@@ -790,8 +790,8 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		Caches:                cfg.ResolveSharedCaches(string(opts.AgentType)),
 		MaterializeCachePaths: !projectDirectory,
 		WritablePaths:         append(writable, seed.WritablePaths...),
+		ReadablePaths:         readable,
 		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:             restore,
 		Network:               net,
 		Binds:                 seed.Binds,
 		ImmutablePaths:        seed.ImmutablePaths,
@@ -1189,7 +1189,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// script (e.g. a bashism error) abort the shell before /bin/bash ever
 		// exec'd, closing the terminal instantly. Its resolved env vars are still
 		// shared with the shell though (preSpawnEnv, below), just not by re-running it.
-		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
+		writable, readable, masked, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
 		// Bash is an interactive shell, not an agent - no system prompt to inject,
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
 		// The bash shell shares the head's worktree, so it inherits the head's
@@ -1225,8 +1225,8 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
 			MaterializeCachePaths: !head.UsesProjectDirectory(),
 			WritablePaths:         append(writable, seed.WritablePaths...),
+			ReadablePaths:         readable,
 			MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-			RestoreRO:             restore,
 			Network:               net,
 			Binds:                 seed.Binds,
 			ImmutablePaths:        seed.ImmutablePaths,
@@ -1380,7 +1380,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// only way a pre_spawn_script added (or changed) after a head was created ever
 	// reaches that head. It must therefore be idempotent - it runs on every launch
 	// - and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
-	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	writable, readable, masked, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
 	// If the pre_spawn_script was removed since this head last launched, drop any
 	// env it previously persisted so stale vars stop leaking into its shells (a
 	// script that still runs re-truncates the file itself on every launch).
@@ -1458,8 +1458,8 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
 		MaterializeCachePaths: !head.UsesProjectDirectory(),
 		WritablePaths:         append(writable, seed.WritablePaths...),
+		ReadablePaths:         readable,
 		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:             restore,
 		Network:               net,
 		Binds:                 seed.Binds,
 		ImmutablePaths:        seed.ImmutablePaths,
@@ -1892,7 +1892,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	runCtx, cancel := context.WithTimeout(ctx, preExitTimeout)
 	defer cancel()
 
-	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
+	writable, readable, masked, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
 	tmpDir := ensureHeadTmpDir(head.ProjectPath, head.ID)
 	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
 	env = sandbox.RuntimeEnv(env, tmpDir)
@@ -1925,8 +1925,8 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 		Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
 		MaterializeCachePaths: !head.UsesProjectDirectory(),
 		WritablePaths:         writable,
+		ReadablePaths:         readable,
 		MaskedPaths:           sandbox.ResolveMaskedPaths(head.ProjectPath, worktree, masked),
-		RestoreRO:             restore,
 		Network:               net,
 		Env:                   env,
 		Argv:                  []string{"bash", "-c", sandbox.StrictScript(script)},

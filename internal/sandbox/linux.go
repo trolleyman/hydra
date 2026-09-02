@@ -151,10 +151,9 @@ func trimOutput(b []byte) string {
 	return s
 }
 
-// BuildSpec assembles a bwrap command line from opts. It translates the helper
-// functions in sandbox-demo/linux/claude-sandboxed into Go: a read-only view of
-// the whole filesystem, a curated set of writable binds, masked credential
-// locations, optional network isolation and a seccomp syscall filter.
+// BuildSpec assembles a bwrap command line from opts: an empty namespace filled
+// with explicit readable and writable paths, masked credential locations,
+// optional network isolation, and a seccomp syscall filter.
 func BuildSpec(opts Options) (*Spec, error) {
 	if err := PrepareSharedCaches(&opts); err != nil {
 		return nil, errtrace.Wrap(err)
@@ -171,8 +170,8 @@ func BuildSpec(opts Options) (*Spec, error) {
 	home := opts.Home
 	args := []string{
 		bwrap,
-		// Read-only view of the entire host filesystem.
-		"--ro-bind", "/", "/",
+		// Bubblewrap starts from an empty filesystem namespace. Add only the
+		// system/runtime paths and user paths admitted below.
 		// Fresh pseudo-filesystems.
 		"--dev", "/dev",
 		"--proc", "/proc",
@@ -230,6 +229,15 @@ func BuildSpec(opts Options) (*Spec, error) {
 		if _, err := os.Stat(p); err == nil {
 			args = append(args, "--ro-bind", p, p)
 		}
+	}
+	for _, p := range linuxSystemReadablePaths() {
+		addROPath(p)
+	}
+	for _, p := range envPathDirs(opts.Env) {
+		addROPath(p)
+	}
+	for _, p := range expandAll(opts.ReadablePaths, home) {
+		addROPath(p)
 	}
 	if opts.WorkingDirReadOnly {
 		addROPath(opts.WorktreePath)
@@ -335,27 +343,6 @@ func BuildSpec(opts Options) (*Spec, error) {
 		)
 	}
 
-	// Mask credential/secret locations (dirs -> empty tmpfs, files -> /dev/null).
-	for _, p := range expandAll(opts.MaskedPaths, home) {
-		info, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
-		if info.IsDir() {
-			args = append(args, "--tmpfs", p)
-		} else {
-			args = append(args, "--ro-bind", "/dev/null", p)
-		}
-	}
-
-	// Restore read-only access to specific paths under masked dirs. Applied
-	// after the masks so they win.
-	for _, p := range expandAll(opts.RestoreRO, home) {
-		if _, err := os.Stat(p); err == nil {
-			args = append(args, "--ro-bind", p, p)
-		}
-	}
-
 	// Overlay writable tmpfs on requested dirs (e.g. $HOME/.hydra) so per-head
 	// files can be bind-mounted into otherwise read-only locations. The bind
 	// sources below are real host files, so writes still reach the host.
@@ -377,6 +364,20 @@ func BuildSpec(opts Options) (*Spec, error) {
 			args = append(args, "--ro-bind", source, target)
 		} else {
 			args = append(args, "--bind", source, target)
+		}
+	}
+
+	// Defense-in-depth masks are last: neither a broad readable/writable path nor
+	// a generated bind can accidentally re-expose a known credential location.
+	for _, p := range expandAll(opts.MaskedPaths, home) {
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() {
+			args = append(args, "--tmpfs", p)
+		} else {
+			args = append(args, "--ro-bind", "/dev/null", p)
 		}
 	}
 
@@ -467,6 +468,21 @@ func BuildSpec(opts Options) (*Spec, error) {
 		ExtraFiles: extraFiles,
 		Cleanup:    cleanup,
 	}, nil
+}
+
+// linuxSystemReadablePaths is the host runtime/toolchain inventory needed by
+// ordinary command-line programs. Everything else starts absent; project and
+// user tool paths are admitted separately through Options and PATH.
+func linuxSystemReadablePaths() []string {
+	return []string{
+		"/bin", "/sbin", "/usr", "/lib", "/lib64", "/opt", "/nix/store",
+		"/run/current-system", "/run/opengl-driver", "/sys/devices/system/cpu", "/sys/fs/cgroup",
+		"/etc/alternatives", "/etc/ca-certificates", "/etc/pki", "/etc/ssl",
+		"/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/hosts",
+		"/etc/resolv.conf", "/etc/localtime", "/etc/timezone", "/etc/services",
+		"/etc/protocols", "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d",
+		"/etc/gitconfig",
+	}
 }
 
 // runtimeDir returns XDG_RUNTIME_DIR or the conventional /run/user/<uid>.

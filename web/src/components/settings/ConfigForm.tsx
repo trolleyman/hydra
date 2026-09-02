@@ -411,8 +411,8 @@ export function ConfigForm({
     const next: SandboxConfig = { ...sandbox, ...patch }
     const empty =
       !next.writable_paths?.length &&
+      !next.readable_paths?.length &&
       !next.masked_paths?.length &&
-      !next.restore_ro?.length &&
       !next.cow_paths?.length &&
       !Object.keys(next.cache ?? {}).length &&
       !next.inherit_env?.length &&
@@ -665,25 +665,25 @@ export function ConfigForm({
         />
 
         <SandboxPathSection
+          icon={<Eye className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />}
+          label="Readable paths"
+          tooltipTitle="Readable paths"
+          tooltip={<p>Extra host paths the agent may read. The worktree, system runtimes, developer toolchains, and writable paths are already included. Credential masks always take precedence.</p>}
+          paths={sandbox.readable_paths ?? []}
+          inheritedPaths={inheritedSandbox?.readable_paths ?? undefined}
+          onChange={(readable_paths) => updateSandbox({ readable_paths })}
+          placeholder="e.g. ~/.config/go"
+        />
+
+        <SandboxPathSection
           icon={<EyeOff className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />}
-          label="Masked Paths"
-          tooltipTitle="Masked Paths"
-          tooltip={<p>Paths hidden from the agent entirely (e.g. extra credential locations beyond the defaults like <code className="text-blue-300">~/.ssh</code>, <code className="text-blue-300">~/.aws</code>).</p>}
+          label="Masked paths"
+          tooltipTitle="Masked paths"
+          tooltip={<p>Defense-in-depth denies for credential or secret paths. Masks are applied after every read and write allowance, so they always win.</p>}
           paths={sandbox.masked_paths ?? []}
           inheritedPaths={inheritedSandbox?.masked_paths ?? undefined}
           onChange={(masked_paths) => updateSandbox({ masked_paths })}
           placeholder="e.g. ~/.vault-token"
-        />
-
-        <SandboxPathSection
-          icon={<Eye className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />}
-          label="Restore Read-Only"
-          tooltipTitle="Restore Read-Only"
-          tooltip={<p>Re-expose specific paths read-only after their parent has been masked (e.g. <code className="text-blue-300">~/.config/git</code> when <code className="text-blue-300">~/.config</code> is masked).</p>}
-          paths={sandbox.restore_ro ?? []}
-          inheritedPaths={inheritedSandbox?.restore_ro ?? undefined}
-          onChange={(restore_ro) => updateSandbox({ restore_ro })}
-          placeholder="e.g. ~/.config/git"
         />
 
         <SandboxPathSection

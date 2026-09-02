@@ -217,7 +217,10 @@ in the loop.
 >   **advisory** mode (proxy via `HTTP(S)_PROXY` — filters every well-behaved
 >   client but a determined process can bypass it), surfaced as a UI warning.
 >   `network.enabled=false` stays the hard off-switch.
-> - **Rec 7 (writable scope):** shared host cache and tool-installation trees are
+> - **Rec 7 (filesystem scope):** filesystem reads and writes are default-deny.
+>   Linux builds an explicit bubblewrap view; macOS grants the same path
+>   categories through Seatbelt. Known credential masks apply last as a
+>   fail-safe. Shared host cache and tool-installation trees are
 >   read-only by default. Hydra redirects mutable cache/state paths beneath each
 >   sandbox's private temp directory. Trusted config can opt disposable caches
 >   into project-scoped sharing with `[sandbox.cache]`; `GOPATH`, `GOBIN`, mise
@@ -275,13 +278,13 @@ in the loop.
    touched, network/MCP attempts) so the user has visibility into an unattended
    head without reading logs. Cheap, high trust value.
 
-7. **Tighten default writable scope (F5).** Shared caches and toolchain
+7. **Tighten default filesystem scope (F5).** Shared caches and toolchain
    installations are read-only by default. Mutable cache/state paths use
    per-sandbox private storage unless trusted config names a disposable,
    project-scoped shared cache. Explicit `cow_paths` remain available where the
-   platform can provide a real private destination or overlay. A future
-   readable-path allow-list can replace the broad read-only host view after its
-   system/toolchain compatibility requirements are inventoried.
+   platform can provide a real private destination or overlay. The readable
+   system/toolchain inventory and project-configured `readable_paths` are the
+   only host filesystem inputs exposed to a head.
 
 ### Suggested priority order
 F1 hook-gate → F3 MCP allow-list + UI → F2 egress → F4 read-only policy →

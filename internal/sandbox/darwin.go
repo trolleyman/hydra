@@ -93,17 +93,25 @@ func BuildSpec(opts Options) (spec *Spec, retErr error) {
 		}
 		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(opts.TmpDir))
 	}
+	for _, p := range darwinSystemReadablePaths() {
+		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
+	}
+	for _, p := range envPathDirs(opts.Env) {
+		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
+	}
+	for _, p := range expandAll(opts.ReadablePaths, home) {
+		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
+	}
 
-	// The worktree's git metadata lives in the main repo's common dir. How much is
-	// writable depends on the git-isolation mode (see docs/git-isolation.md); reads are
-	// allowed by the base template, so read-only modes simply omit the write grant.
+	// The worktree's git metadata lives in the main repo's common dir. It is an
+	// explicit readable input; git-isolation decides whether writes are added.
 	// Seatbelt is last-match-wins, so a deny after the allow carves out subpaths.
 	if opts.GitCommonDir != "" {
 		switch opts.GitIsolation {
 		case GitIsolationReadonly:
-			// No write grant -> the whole common dir is read-only.
+			fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(opts.GitCommonDir))
 		default:
-			fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(opts.GitCommonDir))
+			fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(opts.GitCommonDir))
 		}
 	}
 	// Writable paths (the worktree is covered by WORK_DIR in the template).
@@ -114,13 +122,10 @@ func BuildSpec(opts Options) (spec *Spec, retErr error) {
 		ensureWritableDir(p, home)
 		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(p))
 	}
-	// Masked paths: deny both read and write.
-	for _, p := range expandAll(opts.MaskedPaths, home) {
-		fmt.Fprintf(&b, "(deny file-read* file-write* %s)\n", sbPathRule(p))
-	}
-	// Restore read-only.
-	for _, p := range expandAll(opts.RestoreRO, home) {
-		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
+	// Re-state the worktree after shared-temp denials. Developer checkouts often
+	// live beneath a temporary directory in tests and ephemeral runners.
+	if opts.WorktreePath != "" {
+		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(opts.WorktreePath))
 	}
 	// Immutable runtime and generated policy inputs live at real host paths on
 	// macOS. Grant reads and carve writes back out after every broader writable
@@ -134,6 +139,11 @@ func BuildSpec(opts Options) (spec *Spec, retErr error) {
 	// config-driven allow. Seatbelt is last-match-wins.
 	if opts.WorkingDirReadOnly {
 		fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(opts.WorktreePath))
+	}
+	// Defense-in-depth masks are last so no broader allowance can re-expose a
+	// known credential path.
+	for _, p := range expandAll(opts.MaskedPaths, home) {
+		fmt.Fprintf(&b, "(deny file-read* file-write* %s)\n", sbPathRule(p))
 	}
 	// A head may signal itself and processes it spawned, but not its supervisor
 	// parent or unrelated host processes. Besides containing `kill`/`pkill`, this
@@ -235,6 +245,18 @@ func BuildSpec(opts Options) (spec *Spec, retErr error) {
 			}
 		},
 	}, nil
+}
+
+func darwinSystemReadablePaths() []string {
+	return []string{
+		"/bin", "/sbin", "/usr", "/System", "/opt", "/nix/store",
+		"/Applications/Xcode.app", "/Library/Developer", "/Library/Frameworks", "/Library/Java", "/Library/Ruby",
+		"/private/var/db/timezone", "/dev",
+		"/private/etc/alternatives", "/private/etc/ca-certificates", "/private/etc/pki", "/private/etc/ssl",
+		"/private/etc/passwd", "/private/etc/group", "/private/etc/nsswitch.conf", "/private/etc/hosts",
+		"/private/etc/resolv.conf", "/private/etc/localtime", "/private/etc/services", "/private/etc/protocols",
+		"/private/etc/paths", "/private/etc/paths.d", "/private/etc/shells", "/private/etc/gitconfig",
+	}
 }
 
 // cowClone populates m.Dest with an APFS copy-on-write clone of m.Lower's
