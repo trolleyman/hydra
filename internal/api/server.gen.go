@@ -3456,8 +3456,20 @@ type ReviewThreadsResponse struct {
 	Threads []ReviewThread `json:"threads"`
 }
 
+// SandboxCacheConfig One project-scoped cache; exactly one of env or path must be set
+type SandboxCacheConfig struct {
+	// Env Environment variable redirected to the cache directory
+	Env *string `json:"env"`
+
+	// Path Worktree-relative path linked to the cache directory
+	Path *string `json:"path"`
+}
+
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
 type SandboxConfig struct {
+	// Cache Project-scoped writable caches shared by matching heads and sandboxed runners. Each key owns a stable directory in Hydra project state; env redirects a cache variable and path links a worktree-relative ignored path.
+	Cache *map[string]SandboxCacheConfig `json:"cache"`
+
 	// CowPaths Paths mounted copy-on-write. The agent reads the real files and may overwrite them, but writes are kept per-head and never touch the source. A worktree-relative entry (pipeline/out) is mirrored from the project root into the worktree; a home/absolute entry (~/.gradle, /opt/cache), resolved against HOME, is overlaid in place and supersedes any default writable bind on it. For large gitignored build dirs or shared tool caches too big to copy. On Linux needs an overlay-capable bwrap.
 	CowPaths *[]string `json:"cow_paths"`
 

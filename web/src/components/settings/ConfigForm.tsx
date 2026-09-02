@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
-import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxConfig } from '../../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, TriangleAlert, Lock, KeyRound } from 'lucide-react'
+import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxCacheConfig, SandboxConfig } from '../../api'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, TriangleAlert, Lock, KeyRound, Database } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
 import { Markdown } from '../../lib/MarkdownRenderer'
@@ -187,6 +187,86 @@ export function PathListEditor({
   )
 }
 
+export function CacheListEditor({
+  caches,
+  inheritedCaches,
+  onChange,
+}: {
+  caches: Record<string, SandboxCacheConfig>
+  inheritedCaches?: Record<string, SandboxCacheConfig>
+  onChange: (caches: Record<string, SandboxCacheConfig> | null) => void
+}) {
+  const entries = Object.entries(caches).sort(([a], [b]) => a.localeCompare(b))
+  const update = (oldKey: string, nextKey: string, entry: SandboxCacheConfig) => {
+    const next = { ...caches }
+    delete next[oldKey]
+    next[nextKey] = entry
+    onChange(next)
+  }
+  const add = () => {
+    let index = 1
+    while (`cache_${index}` in caches) index++
+    onChange({ ...caches, [`cache_${index}`]: { env: '' } })
+  }
+  return (
+    <div className="space-y-2 pt-0.5">
+      {inheritedCaches && Object.keys(inheritedCaches).length > 0 && (
+        <p className="text-2xs text-gray-400 dark:text-gray-500 italic ml-0.5">
+          Inherited: <span className="font-mono">{Object.keys(inheritedCaches).sort().join(', ')}</span>
+        </p>
+      )}
+      {entries.map(([key, entry]) => {
+        const kind = entry.path != null ? 'path' : 'env'
+        const target = kind === 'path' ? entry.path ?? '' : entry.env ?? ''
+        return (
+          <div key={key} className="grid grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1.25fr)_1.75rem] items-center gap-2">
+            <input
+              aria-label="Cache key"
+              value={key}
+              onChange={(e) => update(key, e.target.value, entry)}
+              placeholder="cache_key"
+              spellCheck={false}
+              className={`${LIST_ROW_TEXT} ${LIST_ROW_CHROME} ${LIST_ROW_PLACEHOLDER} min-w-0 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500`}
+            />
+            <select
+              aria-label={`Cache type for ${key}`}
+              value={kind}
+              onChange={(e) => update(key, key, e.target.value === 'path' ? { path: target } : { env: target })}
+              className="text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-2 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            >
+              <option value="env">Env</option>
+              <option value="path">Path</option>
+            </select>
+            <input
+              aria-label={`Cache target for ${key}`}
+              value={target}
+              onChange={(e) => update(key, key, kind === 'path' ? { path: e.target.value } : { env: e.target.value })}
+              placeholder={kind === 'path' ? 'e.g. build/cache' : 'e.g. GOCACHE'}
+              spellCheck={false}
+              className={`${LIST_ROW_TEXT} ${LIST_ROW_CHROME} ${LIST_ROW_PLACEHOLDER} min-w-0 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500`}
+            />
+            <button
+              type="button"
+              aria-label={`Remove cache ${key}`}
+              onClick={() => {
+                const next = { ...caches }
+                delete next[key]
+                onChange(Object.keys(next).length > 0 ? next : null)
+              }}
+              className="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )
+      })}
+      <button type="button" onClick={add} className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors ml-1 cursor-pointer">
+        <Plus className="w-3.5 h-3.5" /> Add cache
+      </button>
+    </div>
+  )
+}
+
 // PortListEditor edits a list of TCP ports (network.allowed_loopback_ports).
 // Kept as numbers on the wire; number inputs so a partial edit can't corrupt the
 // list. A row being typed (empty/0) is held as 0 and dropped by the backend's
@@ -334,8 +414,10 @@ export function ConfigForm({
       !next.masked_paths?.length &&
       !next.restore_ro?.length &&
       !next.cow_paths?.length &&
+      !Object.keys(next.cache ?? {}).length &&
       !next.inherit_env?.length &&
       !next.pre_spawn_script &&
+      !next.pre_exit_script &&
       !next.network
     onChange({ ...value, sandbox: empty ? null : next })
   }
@@ -622,6 +704,23 @@ export function ConfigForm({
           onChange={(cow_paths) => updateSandbox({ cow_paths })}
           placeholder="e.g. pipeline/out or ~/.gradle"
         />
+
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Database className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Shared caches</label>
+            <InfoTooltip title="Shared caches">
+              <p>Project-scoped writable caches reused by all heads and sandboxed runners. Each key maps to a stable directory in Hydra's project state.</p>
+              <p className="mt-1.5"><strong>Env</strong> redirects a cache environment variable such as <code className="text-blue-300">GOCACHE</code>. <strong>Path</strong> links a worktree-relative, gitignored path to the cache.</p>
+              <p className="mt-1.5 text-amber-300">Caches are mutable shared state. Use them only for disposable data, never credentials, source files, <code className="text-blue-300">GOBIN</code>, or <code className="text-blue-300">node_modules</code>.</p>
+            </InfoTooltip>
+          </div>
+          <CacheListEditor
+            caches={sandbox.cache ?? {}}
+            inheritedCaches={inheritedSandbox?.cache ?? undefined}
+            onChange={(cache) => updateSandbox({ cache })}
+          />
+        </div>
 
         <SandboxPathSection
           icon={<KeyRound className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />}

@@ -59,14 +59,12 @@ test_prefetch = false
 # preview_ports = "26601-26699"
 
 [sandbox]
-# The web build installs deps and runs `generate-openapi` via `npx` (or aube), so
-# their caches/stores must be writable: ~/.npm for npm/npx, and ~/.local/share/aube
-# for aube's global content-addressed store. Hence those two entries below.
 ## extra paths made writable in the sandbox, unioned on top of the built-in
 ## defaults below AND across config layers (this list in ~/.config/hydra/
 ## config.toml applies to every project; a project's own list adds to it).
 ## A path can be ~ (HOME), absolute, or a $VAR. Secrets are hidden separately
-## via masked_paths, so nothing here holds credentials.
+## via masked_paths, so nothing here holds credentials. Prefer sandbox.cache for a
+## disposable cache instead of making the user's host cache writable.
 ## Built-in defaults, always writable (agent state only; shared caches and toolchains are read-only):
 ##     ~/.local/share/hydra/logs, ~/.claude, ~/.claude.json, ~/.gemini,
 ##     ~/.copilot, ~/.codex
@@ -78,7 +76,7 @@ test_prefetch = false
 ##     ~/.local/share/kotlin - Kotlin compiler cache
 ##     ~/.local/share/JetBrains - JetBrains toolbox
 ##     ~/.local/state - XDG state (some tools persist logs/history here)
-writable_paths = ["~/.npm", "~/.local/share/aube"]
+# writable_paths = []
 
 ## extra paths hidden in the sandbox (added to the built-in defaults).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml"]
@@ -96,6 +94,22 @@ restore_ro = ["~/.config/go"]
 
 ## shell script run in a sandbox when a head ends, before its worktree is removed - gets HYDRA_* + HYDRA_END_STATE; e.g. release a claimed resource.
 # pre_exit_script = ""
+
+## project-scoped writable caches shared by every matching head and sandboxed runner.
+## Each key owns <project-state>/cache/sandbox/<key>. Set exactly one of:
+##   env  - redirect that tool's cache variable to the shared directory.
+##   path - link a worktree-relative, gitignored path to the shared directory.
+## Cache contents are mutable shared state: use them only for disposable/rebuildable data,
+## never credentials, source-of-truth state, GOPATH/GOBIN, or per-head package installs.
+[sandbox.cache]
+aube_cache = { env = "AUBE_CACHE_DIR" }
+aube_store = { env = "AUBE_STORE_DIR" }
+go_build = { env = "GOCACHE" }
+go_modules = { env = "GOMODCACHE" }
+mage = { env = "MAGEFILE_CACHE" }
+mise_downloads = { env = "MISE_CACHE_DIR" }
+npm = { env = "npm_config_cache" }
+playwright = { env = "PLAYWRIGHT_BROWSERS_PATH" }
 
 [sandbox.network]
 ## egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed - no network - when the boundary can't be built; "on" is a synonym for "hard"). Default "hard". Supersedes the legacy enabled/filter_enabled booleans.

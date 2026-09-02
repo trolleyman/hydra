@@ -98,6 +98,7 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 		"GOBIN":          filepath.Join(wantTmp, "go", "bin"),
 		"MAGEFILE_CACHE": filepath.Join(wantTmp, "cache", "mage"),
 		"MISE_CACHE_DIR": filepath.Join(wantTmp, "cache", "mise"),
+		"MISE_DATA_DIR":  filepath.Join(wantTmp, "data", "mise"),
 		"MISE_STATE_DIR": filepath.Join(wantTmp, "state", "mise"),
 	}
 	for key, want := range wants {
@@ -112,11 +113,45 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 			t.Errorf("%s entries = %v, want [%s]", key, matches, prefix+want)
 		}
 	}
-	if !slices.Contains(got, "PATH=/usr/bin") {
-		t.Errorf("RuntimeEnv dropped unrelated environment: %v", got)
+	wantPath := filepath.Join(wantTmp, "go", "bin") + string(os.PathListSeparator) + "/usr/bin"
+	if !slices.Contains(got, "PATH="+wantPath) {
+		t.Errorf("RuntimeEnv PATH does not expose private GOBIN: %v", got)
 	}
 	if got := SandboxPreSpawnEnvFile(hostTmp); got != filepath.Join(wantTmp, PreSpawnEnvFileName) {
 		t.Errorf("SandboxPreSpawnEnvFile() = %q, want %q", got, filepath.Join(wantTmp, PreSpawnEnvFileName))
+	}
+}
+
+func TestPrepareSharedCachesCreatesBackingAndWorktreeLink(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "cache")
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorktreePath: worktree,
+		CacheRoot:    root,
+		Caches: map[string]SharedCache{
+			"go_build": {Env: "GOCACHE"},
+			"web":      {Path: "web/cache"},
+		},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"go_build", "web"} {
+		if info, err := os.Stat(filepath.Join(root, key)); err != nil || !info.IsDir() {
+			t.Fatalf("backing cache %s missing: %v", key, err)
+		}
+	}
+	link := filepath.Join(worktree, "web", "cache")
+	if got, err := os.Readlink(link); err != nil || got != filepath.Join(root, "web") {
+		t.Fatalf("cache link = %q, %v", got, err)
+	}
+	env := SharedCacheEnv(RuntimeEnv([]string{"PATH=/usr/bin"}, filepath.Join(t.TempDir(), "tmp")), root, opts.Caches)
+	if !slices.Contains(env, "GOCACHE="+filepath.Join(root, "go_build")) {
+		t.Fatalf("shared cache did not override private GOCACHE: %v", env)
 	}
 }
 

@@ -51,9 +51,12 @@ What works:
   head's own scratch directory and its random Hydra supervisor socket directory.
   Literal ancestors receive metadata-only access so path-canonicalizing tools
   such as Git and SQLite work without exposing directory listings or sibling
-  scratch data. XDG, Go, mage, and mise mutable cache/state variables point
-  beneath the same private directory. One-shot sandboxed commands receive an
-  ephemeral protected directory with the same redirects.
+  scratch data. XDG, Go, Mage, npm, aube, Playwright, and mise mutable
+  cache/state variables point beneath the same private directory. `GOBIN` is
+  added to `PATH`. An explicit `[sandbox.cache]` entry redirects only that cache
+  to a writable project-owned directory shared by heads; host cache trees stay
+  read-only. One-shot sandboxed commands receive an ephemeral protected
+  directory with the same redirects.
 - Codex can recursively clean generated scratch paths through
   `$HYDRA_BIN sandbox-remove`. Codex may reject raw `rm -rf` before Seatbelt
   sees it; the helper accepts only absolute descendants of the head worktree or

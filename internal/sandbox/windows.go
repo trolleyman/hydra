@@ -16,6 +16,9 @@ func Available() (bool, string) {
 // BuildSpec is not yet implemented on Windows, except for the non-sandboxed
 // shell, which runs the command directly with no confinement.
 func BuildSpec(opts Options) (*Spec, error) {
+	if err := PrepareSharedCaches(&opts); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if opts.NoSandbox {
 		return errtrace.Wrap2(rawSpec(opts))
 	}

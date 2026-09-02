@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -778,29 +779,32 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
-		AgentType:          opts.AgentType,
-		WorktreePath:       worktreePath,
-		WorkingDirReadOnly: projectDirectory && opts.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
-		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
-		GitIsolation:       gitIso,
-		Home:               home,
-		TmpDir:             tmpDir,
-		WritablePaths:      append(writable, seed.WritablePaths...),
-		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:          restore,
-		Network:            net,
-		Binds:              seed.Binds,
-		ImmutablePaths:     seed.ImmutablePaths,
-		ROOverlays:         seed.ROOverlays,
-		CowMounts:          cowMounts,
-		Env:                env,
-		Argv:               argv,
-		HydraBinPath:       seed.HydraBinPath,
-		StdioPipes:         opts.ChatMode,
-		PreSpawnScript:     preSpawn,
-		EgressWrap:         egressWrap,
-		HardenGUI:          true,
-		Seccomp:            true,
+		AgentType:             opts.AgentType,
+		WorktreePath:          worktreePath,
+		WorkingDirReadOnly:    projectDirectory && opts.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+		GitCommonDir:          commonDirForSandbox(projectRoot, gitIso),
+		GitIsolation:          gitIso,
+		Home:                  home,
+		TmpDir:                tmpDir,
+		CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"),
+		Caches:                cfg.ResolveSharedCaches(string(opts.AgentType)),
+		MaterializeCachePaths: !projectDirectory,
+		WritablePaths:         append(writable, seed.WritablePaths...),
+		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		RestoreRO:             restore,
+		Network:               net,
+		Binds:                 seed.Binds,
+		ImmutablePaths:        seed.ImmutablePaths,
+		ROOverlays:            seed.ROOverlays,
+		CowMounts:             cowMounts,
+		Env:                   env,
+		Argv:                  argv,
+		HydraBinPath:          seed.HydraBinPath,
+		StdioPipes:            opts.ChatMode,
+		PreSpawnScript:        preSpawn,
+		EgressWrap:            egressWrap,
+		HardenGUI:             true,
+		Seccomp:               true,
 	})
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start session: %w", err))
@@ -1155,6 +1159,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			// is running; nil in unrestricted/off modes, where the shell needs none.
 			tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
 			shellEnv := sandbox.RuntimeEnv(append([]string(nil), env...), tmpDir)
+			shellEnv = sandbox.SharedCacheEnv(shellEnv, filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
 			// Persisted pre-spawn values are trusted project policy and intentionally
 			// override Hydra's private cache defaults, just as they do for the agent.
 			shellEnv = append(shellEnv, preSpawnEnv...)
@@ -1210,25 +1215,28 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// network, matching the agent's fail-closed behaviour.
 		egressEnv, egressWrap := startEgressKeyed(projectRoot, shellID, head.ID, sandbox.AgentTypeBash, &net)
 		sb = sandbox.Options{
-			AgentType:      sandbox.AgentTypeBash,
-			WorktreePath:   worktreePath,
-			GitCommonDir:   commonDirForSandbox(projectRoot, shellGitIso),
-			GitIsolation:   shellGitIso,
-			Home:           home,
-			TmpDir:         ensureHeadTmpDir(projectRoot, head.ID),
-			WritablePaths:  append(writable, seed.WritablePaths...),
-			MaskedPaths:    sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-			RestoreRO:      restore,
-			Network:        net,
-			Binds:          seed.Binds,
-			ImmutablePaths: seed.ImmutablePaths,
-			CowMounts:      cowMounts,
-			Env:            append(append(append(env, seed.Env...), preSpawnEnv...), egressEnv...),
-			Argv:           []string{"/bin/bash"},
-			HydraBinPath:   seed.HydraBinPath,
-			EgressWrap:     egressWrap,
-			HardenGUI:      true,
-			Seccomp:        true,
+			AgentType:             sandbox.AgentTypeBash,
+			WorktreePath:          worktreePath,
+			GitCommonDir:          commonDirForSandbox(projectRoot, shellGitIso),
+			GitIsolation:          shellGitIso,
+			Home:                  home,
+			TmpDir:                ensureHeadTmpDir(projectRoot, head.ID),
+			CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"),
+			Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
+			MaterializeCachePaths: !head.UsesProjectDirectory(),
+			WritablePaths:         append(writable, seed.WritablePaths...),
+			MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+			RestoreRO:             restore,
+			Network:               net,
+			Binds:                 seed.Binds,
+			ImmutablePaths:        seed.ImmutablePaths,
+			CowMounts:             cowMounts,
+			Env:                   append(append(append(env, seed.Env...), preSpawnEnv...), egressEnv...),
+			Argv:                  []string{"/bin/bash"},
+			HydraBinPath:          seed.HydraBinPath,
+			EgressWrap:            egressWrap,
+			HardenGUI:             true,
+			Seccomp:               true,
 		}
 	} else {
 		// Regular shell: plain host bash in the worktree, no confinement.
@@ -1439,29 +1447,32 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
-		AgentType:          head.AgentType,
-		WorktreePath:       worktreePath,
-		WorkingDirReadOnly: head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
-		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
-		GitIsolation:       gitIso,
-		Home:               home,
-		TmpDir:             tmpDir,
-		WritablePaths:      append(writable, seed.WritablePaths...),
-		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:          restore,
-		Network:            net,
-		Binds:              seed.Binds,
-		ImmutablePaths:     seed.ImmutablePaths,
-		ROOverlays:         seed.ROOverlays,
-		CowMounts:          cowMounts,
-		Env:                env,
-		Argv:               argv,
-		HydraBinPath:       seed.HydraBinPath,
-		StdioPipes:         head.ChatMode,
-		PreSpawnScript:     preSpawn,
-		EgressWrap:         egressWrap,
-		HardenGUI:          true,
-		Seccomp:            true,
+		AgentType:             head.AgentType,
+		WorktreePath:          worktreePath,
+		WorkingDirReadOnly:    head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+		GitCommonDir:          commonDirForSandbox(projectRoot, gitIso),
+		GitIsolation:          gitIso,
+		Home:                  home,
+		TmpDir:                tmpDir,
+		CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"),
+		Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
+		MaterializeCachePaths: !head.UsesProjectDirectory(),
+		WritablePaths:         append(writable, seed.WritablePaths...),
+		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		RestoreRO:             restore,
+		Network:               net,
+		Binds:                 seed.Binds,
+		ImmutablePaths:        seed.ImmutablePaths,
+		ROOverlays:            seed.ROOverlays,
+		CowMounts:             cowMounts,
+		Env:                   env,
+		Argv:                  argv,
+		HydraBinPath:          seed.HydraBinPath,
+		StdioPipes:            head.ChatMode,
+		PreSpawnScript:        preSpawn,
+		EgressWrap:            egressWrap,
+		HardenGUI:             true,
+		Seccomp:               true,
 	})
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -1885,6 +1896,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	tmpDir := ensureHeadTmpDir(head.ProjectPath, head.ID)
 	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
 	env = sandbox.RuntimeEnv(env, tmpDir)
+	env = sandbox.SharedCacheEnv(env, filepath.Join(paths.GetCacheDirFromProjectRoot(head.ProjectPath), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)
 
@@ -1904,19 +1916,22 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	}
 
 	spec, err := sandbox.BuildSpec(sandbox.Options{
-		AgentType:     sandbox.AgentTypeBash,
-		WorktreePath:  worktree,
-		GitCommonDir:  commonDirForSandbox(head.ProjectPath, resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)),
-		Home:          home,
-		TmpDir:        tmpDir,
-		WritablePaths: writable,
-		MaskedPaths:   sandbox.ResolveMaskedPaths(head.ProjectPath, worktree, masked),
-		RestoreRO:     restore,
-		Network:       net,
-		Env:           env,
-		Argv:          []string{"bash", "-c", sandbox.StrictScript(script)},
-		HardenGUI:     true,
-		Seccomp:       true,
+		AgentType:             sandbox.AgentTypeBash,
+		WorktreePath:          worktree,
+		GitCommonDir:          commonDirForSandbox(head.ProjectPath, resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)),
+		Home:                  home,
+		TmpDir:                tmpDir,
+		CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(head.ProjectPath), "sandbox"),
+		Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
+		MaterializeCachePaths: !head.UsesProjectDirectory(),
+		WritablePaths:         writable,
+		MaskedPaths:           sandbox.ResolveMaskedPaths(head.ProjectPath, worktree, masked),
+		RestoreRO:             restore,
+		Network:               net,
+		Env:                   env,
+		Argv:                  []string{"bash", "-c", sandbox.StrictScript(script)},
+		HardenGUI:             true,
+		Seccomp:               true,
 	})
 	if err != nil {
 		log.Printf("warn: pre_exit_script for %s: build sandbox: %v", head.ID, err)

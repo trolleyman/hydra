@@ -4450,6 +4450,12 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 			InheritEnv:     ptr([]string{"ANDROID_HOME", "SSH_AUTH_SOCK"}),
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
+			Cache: ptr(map[string]api.SandboxCacheConfig{
+				"go_build":       {Env: ptr("GOCACHE")},
+				"go_modules":     {Env: ptr("GOMODCACHE")},
+				"npm":            {Env: ptr("npm_config_cache")},
+				"mise_downloads": {Env: ptr("MISE_CACHE_DIR")},
+			}),
 			// Hard egress mode with extra allow-listed hosts + a blocked host -
 			// drives the settings network screenshot (mode dropdown + allowed/blocked
 			// host editors populated).

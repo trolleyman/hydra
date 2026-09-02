@@ -357,8 +357,8 @@ func TestBuildSpecDarwinHardensGUIAndSignals(t *testing.T) {
 			}
 		}
 	}
-	if !containsExact(spec.Env, "PATH=/usr/bin") {
-		t.Errorf("GUI hardening dropped unrelated environment: %v", spec.Env)
+	if got := envValue(spec.Env, "PATH"); !strings.HasSuffix(got, string(os.PathListSeparator)+"/usr/bin") {
+		t.Errorf("GUI hardening did not preserve PATH after private GOBIN: %v", spec.Env)
 	}
 	data, err := os.ReadFile(spec.Args[2])
 	if err != nil {

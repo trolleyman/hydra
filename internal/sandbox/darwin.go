@@ -32,6 +32,9 @@ func Available() (bool, string) {
 // Seatbelt profile to a temp file, appends config-driven allow/deny rules, and
 // invokes sandbox-exec with WORK_DIR/HOME_DIR params.
 func BuildSpec(opts Options) (spec *Spec, retErr error) {
+	if err := PrepareSharedCaches(&opts); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if opts.NoSandbox {
 		return errtrace.Wrap2(rawSpec(opts))
 	}
@@ -214,7 +217,7 @@ func BuildSpec(opts Options) (spec *Spec, retErr error) {
 	// Optionally run the configured pre-spawn script first; it execs into Argv
 	// when it falls through. The resolved $HYDRA_ENV is persisted in this head's
 	// private temp directory so sibling sandboxed shells can reuse it.
-	env := RuntimeEnv(opts.Env, opts.TmpDir)
+	env := SharedCacheEnv(RuntimeEnv(opts.Env, opts.TmpDir), opts.CacheRoot, opts.Caches)
 	if opts.HardenGUI {
 		env = withoutEnvKeys(env, "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS")
 	}

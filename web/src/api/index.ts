@@ -175,6 +175,7 @@ export type { ReviewState } from './models/ReviewState';
 export type { ReviewThread } from './models/ReviewThread';
 export { ReviewThreadNote } from './models/ReviewThreadNote';
 export type { ReviewThreadsResponse } from './models/ReviewThreadsResponse';
+export type { SandboxCacheConfig } from './models/SandboxCacheConfig';
 export type { SandboxConfig } from './models/SandboxConfig';
 export type { SandboxedScriptDefinition } from './models/SandboxedScriptDefinition';
 export type { ScriptDefinition } from './models/ScriptDefinition';

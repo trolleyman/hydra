@@ -1452,6 +1452,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
+		cfg.ApplySharedCaches(&opts, m.projectRoot, "", true)
 		// The pre-spawn script is intentionally ignored: artifact generation is a
 		// plain command, not an agent spawn.
 		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")

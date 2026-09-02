@@ -1542,6 +1542,20 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
 			PreExitScript:  c.Sandbox.PreExitScript,
 		}
+		if c.Sandbox.Cache != nil {
+			cache := make(map[string]api.SandboxCacheConfig, len(c.Sandbox.Cache))
+			for key, entry := range c.Sandbox.Cache {
+				apiEntry := api.SandboxCacheConfig{}
+				if entry.Env != "" {
+					apiEntry.Env = &entry.Env
+				}
+				if entry.Path != "" {
+					apiEntry.Path = &entry.Path
+				}
+				cache[key] = apiEntry
+			}
+			out.Sandbox.Cache = &cache
+		}
 		if c.Sandbox.Network != nil {
 			n := c.Sandbox.Network
 			out.Sandbox.Network = &api.NetworkConfig{
@@ -1582,6 +1596,19 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 	out := config.AgentConfig{PrePrompt: a.PrePrompt, Fullscreen: a.Fullscreen}
 	if a.Sandbox != nil {
 		sb := &config.SandboxConfig{}
+		if a.Sandbox.Cache != nil {
+			sb.Cache = make(map[string]sandbox.SharedCache, len(*a.Sandbox.Cache))
+			for key, entry := range *a.Sandbox.Cache {
+				cache := sandbox.SharedCache{}
+				if entry.Env != nil {
+					cache.Env = *entry.Env
+				}
+				if entry.Path != nil {
+					cache.Path = *entry.Path
+				}
+				sb.Cache[key] = cache
+			}
+		}
 		if a.Sandbox.WritablePaths != nil {
 			sb.WritablePaths = *a.Sandbox.WritablePaths
 		}

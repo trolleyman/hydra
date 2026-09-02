@@ -16,9 +16,11 @@ overriding earlier ones:
 1. A Hydra-owned baseline provides `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`,
    `LANG`, `TERM`, `COLORTERM`, and private temporary-directory variables. At
    sandbox construction, Hydra also redirects XDG cache/state, Go build/module/
-   workspace/output, mage cache, and mise cache/state variables beneath that
-   sandbox's private temporary directory. Shared `~/.cache` and mise installation
-   trees remain readable but are not writable by default. Git author and
+   workspace/output, Mage, npm, aube, Playwright, and mise cache/state variables
+   beneath that sandbox's private temporary directory. `GOBIN` is prepended to
+   `PATH`, so privately installed Go commands are usable in the same head.
+   Shared `~/.cache` and tool installation trees remain readable but are not
+   writable by default. Git author and
    committer identity comes from the trusted project Git config.
 2. A small provider-specific list preserves conventional direct authentication
    variables for only the selected agent type. Credentials for other providers
@@ -48,6 +50,41 @@ overriding earlier ones:
 5. The existing `pre_spawn_script` may append deliberate `KEY=value` entries to
    `$HYDRA_ENV`; those values continue to override the baseline on spawn and
    resume.
+
+## Project-scoped caches
+
+Projects can opt disposable caches into sharing across heads and sandboxed
+runners. Each named entry owns a stable directory at
+`<project-state>/cache/sandbox/<key>`:
+
+```toml
+[sandbox.cache]
+go_build = { env = "GOCACHE" }
+go_modules = { env = "GOMODCACHE" }
+npm = { env = "npm_config_cache" }
+generated = { path = "build/cache" }
+```
+
+An `env` entry replaces Hydra's private default for that variable. A `path`
+entry creates a symlink at the worktree-relative path; the path must be ignored
+by Git and must not already contain project data. Cache keys merge across config
+layers, with a later entry replacing the same key.
+
+These directories are writable shared state. They are suitable for reproducible,
+disposable caches, but not credentials, source-of-truth files, mutable executable
+output, or per-worktree dependency trees. In particular:
+
+- `GOCACHE`, `GOMODCACHE`, and Mage's cache can be shared; `GOPATH` and `GOBIN`
+  remain private.
+- npm's download cache can be shared; `node_modules` remains in its worktree or
+  reusable artifact/test slot.
+- `AUBE_CACHE_DIR` and its content-addressed `AUBE_STORE_DIR` can be shared;
+  package installation state remains worktree-local.
+- `MISE_CACHE_DIR` can be shared for downloads and metadata. `MISE_DATA_DIR` and
+  `MISE_STATE_DIR` remain private because they contain installed executable and
+  machine-local state. Existing host installs are available through mise's
+  read-only `MISE_SHARED_INSTALL_DIRS` search path.
+- `PLAYWRIGHT_BROWSERS_PATH` can be shared for downloaded browser builds.
 
 Hydra rejects invalid or reserved names in `inherit_env`: all `HYDRA_*` names,
 temporary-directory and identity variables, agent configuration variables, and
@@ -87,6 +124,8 @@ their config trust and credential requirements differ from a head session.
 - `sandbox.RuntimeEnv` maps temporary and mutable cache/state paths to the
   platform-visible private temp directory. Linux uses its per-sandbox `/tmp`;
   macOS uses the protected real per-head or per-command directory.
+- `sandbox.cache` selectively redirects cache variables or worktree paths to
+  project-owned shared directories after those private defaults are applied.
 - Config decoding and saving reject reserved names before a head launches. The
   launch builder repeats that check defensively for programmatically assembled
   config values.

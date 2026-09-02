@@ -13,6 +13,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -273,6 +275,14 @@ type ROOverlay struct {
 	Upper string // per-head host dir merged on top, mirroring Dir's layout
 }
 
+// SharedCache describes one project-scoped cache. Env redirects a tool's cache
+// variable to the backing directory; Path exposes it at a worktree-relative
+// path. Config validation requires exactly one of the two fields.
+type SharedCache struct {
+	Env  string `toml:"env" json:"env,omitempty"`
+	Path string `toml:"path" json:"path,omitempty"`
+}
+
 // Options describes a sandbox launch request. Paths use the host's real
 // filesystem layout; "~" and "$VAR" are expanded against Home/the environment.
 type Options struct {
@@ -305,6 +315,15 @@ type Options struct {
 	// Linux args or preserves the platform default (used by tests and one-off
 	// sandboxes).
 	TmpDir string
+
+	// CacheRoot contains project-scoped cache directories, one child per key in
+	// Caches. They are deliberately shared between heads in the same project;
+	// unlike writable host caches, this cannot modify the user's tool state.
+	CacheRoot string
+	Caches    map[string]SharedCache
+	// MaterializeCachePaths creates worktree-relative path cache symlinks. It is
+	// false for runners using the live project root or a read-only directory.
+	MaterializeCachePaths bool
 
 	// WritablePaths, MaskedPaths and RestoreRO come from config + baked-in
 	// defaults (see DefaultSandboxConfig). Masks are applied before restores.
@@ -492,7 +511,12 @@ func RuntimeEnv(env []string, hostTmpDir string) []string {
 		{"GOPATH", filepath.Join(tmpDir, "go")},
 		{"GOBIN", filepath.Join(tmpDir, "go", "bin")},
 		{"MAGEFILE_CACHE", filepath.Join(tmpDir, "cache", "mage")},
+		{"npm_config_cache", filepath.Join(tmpDir, "cache", "npm")},
+		{"AUBE_CACHE_DIR", filepath.Join(tmpDir, "cache", "aube")},
+		{"AUBE_STORE_DIR", filepath.Join(tmpDir, "cache", "aube-store")},
+		{"PLAYWRIGHT_BROWSERS_PATH", filepath.Join(tmpDir, "cache", "playwright")},
 		{"MISE_CACHE_DIR", filepath.Join(tmpDir, "cache", "mise")},
+		{"MISE_DATA_DIR", filepath.Join(tmpDir, "data", "mise")},
 		{"MISE_STATE_DIR", filepath.Join(tmpDir, "state", "mise")},
 	}
 	for _, item := range private {
@@ -505,7 +529,120 @@ func RuntimeEnv(env []string, hostTmpDir string) []string {
 		}
 		env = append(filtered, prefix+item.value)
 	}
+	// `go install` writes commands to GOBIN. Keep that private output useful by
+	// putting it first on PATH without inheriting a host GOBIN.
+	goBin := filepath.Join(tmpDir, "go", "bin")
+	pathValue := lookupEnvValue(env, "PATH")
+	if pathValue == "" {
+		pathValue = goBin
+	} else if !slices.Contains(filepath.SplitList(pathValue), goBin) {
+		pathValue = goBin + string(os.PathListSeparator) + pathValue
+	}
+	env = setEnvValue(env, "PATH", pathValue)
+	// Tool installations remain private, but mise may resolve already-installed
+	// host tools through its supported read-only shared-install search path.
+	if home := lookupEnvValue(env, "HOME"); home != "" {
+		env = setEnvValue(env, "MISE_SHARED_INSTALL_DIRS", filepath.Join(home, ".local", "share", "mise", "installs"))
+	}
 	return env
+}
+
+// PrepareSharedCaches creates project-owned cache backing directories and any
+// requested worktree links. It mutates opts.WritablePaths so platform policy
+// builders expose the cache directories read-write.
+func PrepareSharedCaches(opts *Options) error {
+	if opts.CacheRoot == "" || len(opts.Caches) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(opts.Caches))
+	for key := range opts.Caches {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		entry := opts.Caches[key]
+		if key == "" || key == "." || key == ".." || filepath.Base(key) != key || strings.ContainsAny(key, `/\\`) {
+			return errtrace.Errorf("invalid shared cache key %q", key)
+		}
+		if entry.Path != "" {
+			clean := filepath.Clean(entry.Path)
+			if filepath.IsAbs(entry.Path) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return errtrace.Errorf("shared cache %q path must stay inside the worktree", key)
+			}
+		}
+		backing := filepath.Join(opts.CacheRoot, key)
+		if err := os.MkdirAll(backing, 0o755); err != nil {
+			return errtrace.Wrap(fmt.Errorf("create shared cache %q: %w", key, err))
+		}
+		opts.WritablePaths = append(opts.WritablePaths, backing)
+		if entry.Path == "" || !opts.MaterializeCachePaths || opts.WorkingDirReadOnly {
+			continue
+		}
+		target := filepath.Join(opts.WorktreePath, filepath.FromSlash(entry.Path))
+		if err := ensureCacheLink(target, backing); err != nil {
+			return errtrace.Wrap(fmt.Errorf("materialize shared cache %q: %w", key, err))
+		}
+	}
+	return nil
+}
+
+// SharedCacheEnv applies env-backed cache entries after RuntimeEnv, so explicit
+// project cache configuration overrides Hydra's private per-run defaults.
+func SharedCacheEnv(env []string, root string, caches map[string]SharedCache) []string {
+	if root == "" {
+		return env
+	}
+	keys := make([]string, 0, len(caches))
+	for key := range caches {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		entry := caches[key]
+		if entry.Env != "" {
+			env = setEnvValue(env, entry.Env, filepath.Join(root, key))
+		}
+	}
+	return env
+}
+
+func ensureCacheLink(target, backing string) error {
+	if info, err := os.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			got, readErr := os.Readlink(target)
+			if readErr == nil && filepath.Clean(got) == filepath.Clean(backing) {
+				return nil
+			}
+		}
+		return errtrace.Errorf("%s already exists; path caches require an absent path or Hydra's existing symlink", target)
+	} else if !os.IsNotExist(err) {
+		return errtrace.Wrap(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.Symlink(backing, target))
+}
+
+func lookupEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimPrefix(env[i], prefix)
+		}
+	}
+	return ""
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	prefix := key + "="
+	filtered := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return append(filtered, prefix+value)
 }
 
 func withoutEnvKeys(env []string, keys ...string) []string {
@@ -646,7 +783,7 @@ func rawSpec(opts Options) (*Spec, error) {
 	return &Spec{
 		Path:    opts.Argv[0],
 		Args:    opts.Argv,
-		Env:     opts.Env,
+		Env:     SharedCacheEnv(opts.Env, opts.CacheRoot, opts.Caches),
 		Dir:     opts.WorktreePath,
 		Cleanup: func() {},
 	}, nil

@@ -22,9 +22,15 @@ the linked subsystem documents, and completed work belongs in Git history.
   Seatbelt backend on supported macOS releases. See
   [macos-support.md](macos-support.md).
 
-- [ ] **Tighten shared cache access.** Make `~/.cache` copy-on-write by default
-  while preserving narrow, per-project shared caches for safe content-addressed
-  assets and large dependencies such as Playwright browsers.
+- [ ] **Add default-deny filesystem reads.** Replace the broad read-only host
+  view plus credential masks with an explicit readable-path allow-list. This
+  needs a compatibility inventory for system toolchains, dynamic libraries,
+  SDKs, project roots, and user configuration before it can become the default.
+  Keep credential masks as a fail-safe even after the read allow-list exists.
+
+- [ ] **Show shared-cache storage usage.** Add per-key sizes and cleanup controls
+  to the Project settings cache list without putting directory scans on the
+  normal config-read path.
 
 ## Agent and review UX
 

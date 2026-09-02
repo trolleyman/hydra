@@ -1174,6 +1174,7 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
+		cfg.ApplySharedCaches(&opts, m.projectRoot, "", true)
 		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		writable = append(writable, outputDir)
 		if gcd, err := git.GetCommonDir(m.projectRoot); err == nil {

@@ -5773,6 +5773,19 @@ components:
             adb's server on 5037. No effect in other modes (they share the
             host loopback already).
 
+    SandboxCacheConfig:
+      type: object
+      description: One project-scoped cache; exactly one of env or path must be set
+      properties:
+        env:
+          type: string
+          nullable: true
+          description: Environment variable redirected to the cache directory
+        path:
+          type: string
+          nullable: true
+          description: Worktree-relative path linked to the cache directory
+
     SandboxConfig:
       type: object
       description: User-editable sandbox policy, additive on top of baked-in defaults
@@ -5798,6 +5811,12 @@ components:
             type: string
           nullable: true
           description: Paths mounted copy-on-write. The agent reads the real files and may overwrite them, but writes are kept per-head and never touch the source. A worktree-relative entry (pipeline/out) is mirrored from the project root into the worktree; a home/absolute entry (~/.gradle, /opt/cache), resolved against HOME, is overlaid in place and supersedes any default writable bind on it. For large gitignored build dirs or shared tool caches too big to copy. On Linux needs an overlay-capable bwrap.
+        cache:
+          type: object
+          nullable: true
+          additionalProperties:
+            $ref: '#/components/schemas/SandboxCacheConfig'
+          description: Project-scoped writable caches shared by matching heads and sandboxed runners. Each key owns a stable directory in Hydra project state; env redirects a cache variable and path links a worktree-relative ignored path.
         inherit_env:
           type: array
           items:
