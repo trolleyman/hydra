@@ -20,10 +20,10 @@ pre_prompt = '''
 - `rg` searches RECURSIVELY by default - `rg pat internal/` and `rg pat` already walk the tree, and there is no `-r` for it. In `rg`, `-r` is `--replace`: `rg -rn "pat" dir` silently rewrites every match to `n` and prints no line numbers, which looks like a search that found odd results rather than like a mistake. Reach for `--hidden`, `--no-ignore` or `-u` when the default is skipping files you want. (`-r`/`-R` for recursion is `grep`.)
 - A single `sed`, `cat`, `head`, or numbered search already identifies its source and needs no separator. Between adjacent reads whose boundary may be ambiguous, print a typed constant marker such as `printf '%s\n' '--- [file] web/src/App.tsx ---'`. Use `[text]` for an exact ordinary heading and `[dir]` for a directory. Hydra consumes the marker into a compact ruled header while preserving its value exactly. Prefer `printf` to `echo`, and prefer a marker to adding numbers with `nl` or `cat -n`, so copied source stays clean.
 - Use aube if it is available, otherwise npm. For one-off tools use `aubx <tool>` (aube's npx, short for `aube exec`) when on aube, else `npx <tool>`. Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
-- When a logical change is coherent and you are confident in it, commit it promptly, then run its focused tests against that committed tip. This lets Hydra start its per-commit checks without waiting for an extra agent turn. Test first when confidence is low or the change is risky. Run `mage build` once after the implementation is complete, before the final commit and handoff; repeat it earlier only at a meaningful integration checkpoint.
+- While iterating, run only the tests that cover the changed package, file, or behavior. For example, use `go test ./internal/tests -run TestName` or `cd web && aube exec vitest run src/lib/example.test.ts` instead of a full repository suite. Run repository-wide checks once after the complete change, not after every commit. Run `mage build` once after the implementation is complete, before the final commit and handoff; repeat it earlier only at a meaningful integration checkpoint.
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
-- After committing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced in a follow-up commit. It runs `tsc -b` before eslint, so it typechecks too - eslint alone does NOT, and a type error will otherwise only surface at `mage build`.
-- After committing Go code, run `go test ./...` and make sure it passes
+- After the complete web change, run `cd web && aube run lint` (`npm run lint` off aube) once and fix the errors AND warnings you introduced. It runs `tsc -b` before eslint, so it typechecks too - eslint alone does NOT, and a type error will otherwise only surface at `mage build`.
+- After the complete Go change, run `go test ./...` once and make sure it passes. During iteration and between commits, run only the relevant package or named test.
 - When writing docs, can you ideally not refer to how things _were_, just refer to how they _are_, especially after a change. That way the docs reflect present reality.
 - When making changes, also update the docs to reflect those changes.
 - When making git commits - have the message be not just 1 line, unless it's a basic change. Explain a bit more about what the change is
@@ -47,13 +47,13 @@ icon = "web/public/icon.png"
 artifact_concurrency = 1
 
 ## pre-generate a head's artifacts in the background once it settles, so a diff is ready before you open it; set false to disable proactive work ("always" may still start on view, while other modes require an explicit retry). The concurrency cap still applies (default true).
-# artifact_prefetch = true
+artifact_prefetch = false
 
 ## max test-runner generations run at once; lower it for heavy suites, or 0 for unlimited (default 1).
-test_concurrency = 2
+test_concurrency = 1
 
 ## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to disable proactive work ("always" may still start on view, and merge/publish workflows may require any mode). The concurrency cap still applies (default true).
-# test_prefetch = true
+test_prefetch = false
 
 ## inclusive "min-max" TCP port range that the live server previews ([previews.<name>]) allocate their listeners from; a fixed range keeps firewall rules simple, and busy ports are skipped (default 26601-26699).
 # preview_ports = "26601-26699"
@@ -411,30 +411,26 @@ ready_timeout_sec = 900
 ## but a file using it replaces the inherited list wholesale.)
 [tests.go]
 # Go test suite (type = "stdout": streams per-case results into the panel live via
-# ::hydra:test:*:: markers). A first `go test -json -list '.*'` pass is counted by
-# `gotest-markers -total` into the ::hydra:test:total:: progress denominator (the
-# build is paid once — the real run reuses the cache; `|| true` so a build break is
-# reported by the real run, not swallowed by pipefail here). Then `go test -json
-# ./...` is piped through scripts/gotest-markers, which turns each test's JSON
-# event into a marker (package import path as the location — Hydra strips the
-# go.mod prefix — subtests as scope) and passes the `ok pkg` / `FAIL pkg` summary
-# lines through to the build log.
-# No global/mise install needed — it builds from the module cache wherever `go`
+# ::hydra:test:*:: markers). `go test -json ./...` is piped through
+# scripts/gotest-markers, which turns each test's JSON event into a marker
+# (package import path as the location - Hydra strips the go.mod prefix - subtests
+# as scope) and passes the `ok pkg` / `FAIL pkg` summary lines through to the
+# build log. Hydra reuses the previous run's case count as the next run's progress
+# denominator, avoiding a separate discovery build.
+# No global/mise install needed - it builds from the module cache wherever `go`
 # works. The whole module is slow, so allow a generous timeout. (web/dist is kept
 # present in every checkout via a committed web/dist/.gitkeep, so the //go:embed
 # all:dist in web/embed.go compiles without building the frontend.)
-# Once the tests pass, errtrace-report (read-only errtrace -l — safe against a
+# Once the tests pass, errtrace-report (read-only errtrace -l - safe against a
 # head's live worktree) emits ⚠ warn markers for what `mage tidy` would still
-# change — unwrapped error returns and unused //errtrace:skip directives —
+# change - unwrapped error returns and unused //errtrace:skip directives -
 # informational only; they never gate the merge.
 script = '''
-# Count the cases first so the panel has a denominator to tick against.
-echo "::hydra:progress:: Discovering Go tests"
-{ go test -json -list '.*' ./... || true; } | go run ./scripts/gotest-markers -total
-
-# The real run: each JSON event becomes a ::hydra:test:*:: marker.
+# Limit package and runtime parallelism so one background check cannot consume
+# the whole machine. Each JSON event becomes a ::hydra:test:*:: marker; Hydra
+# uses the previous run's total as its progress denominator.
 echo "::hydra:progress:: Running Go tests"
-go test -json ./... | go run ./scripts/gotest-markers
+GOMAXPROCS=2 go test -p 2 -timeout=3m -json ./... | go run ./scripts/gotest-markers
 
 # Informational only - warn markers for what `mage tidy` would still change.
 echo "::hydra:progress:: Checking errtrace"
@@ -485,7 +481,7 @@ fi
 # Specs first - the merge is already blocked when they fail, so the lint and
 # typecheck passes below only run once they pass.
 echo "::hydra:progress:: Running web tests"
-$PX vitest run --reporter=./scripts/hydra-reporter.ts
+$PX vitest run --maxWorkers=2 --reporter=./scripts/hydra-reporter.ts
 
 echo "::hydra:progress:: Running ESLint"
 node scripts/eslint-report.ts

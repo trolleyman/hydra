@@ -32,13 +32,25 @@ func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 	if strings.Contains(prompt, "--- [text]") {
 		t.Error("final pre-prompt still asks agents to tag ordinary text headings")
 	}
-	for _, guidance := range []string{"immediately before every command", "including the first", "Keep file reads bounded"} {
+	for _, guidance := range []string{"immediately before every command", "including the first", "adjacent bounded `sed` ranges", "exact path"} {
 		if !strings.Contains(prompt, guidance) {
 			t.Errorf("final pre-prompt does not document output-section guidance %q", guidance)
 		}
 	}
 	if !strings.Contains(prompt, "`git diff`") {
 		t.Error("final pre-prompt does not tell agents that unified diffs need no marker")
+	}
+}
+
+func TestFinalPrePromptDocumentsCodexSandboxCleanup(t *testing.T) {
+	prompt := BuildFinalPrePrompt(Config{}, string(sandbox.AgentTypeCodex))
+	for _, want := range []string{"$HYDRA_BIN sandbox-remove", "$HYDRA_WORKTREE", "$TMPDIR", "absolute descendants"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("Codex final pre-prompt does not document sandbox cleanup %q", want)
+		}
+	}
+	if strings.Contains(BuildFinalPrePrompt(Config{}, string(sandbox.AgentTypeClaude)), "sandbox-remove") {
+		t.Error("Claude final pre-prompt includes Codex-specific sandbox cleanup guidance")
 	}
 }
 

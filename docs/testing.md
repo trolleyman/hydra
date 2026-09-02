@@ -16,6 +16,14 @@ merge-when-green, or publish/push-when-green - also starts missing test runs in
 every mode. Thus `"never"` means never automatically, not never when explicitly
 required by an action.
 
+`test_concurrency` limits the number of runner commands Hydra starts at once. It
+does not limit parallel workers created inside one command, so resource-heavy
+runners should cap both layers. On a development laptop, a practical low-load
+configuration is `test_concurrency = 1`, `go test -p 2`, and `vitest
+--maxWorkers=2`. Set `test_prefetch = false` to generate verdicts only when the
+tests UI or merge flow requests them; use `auto_run = "never"` for a runner that
+should run only after an explicit Refresh.
+
 The primary Merge action preflights the per-runner endpoint before opening its
 normal confirmation. The preflight is passive for `"settled"` and `"never"`, so
 a missing verdict goes directly to the Force / Queue choice. Queuing starts the

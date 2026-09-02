@@ -180,19 +180,22 @@ and `web/src/DiffViewer.tsx`):
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
   file's real line numbers beneath a ruled, tooltip-bearing file header. Numbered
   searches group consecutive results under the sans-serif path each row names;
-  an inset rule marks each nonconsecutive jump within that file. Every text,
+  a full-width rule across the gutter and source marks each nonconsecutive jump
+  within that file. Every text,
   file, and directory header sticks to the output scroller's top until the next
   header replaces it. Adjacent
   bounded reads keep their requested starts when their exact range lengths
-  account for all returned lines. When a boundary may fall at EOF, agents print
-  a static marker such as
+  account for all returned lines. Adjacent bounded ranges of the same file do
+  not need headings between them. When an unbounded boundary cannot otherwise
+  be proved, agents print a static marker such as
   `printf '%s\n' '--- [file] web/src/App.tsx ---'`; the untyped
   `printf '%s\n' '--- Notes ---'` form creates an ordinary heading and `[dir]`
   selects the shared directory treatment. The older `[text]` spelling remains
-  accepted for existing transcripts. A Bash
-  call with several sections puts the marker immediately before every command
-  that produces one, including the first, and keeps reads bounded so truncation
-  cannot separate a marker from its content. A constant `echo` is accepted,
+  accepted for existing transcripts. File and directory marker values are exact
+  paths without annotations such as `(continued)`. A Bash call with several
+  unbounded sections puts the marker immediately before every command that
+  produces one, including the first, and keeps reads bounded where possible so
+  truncation cannot remove its boundary evidence. A constant `echo` is accepted,
   while `printf` is the canonical cross-shell spelling. The parser only consumes
   a marker when it can correlate it unambiguously with the constant-printing
   command. In a script where a numbered search immediately

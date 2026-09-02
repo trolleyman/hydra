@@ -258,6 +258,7 @@ describe('sectioned search output', () => {
     expect(headings).toHaveLength(3)
     for (const heading of headings) {
       expect(heading).toHaveClass('top-0', 'z-10', 'bg-[#fdfcf9]', 'dark:bg-[#1d1c1a]')
+      expect(heading.children[1]).toHaveClass('py-1')
     }
   })
 
@@ -308,7 +309,7 @@ describe('sectioned search output', () => {
     ])
   })
 
-  it('renders one inset rule between nonconsecutive matches in the same file', () => {
+  it('renders one full-width rule between nonconsecutive matches in the same file', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',
       command: 'rg -n value a.ts',
@@ -319,7 +320,28 @@ describe('sectioned search output', () => {
 
     expect(rows.filter((row) => row.divider)).toHaveLength(1)
     const divider = container.querySelector('[data-copy-skip].border-t')
-    expect(divider).toHaveClass('mx-2.5')
+    expect(divider).toHaveClass('col-span-2')
+    expect(divider).not.toHaveClass('mx-2.5')
+  })
+
+  it('turns an rg context separator into a rule only within the same file', () => {
+    const same = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value a.go',
+      match: { paths: ['a.go'], numbered: true },
+      lines: ['29:first', '30:second', '--', '67:later'],
+    }])
+    expect(same.filter((row) => row.divider)).toHaveLength(1)
+    expect(same.filter((row) => !row.header && !row.divider).map((row) => row.num)).toEqual(['29', '30', '67'])
+
+    const different = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value src',
+      match: { paths: [], numbered: true },
+      lines: ['src/a.go:29:first', '--', 'src/b.go:67:later'],
+    }])
+    expect(different.filter((row) => row.divider)).toHaveLength(0)
+    expect(different.filter((row) => row.header).map((row) => row.header?.label)).toEqual(['src/a.go', 'src/b.go'])
   })
 })
 

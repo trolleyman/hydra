@@ -199,6 +199,9 @@ command = "drop"
 	if !envHasPrefix(res.Env, gate.EnvPolicyPath+"=") || !envHasPrefix(res.Env, gate.EnvApprovalDir+"=") {
 		t.Fatalf("Codex gate environment missing: %v", res.Env)
 	}
+	if !envHasPrefix(res.Env, "HYDRA_BIN="+res.HydraBinPath) {
+		t.Fatalf("Codex Hydra binary environment missing: %v", res.Env)
+	}
 }
 
 func TestSeededInstructionFilesArePerSession(t *testing.T) {

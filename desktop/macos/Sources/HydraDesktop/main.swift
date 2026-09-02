@@ -3,7 +3,6 @@ import WebKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, HydraWindowControllerDelegate {
     private let backend = BackendController()
-    private let processPool = WKProcessPool()
     private var windows: [HydraWindowController] = []
     private var terminating = false
 
@@ -85,7 +84,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
     private func openWindow(kind: HydraWindowKind, projectID: String? = nil, agentID: String? = nil) {
         guard let baseURL = backend.baseURL else { return }
         let configuration = WKWebViewConfiguration()
-        configuration.processPool = processPool
         configuration.websiteDataStore = .default()
         let controller = HydraWindowController(
             kind: kind,
