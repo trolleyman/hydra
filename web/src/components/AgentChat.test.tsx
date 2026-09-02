@@ -262,6 +262,30 @@ describe('sectioned search output', () => {
     }
   })
 
+  it('wraps every output heading kind like an ordinary output line', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'text', label: 'diagnostics-with-one-very-long-unbroken-label' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'file', label: 'deep/path/to/a-very-long-file-name.txt' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'dir', label: 'deep/path/to/a-very-long-directory-name/' }, lines: ['marker'] },
+    ])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    const textLabel = screen.getByText('diagnostics-with-one-very-long-unbroken-label')
+    const fileLabel = screen.getByText('a-very-long-file-name.txt').parentElement
+    const directoryLabel = screen.getAllByText('deep/path/to/a-very-long-directory-name/')[0]
+
+    expect(textLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(fileLabel).toHaveClass('whitespace-normal', 'break-words')
+    expect(fileLabel).not.toHaveClass('truncate')
+    expect(directoryLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(directoryLabel).not.toHaveClass('truncate')
+
+    const headings = container.querySelectorAll('[data-copy-skip].sticky')
+    expect(headings).toHaveLength(3)
+    expect(headings[1].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
+    expect(headings[2].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
+  })
+
   it('highlights marked Markdown and Go sections by their file headings', () => {
     const rows = scriptOutputRows([
       { kind: 'section', section: { kind: 'file', label: 'docs/policy.md' }, lines: ['marker'] },

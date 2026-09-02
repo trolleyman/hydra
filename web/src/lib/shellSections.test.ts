@@ -192,6 +192,8 @@ describe('parseScriptSteps', () => {
     expect(kinds('git --no-pager log --graph --oneline --all\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git show --format=fuller --no-ext-diff f5c8c282 -- .hydra/config.toml\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git show --pretty=full HEAD\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds("git show --format= --unified=4 bc72e93d -- .hydra/config.toml docs internal/config web/src/components/settings | sed -n '1,1000p'\necho ----"))
+      .toEqual(['git', 'marker'])
     // The `| cat` that stops git paging changes nothing about what it printed.
     expect(steps('git log --oneline -1 | cat')[0]).toEqual({ kind: 'git', command: 'git log --oneline -1 | cat', cap: 1 })
     expect(kinds('git log | cat | head -20\necho ----')).toEqual(['git', 'marker'])
@@ -205,6 +207,7 @@ describe('parseScriptSteps', () => {
     // A listing, or a caller's own format, could put anything on any line.
     expect(kinds('git show --stat --pretty=format:%s\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git show --format=%H:%s\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git log --format= HEAD\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git diff --name-only\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git status --porcelain=v2\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
