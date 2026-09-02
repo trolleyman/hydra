@@ -1740,6 +1740,15 @@ paths:
             type: string
           description: Only return the diff for this specific file path
         - in: query
+          name: viewed_blob_sha
+          required: false
+          schema:
+            type: string
+          description: >-
+            With path, compare the file version previously marked viewed to its
+            current head-side content. This returns only changes made after that
+            review baseline. The blob must still exist in the repository.
+        - in: query
           name: context
           required: false
           schema:

@@ -315,6 +315,55 @@ func GetDiffPaths(projectRoot, baseRef, headRef string, ignoreWhitespace, useTri
 	return files, nil
 }
 
+// GetBlobDiff returns the changes between two versions of one file. Blob diffs
+// have object ids in their synthetic file headers, so path supplies the real
+// repository path that the viewer should display. Both objects must already
+// exist; working-tree blobs are persisted by HeadBlobSHAs for this purpose.
+func GetBlobDiff(projectRoot, baseBlobSHA, headBlobSHA, path string, ignoreWhitespace bool, context int) ([]DiffFile, error) {
+	if err := validateBlob(projectRoot, baseBlobSHA); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if err := validateBlob(projectRoot, headBlobSHA); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	args := []string{"diff", fmt.Sprintf("-U%d", context), "--diff-algorithm=histogram"}
+	if ignoreWhitespace {
+		args = append(args, "--ignore-space-change")
+	}
+	args = append(args, baseBlobSHA, headBlobSHA)
+	out, err := gitOutput(projectRoot, args...)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	files, err := parseDiff(out)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	for i := range files {
+		files[i].Path = path
+		files[i].OldPath = nil
+		files[i].ChangeType = "modified"
+		files[i].HeadBlobSHA = headBlobSHA
+	}
+	return files, nil
+}
+
+func validateBlob(projectRoot, sha string) error {
+	if len(sha) != 40 && len(sha) != 64 {
+		return errtrace.Wrap(fmt.Errorf("invalid blob object id"))
+	}
+	for _, c := range sha {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return errtrace.Wrap(fmt.Errorf("invalid blob object id"))
+		}
+	}
+	typ, err := gitOutput(projectRoot, "cat-file", "-t", sha)
+	if err != nil || typ != "blob" {
+		return errtrace.Wrap(fmt.Errorf("object is not an available blob"))
+	}
+	return nil
+}
+
 // fillHeadBlobSHAs sets HeadBlobSHA on each non-deleted file. headRef == "" means
 // the head side is the working tree, so the on-disk file is hashed instead of
 // read from a tree. Best-effort: files whose sha can't be resolved keep "".
@@ -372,11 +421,13 @@ func HeadBlobSHAs(projectRoot, ref string, paths []string) map[string]string {
 		}
 		return out
 	}
-	// Working-tree side: hash the on-disk files. `git hash-object` prints one sha
-	// per input path, in order, so line i maps back to paths[i].
+	// Working-tree side: hash and persist the on-disk files. Persisting makes a
+	// viewed version available later as the left side of a blob-to-blob diff,
+	// even after the agent edits the working file again. `git hash-object` prints
+	// one sha per input path, in order, so line i maps back to paths[i].
 	for i := 0; i < len(paths); i += chunk {
 		end := min(i+chunk, len(paths))
-		args := append([]string{"hash-object", "--"}, paths[i:end]...)
+		args := append([]string{"hash-object", "-w", "--"}, paths[i:end]...)
 		res, err := gitOutput(projectRoot, args...)
 		if err != nil {
 			continue

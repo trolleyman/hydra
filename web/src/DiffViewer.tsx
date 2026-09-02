@@ -1776,7 +1776,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo, revealLine }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, showingSinceViewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo, revealLine }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -1786,6 +1786,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // flips it (given the head blob sha to key on). Both omitted in the read-only
   // repo view, which has no per-agent review progress.
   viewed?: boolean
+  // True when this card is a delta from the version previously marked viewed,
+  // rather than the head's complete change against its base branch.
+  showingSinceViewed?: boolean
   onToggleViewed?: (path: string, headBlobSha: string | null | undefined) => void
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string, attachments: string[]) => void
@@ -2371,6 +2374,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
           {!file.binary && (
             <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-1 text-xs font-medium" />
           )}
+          {showingSinceViewed && (
+            <span className="shrink-0 text-2xs font-medium text-blue-500 dark:text-blue-400">New since viewed</span>
+          )}
           {onToggleViewed && (
             // Marking a file viewed records its current head blob sha; when the
             // agent later changes the file the sha no longer matches and it re-shows
@@ -2571,6 +2577,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
 // ── Commit selector types & helpers ───────────────────────────────────────────
 
 type DiffParams = { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean }
+type ViewedDeltaDiffFile = DiffFile & { viewed_delta?: true }
+
+function isViewedDelta(file: DiffFile): boolean {
+  return !!(file as ViewedDeltaDiffFile).viewed_delta
+}
 
 // buildDiffParams maps the left/right selectors to the getAgentDiff query
 // params. Shared by every diff fetch (initial load, silent refresh, per-file
@@ -3766,6 +3777,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [viewedFiles, setViewedFiles] = useState<Record<string, string>>(
     () => loadAgentViewPrefs(projectId, agent.id).viewedFiles ?? {},
   )
+  const viewedFilesRef = useRef(viewedFiles)
   const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
   const userShownFilesRef = useRef<Set<string>>(new Set())
   // Per-file context (number of surrounding lines). Persists across polling refreshes.
@@ -3812,6 +3824,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [projectId, agent.id, collapsedFiles])
 
   useEffect(() => {
+    viewedFilesRef.current = viewedFiles
     patchAgentViewPrefs(projectId, agent.id, { viewedFiles })
   }, [projectId, agent.id, viewedFiles])
 
@@ -3819,6 +3832,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // blob sha; unmarking (or a missing sha) clears it. A file with no head blob
   // sha (a deletion) can't be marked - there is nothing to key on.
   const toggleFileViewed = useCallback((path: string, headBlobSha: string | null | undefined) => {
+    const wasViewed = !!headBlobSha && viewedFiles[path] === headBlobSha
     setViewedFiles((prev) => {
       const isViewed = !!headBlobSha && prev[path] === headBlobSha
       if (isViewed) {
@@ -3829,7 +3843,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       if (!headBlobSha) return prev
       return { ...prev, [path]: headBlobSha }
     })
-  }, [])
+    // Unchecking a reviewed file restores the complete base-to-head diff. A
+    // newly checked file can keep its already-rendered body in place.
+    if (wasViewed) setRefreshKey((key) => key + 1)
+  }, [viewedFiles])
 
   // A file is viewed iff the sha we stored equals its current head blob sha.
   const isFileViewed = useCallback(
@@ -3840,6 +3857,41 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     () => (diff ? diff.files.reduce((n, f) => n + (isFileViewed(f) ? 1 : 0), 0) : 0),
     [diff, isFileViewed],
   )
+
+  // Replace only files that changed after being marked viewed with a diff from
+  // their saved blob to the latest blob. The first response remains the source
+  // of truth for which files belong to the overall review; these scoped
+  // follow-ups only replace the bodies and stats of affected file cards.
+  // Historical commit ranges deliberately keep their literal selected diff.
+  const applyViewedDeltas = useCallback(async (d: DiffResponse, params: DiffParams): Promise<DiffResponse> => {
+    const liveRange = leftSel.type === 'base' && !leftSel.sha && rightSel.type !== 'commit'
+    if (!liveRange) return d
+    const viewed = viewedFilesRef.current
+    const candidates = d.files.filter((file) => {
+      const baseline = viewed[file.path]
+      return !file.binary && !!baseline && !!file.head_blob_sha && baseline !== file.head_blob_sha
+    })
+    if (candidates.length === 0) return d
+
+    const replacements = new Map<string, DiffFile>()
+    await Promise.all(candidates.map(async (file) => {
+      try {
+        const delta = await api.default.getAgentDiff(
+          projectId ?? '', agent.id,
+          params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted,
+          file.path, viewed[file.path], 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES,
+        )
+        const updated = indexDiffFiles(delta.files).get(file.path)
+        if (updated) replacements.set(file.path, { ...updated, viewed_delta: true } as ViewedDeltaDiffFile)
+      } catch (error) {
+        // A stale/pruned blob should not hide the file. Fall back to the complete
+        // base-to-head response and leave it unviewed.
+        console.warn(`Could not load changes since ${file.path} was viewed`, error)
+      }
+    }))
+    if (replacements.size === 0) return d
+    return { ...d, files: d.files.map((file) => replacements.get(file.path) ?? file) }
+  }, [agent.id, leftSel, projectId, rightSel])
 
   // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
@@ -3897,14 +3949,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // same response carries it at `context`, since the server falls back to the
   // requested windowed context when it declines to expand. So the fallback costs
   // no extra round-trip.
-  const expandFileDiff = useCallback(async (path: string, context: number = 3) => {
+  const expandFileDiff = useCallback(async (path: string, context: number = 3, baselineOverride?: string) => {
     if (!agent.branch_name && !projectDirectory) return
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
+    const displayed = diff?.files.find((file) => file.path === path)
+    const reviewedBaseline = baselineOverride ?? (displayed && isViewedDelta(displayed) ? viewedFiles[path] : undefined)
 
     try {
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context,
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, reviewedBaseline, context,
         true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
 
       // Select by path rather than [0] - the backend may return more than the
@@ -3937,7 +3991,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, ignoreWhitespace])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, ignoreWhitespace, viewedFiles, diff])
 
   // Compute hidden-file state from a fresh diff response.
   // Large files (HIDDEN_FILE_THRESHOLD changed lines) start hidden, unless the user has explicitly shown them.
@@ -4015,7 +4069,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // file's full content inline (full_context) so context expansion needs no
     // per-file follow-up requests.
     api.default.getAgentDiff(projectId ?? '', agent.id,
-      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+      .then((d) => applyViewedDeltas(d, params))
       .then((d) => {
         if (!cancelled) {
           const { files } = reconcileFiles(d.files)
@@ -4027,7 +4082,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => { if (!cancelled) { setDiffError(formatError(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles, reconcileFiles])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles, applyViewedDeltas, reconcileFiles])
 
   // Version params for the artifacts panel, mirroring the diff request logic.
   // Artifacts (e.g. screenshots) don't care about whitespace, so pass false.
@@ -4124,7 +4179,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setDiff({ ...d, files })
     applyHiddenFiles(files)
     for (const path of promoted) {
-      expandFileDiffRef.current(path, 3).catch(() => { })
+      const file = files.find((candidate) => candidate.path === path)
+      if (!file?.expanded) {
+        expandFileDiffRef.current(path, 3, file && isViewedDelta(file) ? viewedFilesRef.current[path] : undefined).catch(() => { })
+      }
     }
     for (const [path, ctx] of contexts) {
       if (ctx > 3 && !promoted.has(path)) expandFileDiffRef.current(path, ctx).catch(() => { })
@@ -4189,7 +4247,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
       // Fetch full diff silently - preserves open comments since we diff against previous state.
       const diffP = api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+        .then((d) => applyViewedDeltas(d, params))
         .then((d) => {
           // Defer applying while the user is selecting text - otherwise the re-render
           // wipes their selection. The selectionchange listener flushes it later.
@@ -5393,6 +5452,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               sideBySide={sideBySide}
               wordHighlight={wordHighlight}
               viewed={isFileViewed(diff.files[singleFileIdx])}
+              showingSinceViewed={isViewedDelta(diff.files[singleFileIdx]) && !isFileViewed(diff.files[singleFileIdx])}
               onToggleViewed={toggleFileViewed}
               isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
               onToggleCollapse={toggleFileCollapse}
@@ -5438,6 +5498,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             return (
               <FileDiff key={f.path} file={f} projectId={projectId} sideBySide={sideBySide} wordHighlight={wordHighlight}
                 viewed={isFileViewed(f)}
+                showingSinceViewed={isViewedDelta(f) && !isFileViewed(f)}
                 onToggleViewed={toggleFileViewed}
                 isCollapsed={collapsedFiles.has(f.path)}
                 onToggleCollapse={toggleFileCollapse}

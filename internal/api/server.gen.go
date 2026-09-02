@@ -4736,6 +4736,9 @@ type GetAgentDiffParams struct {
 	// Path Only return the diff for this specific file path
 	Path *string `form:"path,omitempty" json:"path,omitempty"`
 
+	// ViewedBlobSha With path, compare the file version previously marked viewed to its current head-side content. This returns only changes made after that review baseline. The blob must still exist in the repository.
+	ViewedBlobSha *string `form:"viewed_blob_sha,omitempty" json:"viewed_blob_sha,omitempty"`
+
 	// Context Number of lines of context to show (defaults to 3)
 	Context *int `form:"context,omitempty" json:"context,omitempty"`
 
@@ -8098,6 +8101,14 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 	err = runtime.BindQueryParameter("form", true, false, "path", r.URL.Query(), &params.Path)
 	if err != nil {
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "viewed_blob_sha" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "viewed_blob_sha", r.URL.Query(), &params.ViewedBlobSha)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "viewed_blob_sha", Err: err})
 		return
 	}
 
