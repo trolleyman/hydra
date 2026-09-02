@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -13,10 +14,13 @@ func msg(id, text string) QueuedMessage {
 	return QueuedMessage{ID: id, Content: content}
 }
 
-func TestQueuedMessageEventCarriesOrigin(t *testing.T) {
-	event := queuedMessage("m1", "queued", []byte(`[{"type":"text","text":"hello"}]`), "agent:source")
-	if event.Origin != "agent:source" {
-		t.Fatalf("queued origin = %q", event.Origin)
+func TestQueuedMessageEventCarriesProvenance(t *testing.T) {
+	event := queuedMessage(QueuedMessage{
+		ID: "m1", Content: []byte(`[{"type":"text","text":"hello"}]`),
+		Origin: api.MessageOriginAgent, SourceAgentID: "source",
+	}, "queued")
+	if event.Origin != api.MessageOriginAgent || event.SourceAgentId != "source" {
+		t.Fatalf("queued provenance = %q from %q", event.Origin, event.SourceAgentId)
 	}
 }
 

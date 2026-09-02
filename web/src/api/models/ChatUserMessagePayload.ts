@@ -3,6 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ChatShellResult } from './ChatShellResult';
+import type { MessageOrigin } from './MessageOrigin';
+import type { MessageReason } from './MessageReason';
 /**
  * A user turn. Hydra records this at the input boundary.
  */
@@ -17,8 +19,16 @@ export type ChatUserMessagePayload = {
     content?: Record<string, any>;
     shell?: ChatShellResult;
     /**
-     * Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+     * Who caused this turn when it was not typed in the composer. Drives the chat's attribution marker; the agent sees only the text.
      */
-    origin?: string;
+    origin?: MessageOrigin;
+    /**
+     * Optional context for the button action or Hydra automation.
+     */
+    reason?: MessageReason;
+    /**
+     * The sending head when origin is "agent".
+     */
+    source_agent_id?: string;
 };
 

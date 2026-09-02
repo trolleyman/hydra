@@ -1047,6 +1047,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{agent_id}/publish/close:
+    post:
+      summary: Close a head's linked MR/PR and detach it from the head
+      operationId: closeReview
+      description: >-
+        Closes the review on its forge, clears the head's review link, and
+        disables automatic pushing. The head, local branch, downstream branch
+        name, and remote branch remain intact.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Closed (returns the updated, unlinked agent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request (not linked, adopted review, or forge rejected the close)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{agent_id}/downstream-branch:
     patch:
       summary: Set a head's downstream branch name (the name it is pushed AS)
@@ -5628,6 +5671,18 @@ components:
           items:
             type: string
 
+    MessageOrigin:
+      type: string
+      description: Who caused a user-shaped message to be sent when it was not typed in the composer.
+      enum: [button, hydra, agent]
+      x-enum-varnames: [MessageOriginButton, MessageOriginHydra, MessageOriginAgent]
+
+    MessageReason:
+      type: string
+      description: The action or event that caused a non-composer message.
+      enum: [review_comments, review_mention, tests_failed, fix_test, review_thread]
+      x-enum-varnames: [MessageReasonReviewComments, MessageReasonReviewMention, MessageReasonTestsFailed, MessageReasonFixTest, MessageReasonReviewThread]
+
     AgentInputRequest:
       type: object
       required: [text]
@@ -5636,14 +5691,13 @@ components:
           type: string
           description: Text to send to the agent's stdin (a newline is appended automatically)
         origin:
-          type: string
+          $ref: '#/components/schemas/MessageOrigin'
           description: >-
-            Why this message exists, when the user did not type it - "review_comments",
-            "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread",
-            "fix_test".
-            Absent for anything typed in the composer. It rides through to the chat event so
-            the transcript can mark an automated turn as such; the agent sees only the text,
-            which is why those messages also carry a "[Hydra]" prefix.
+            Who caused this message when the user did not type it. Browser actions use
+            "button"; server automation uses "hydra". Absent for composer input.
+        reason:
+          $ref: '#/components/schemas/MessageReason'
+          description: Optional context for the button action or Hydra automation.
 
     ApprovalRequest:
       type: object
@@ -6909,9 +6963,19 @@ components:
           x-go-type: json.RawMessage
           x-go-type-skip-optional-pointer: true
         origin:
+          allOf:
+            - $ref: '#/components/schemas/MessageOrigin'
+          x-go-type-skip-optional-pointer: true
+          description: Who caused this message when it was not typed in the composer.
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/MessageReason'
+          x-go-type-skip-optional-pointer: true
+          description: Optional context for the button action or Hydra automation.
+        source_agent_id:
           type: string
           x-go-type-skip-optional-pointer: true
-          description: Why this message exists when the user did not type it.
+          description: The sending head when origin is "agent".
 
     ChatPendingAsk:
       type: object
@@ -7187,16 +7251,21 @@ components:
         shell:
           $ref: '#/components/schemas/ChatShellResult'
         origin:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/MessageOrigin'
           x-go-type-skip-optional-pointer: true
           description: >-
-            Why this turn exists, when the user did not type it - "review_comments",
-            "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread",
-            "fix_test".
-            Absent for anything typed in the composer. The test is not "did Hydra write the
-            words" but "did the user type it", so a one-click action like Fix with agent
-            counts as automated too. Drives the chat's automated-turn marker; the agent sees
-            only the text, which is why those messages also carry a "[Hydra]" prefix.
+            Who caused this turn when it was not typed in the composer. Drives the chat's
+            attribution marker; the agent sees only the text.
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/MessageReason'
+          x-go-type-skip-optional-pointer: true
+          description: Optional context for the button action or Hydra automation.
+        source_agent_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The sending head when origin is "agent".
 
     ChatUserMessageEchoedPayload:
       type: object
@@ -7628,9 +7697,19 @@ components:
           x-go-type: json.RawMessage
           x-go-type-skip-optional-pointer: true
         origin:
+          allOf:
+            - $ref: '#/components/schemas/MessageOrigin'
+          x-go-type-skip-optional-pointer: true
+          description: Who caused this message when it was not typed in the composer.
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/MessageReason'
+          x-go-type-skip-optional-pointer: true
+          description: Optional context for the button action or Hydra automation.
+        source_agent_id:
           type: string
           x-go-type-skip-optional-pointer: true
-          description: Why this message exists when the user did not type it.
+          description: The sending head when origin is "agent".
 
     ChatQueueMessageRemovedPayload:
       type: object

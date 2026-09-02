@@ -80,6 +80,48 @@ export function treeToLines(root: Root): string[] {
   return lines
 }
 
+export interface HighlightSpan {
+  text: string
+  cls: string
+}
+
+// treeToLineSpans is the text-and-classes counterpart to treeToLines. Tool
+// output normally renders semantic pieces as React nodes rather than trusted
+// HTML (see lib/outputSpan), but source excerpts embedded in that output still
+// need the same Prism palette as a file view. Flattening the tree at each text
+// leaf preserves those token classes while keeping the original text available
+// to selection, copying and whitespace marks.
+export function treeToLineSpans(root: Root): HighlightSpan[][] {
+  const lines: HighlightSpan[][] = [[]]
+
+  const append = (text: string, cls: string) => {
+    if (!text) return
+    const line = lines[lines.length - 1]
+    const previous = line[line.length - 1]
+    if (previous?.cls === cls) previous.text += text
+    else line.push({ text, cls })
+  }
+
+  const walk = (nodes: RootContent[], inherited = '') => {
+    for (const node of nodes) {
+      if (node.type === 'text') {
+        const parts = node.value.split('\n')
+        parts.forEach((part, i) => {
+          if (i > 0) lines.push([])
+          append(part, inherited)
+        })
+      } else if (node.type === 'element') {
+        // A nested token's own class determines its colour; its parent's colour
+        // reaches it only through CSS inheritance when it has no class itself.
+        walk(node.children, classOf(node) || inherited)
+      }
+    }
+  }
+
+  walk(root.children)
+  return lines
+}
+
 // highlightToHtml is the one-shot form: token HTML for a run of code, or null
 // when the grammar isn't available.
 export function highlightToHtml(code: string, language: string): string | null {

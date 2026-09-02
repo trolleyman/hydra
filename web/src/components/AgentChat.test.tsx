@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, fileChangeRows, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
@@ -162,6 +162,26 @@ describe('Bash card summary comments', () => {
   it('handles Codex wrappers whose closing quote was consumed by shell expansion', () => {
     const command = `/usr/bin/bash -lc "# Verify the merge\ngit status --short\nprintf '%s\\n' \\"'$?'`
     expect(leadingBashComment(command)).toBe('Verify the merge')
+  })
+})
+
+describe('Codex file-change previews', () => {
+  it('keeps real hunk offsets and computes changed-word ranges', () => {
+    const rows = fileChangeRows('@@ -585,2 +585,2 @@\n-\tfor key := range caches {\n+\tfor _, key := range keys {\n unchanged', 'update')
+
+    expect(rows.map((row) => [row.type, row.oldNum, row.newNum, row.content])).toEqual([
+      ['del', 585, null, '\tfor key := range caches {'],
+      ['add', null, 585, '\tfor _, key := range keys {'],
+      ['context', 586, 586, 'unchanged'],
+    ])
+    expect(rows[0].ranges?.length).toBeGreaterThan(0)
+    expect(rows[1].ranges?.length).toBeGreaterThan(0)
+  })
+
+  it('numbers complete added files on the new side', () => {
+    expect(fileChangeRows('package config\n\nconst enabled = true\n', 'add').map((row) => [row.oldNum, row.newNum])).toEqual([
+      [null, 1], [null, 2], [null, 3],
+    ])
   })
 })
 

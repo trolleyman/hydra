@@ -289,6 +289,22 @@ const (
 	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
 )
 
+// Defines values for MessageOrigin.
+const (
+	MessageOriginAgent  MessageOrigin = "agent"
+	MessageOriginButton MessageOrigin = "button"
+	MessageOriginHydra  MessageOrigin = "hydra"
+)
+
+// Defines values for MessageReason.
+const (
+	MessageReasonFixTest        MessageReason = "fix_test"
+	MessageReasonReviewComments MessageReason = "review_comments"
+	MessageReasonReviewMention  MessageReason = "review_mention"
+	MessageReasonReviewThread   MessageReason = "review_thread"
+	MessageReasonTestsFailed    MessageReason = "tests_failed"
+)
+
 // Defines values for MessagesRetractedEventType.
 const (
 	MessagesRetracted MessagesRetractedEventType = "messages_retracted"
@@ -640,8 +656,11 @@ type AgentConfig struct {
 
 // AgentInputRequest defines model for AgentInputRequest.
 type AgentInputRequest struct {
-	// Origin Why this message exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-	Origin *string `json:"origin,omitempty"`
+	// Origin Who caused a user-shaped message to be sent when it was not typed in the composer.
+	Origin *MessageOrigin `json:"origin,omitempty"`
+
+	// Reason The action or event that caused a non-composer message.
+	Reason *MessageReason `json:"reason,omitempty"`
 
 	// Text Text to send to the agent's stdin (a newline is appended automatically)
 	Text string `json:"text"`
@@ -1479,8 +1498,14 @@ type ChatQueuedMessage struct {
 	// Id The client-generated id, used to reconcile the pending bubble.
 	Id string `json:"id"`
 
-	// Origin Why this message exists when the user did not type it.
-	Origin string `json:"origin,omitempty"`
+	// Origin Who caused this message when it was not typed in the composer.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
 }
 
 // ChatQueuedMessagePayload A message the daemon is holding because a turn was running. It lives in the queue projection only; when it drains it becomes a durable user_message carrying the same id.
@@ -1488,9 +1513,15 @@ type ChatQueuedMessagePayload struct {
 	Content json.RawMessage `json:"content,omitempty"`
 	Id      string          `json:"id,omitempty"`
 
-	// Origin Why this message exists when the user did not type it.
-	Origin string `json:"origin,omitempty"`
-	Status string `json:"status,omitempty"`
+	// Origin Who caused this message when it was not typed in the composer.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
+	Status        string `json:"status,omitempty"`
 }
 
 // ChatQueuedState defines model for ChatQueuedState.
@@ -1696,11 +1727,17 @@ type ChatUserMessagePayload struct {
 	// Id The client-generated id, so a queued bubble reconciles to it.
 	Id string `json:"id,omitempty"`
 
-	// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-	Origin string `json:"origin,omitempty"`
+	// Origin Who caused this turn when it was not typed in the composer. Drives the chat's attribution marker; the agent sees only the text.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
 
 	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
 	Shell *ChatShellResult `json:"shell,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
 }
 
 // ClaudeUsageResponse defines model for ClaudeUsageResponse.
@@ -2345,6 +2382,12 @@ type MergeConflictError struct {
 
 // MergeConflictErrorError defines model for MergeConflictError.Error.
 type MergeConflictErrorError string
+
+// MessageOrigin Who caused a user-shaped message to be sent when it was not typed in the composer.
+type MessageOrigin string
+
+// MessageReason The action or event that caused a non-composer message.
+type MessageReason string
 
 // MessagesRetractedEvent defines model for MessagesRetractedEvent.
 type MessagesRetractedEvent struct {
@@ -4598,16 +4641,22 @@ type UserMessageEvent struct {
 		// Id The client-generated id, so a queued bubble reconciles to it.
 		Id string `json:"id,omitempty"`
 
-		// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-		Origin string `json:"origin,omitempty"`
+		// Origin Who caused this turn when it was not typed in the composer. Drives the chat's attribution marker; the agent sees only the text.
+		Origin MessageOrigin `json:"origin,omitempty"`
 
 		// ParentItemId The tool call this belongs under.
 		ParentItemId string `json:"parent_item_id,omitempty"`
 
+		// Reason Optional context for the button action or Hydra automation.
+		Reason MessageReason `json:"reason,omitempty"`
+
 		// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
-		Shell      *ChatShellResult `json:"shell,omitempty"`
-		Sidechain  bool             `json:"sidechain,omitempty"`
-		StopReason string           `json:"stop_reason,omitempty"`
+		Shell     *ChatShellResult `json:"shell,omitempty"`
+		Sidechain bool             `json:"sidechain,omitempty"`
+
+		// SourceAgentId The sending head when origin is "agent".
+		SourceAgentId string `json:"source_agent_id,omitempty"`
+		StopReason    string `json:"stop_reason,omitempty"`
 
 		// Usage Provider token accounting; the shape differs per provider.
 		Usage json.RawMessage `json:"usage,omitempty"`
@@ -7321,6 +7370,9 @@ type ServerInterface interface {
 	// Arm automatic publishing - auto-open after tests / auto-push linked heads
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
 	ArmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmAutoPushParams)
+	// Close a head's linked MR/PR and detach it from the head
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/close)
+	CloseReview(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -8657,6 +8709,40 @@ func (siw *ServerInterfaceWrapper) ArmAutoPush(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ArmAutoPush(w, r, projectId, agentId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CloseReview operation middleware
+func (siw *ServerInterfaceWrapper) CloseReview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CloseReview(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10469,6 +10555,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish", wrapper.PublishAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.DisarmAutoPush)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.ArmAutoPush)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/close", wrapper.CloseReview)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/pull", wrapper.PullFromMr)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/push", wrapper.PushToMr)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/purge", wrapper.PurgeAgent)
@@ -11686,6 +11773,51 @@ func (response ArmAutoPush404JSONResponse) VisitArmAutoPushResponse(w http.Respo
 type ArmAutoPush500JSONResponse ErrorResponse
 
 func (response ArmAutoPush500JSONResponse) VisitArmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReviewRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+}
+
+type CloseReviewResponseObject interface {
+	VisitCloseReviewResponse(w http.ResponseWriter) error
+}
+
+type CloseReview200JSONResponse AgentResponse
+
+func (response CloseReview200JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview400JSONResponse ErrorResponse
+
+func (response CloseReview400JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview404JSONResponse ErrorResponse
+
+func (response CloseReview404JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview500JSONResponse ErrorResponse
+
+func (response CloseReview500JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -13516,6 +13648,9 @@ type StrictServerInterface interface {
 	// Arm automatic publishing - auto-open after tests / auto-push linked heads
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
 	ArmAutoPush(ctx context.Context, request ArmAutoPushRequestObject) (ArmAutoPushResponseObject, error)
+	// Close a head's linked MR/PR and detach it from the head
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/close)
+	CloseReview(ctx context.Context, request CloseReviewRequestObject) (CloseReviewResponseObject, error)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(ctx context.Context, request PullFromMrRequestObject) (PullFromMrResponseObject, error)
@@ -14552,6 +14687,33 @@ func (sh *strictHandler) ArmAutoPush(w http.ResponseWriter, r *http.Request, pro
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArmAutoPushResponseObject); ok {
 		if err := validResponse.VisitArmAutoPushResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CloseReview operation middleware
+func (sh *strictHandler) CloseReview(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request CloseReviewRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CloseReview(ctx, request.(CloseReviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CloseReview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CloseReviewResponseObject); ok {
+		if err := validResponse.VisitCloseReviewResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

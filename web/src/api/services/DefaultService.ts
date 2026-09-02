@@ -711,6 +711,32 @@ export class DefaultService {
         });
     }
     /**
+     * Close a head's linked MR/PR and detach it from the head
+     * Closes the review on its forge, clears the head's review link, and disables automatic pushing. The head, local branch, downstream branch name, and remote branch remain intact.
+     * @param projectId
+     * @param agentId
+     * @returns AgentResponse Closed (returns the updated, unlinked agent).
+     * @throws ApiError
+     */
+    public closeReview(
+        projectId: string,
+        agentId: string,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/close',
+            path: {
+                'project_id': projectId,
+                'agent_id': agentId,
+            },
+            errors: {
+                400: `Bad Request (not linked, adopted review, or forge rejected the close)`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Set a head's downstream branch name (the name it is pushed AS)
      * @param projectId
      * @param agentId

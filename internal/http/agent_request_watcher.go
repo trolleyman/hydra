@@ -244,7 +244,7 @@ func (s *Server) sendCollaborationMessage(ctx context.Context, projectRoot strin
 	}
 	queuedAgentMessages := 0
 	for _, m := range s.ChatQueues.List(projectRoot, target.ID) {
-		if strings.HasPrefix(m.Origin, "agent:") {
+		if m.Origin == api.MessageOriginAgent {
 			queuedAgentMessages++
 		}
 	}
@@ -264,7 +264,7 @@ func (s *Server) sendCollaborationMessage(ctx context.Context, projectRoot strin
 		source.ID, sourceTitle, correlationID, messageID, chainCount, agentChainMax)
 	queued := target.AgentStatus != nil && (target.AgentStatus.Status == api.Running || target.AgentStatus.Status == api.Starting || target.AgentStatus.Status == api.Building)
 	if !s.ChatQueues.Submit(projectRoot, target.ID, heads.QueuedMessage{
-		ID: messageID, Content: claudestream.TextUserContent(prefix + body), Origin: "agent:" + source.ID,
+		ID: messageID, Content: claudestream.TextUserContent(prefix + body), Origin: api.MessageOriginAgent, SourceAgentID: source.ID,
 	}, queued) {
 		return agentq.Result{Message: "The target stopped before Hydra could deliver the message."}
 	}

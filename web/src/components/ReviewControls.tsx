@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { GitPullRequest, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Lock, ArrowUp, ArrowDown } from 'lucide-react'
+import { GitPullRequest, ExternalLink, Lock, ArrowUp, ArrowDown } from 'lucide-react'
 // lucide-react dropped brand glyphs in v1, so the forge icons come from
 // simple-icons instead (@icons-pack/react-simple-icons).
 import { SiGithub, SiGitlab } from '@icons-pack/react-simple-icons'
@@ -10,10 +10,8 @@ import { Tooltip } from './Tooltip'
 import { DialogCancelButton, DialogConfirmButton } from './dialogPrimitives'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { ResizeHandle } from '../lib/ResizeHandle'
-import { CopyStateIcon } from './CopyStateIcon'
-import { useCopyFlash } from '../lib/useCopyFlash'
-import { copyWithToast } from '../lib/copyToast'
 import { DialogIconTile } from './dialogPrimitives'
+import { providerLabel } from '../lib/forgeDisplay'
 
 // FieldLabel is the Create MR dialog's field caption: sentence case (like the
 // DialogSectionLabel) and tight to the input below it.
@@ -44,26 +42,6 @@ function mrStateTone(state?: string): 'green' | 'yellow' | 'violet' | 'neutral' 
     default:
       return 'neutral'
   }
-}
-
-// CIChip renders the MR's CI status as a small coloured chip. Absent/none renders
-// nothing (no pipeline to report).
-function CIChip({ status }: { status?: string }) {
-  if (!status || status === 'none') return null
-  const map: Record<string, { tone: 'green' | 'red' | 'yellow' | 'neutral'; icon: React.ReactNode; label: string }> = {
-    success: { tone: 'green', icon: <CircleCheck className="w-3 h-3" />, label: 'CI' },
-    failed: { tone: 'red', icon: <CircleX className="w-3 h-3" />, label: 'CI' },
-    running: { tone: 'yellow', icon: <LoaderCircle className="w-3 h-3 animate-spin" />, label: 'CI' },
-    pending: { tone: 'neutral', icon: <LoaderCircle className="w-3 h-3" />, label: 'CI' },
-  }
-  const m = map[status] ?? map.pending
-  return (
-    <Tooltip content={`CI: ${status}`}>
-      <Badge tone={m.tone} icon={m.icon}>
-        {m.label}
-      </Badge>
-    </Tooltip>
-  )
 }
 
 // MRSyncChip is the ahead/behind indicator for a linked head, modelled on the
@@ -166,10 +144,60 @@ function SyncChipButton({
   )
 }
 
-// MRStateChip renders the metadata-row summary of a head's linked MR: a state
-// pill (draft/open/merged), CI status, approvals, unresolved-discussion count
-// and how far ahead/behind the MR branch it is. Clicking the state pill opens the
-// forge MR; clicking an ahead/behind chip pushes/pulls. Shown only for a linked head.
+// ReviewTooltipContent keeps passive review metadata behind the existing review
+// button instead of expanding each fact into another chip in the metadata row.
+// The branch remains selectable for the common copy/fetch use case.
+export function ReviewTooltipContent({ agent, actionLabel }: { agent: AgentResponse; actionLabel?: string }) {
+  const review = agent.review
+  if (!review) return null
+  const st = review.state
+  const noun = review.provider === 'github' ? 'PR' : 'MR'
+  const rows: Array<{ label: string; value: ReactNode }> = []
+  if (st?.state) rows.push({ label: 'State', value: st.state })
+  if (agent.downstream_branch) {
+    rows.push({
+      label: `${noun} branch`,
+      value: <span className="font-mono select-text break-all">{agent.downstream_branch}</span>,
+    })
+  }
+  if (review.target_branch) {
+    rows.push({
+      label: 'Target',
+      value: <span className="font-mono select-text break-all">{review.target_branch}</span>,
+    })
+  }
+  if (st?.ci_status && st.ci_status !== 'none') rows.push({ label: 'CI', value: st.ci_status })
+  if (st?.approvals_required != null && st.approvals_required > 0) {
+    rows.push({ label: 'Approvals', value: `${st.approvals ?? 0}/${st.approvals_required}` })
+  }
+  if (st?.unresolved_discussions != null) {
+    rows.push({
+      label: 'Discussions',
+      value: `${st.unresolved_discussions} unresolved`,
+    })
+  }
+  if (review.adopted) {
+    rows.push({ label: 'Access', value: review.can_push === false ? 'Adopted, read-only' : 'Adopted' })
+  }
+  return (
+    <div className="min-w-48 text-left">
+      <div className="font-semibold mb-1.5">{providerLabel(review.provider)} {noun} #{review.id}</div>
+      <div className="space-y-1">
+        {rows.map((row) => (
+          <div key={row.label} className="grid grid-cols-[auto_1fr] gap-x-3">
+            <span className="text-gray-400 dark:text-gray-500">{row.label}</span>
+            <span>{row.value}</span>
+          </div>
+        ))}
+      </div>
+      {actionLabel && <div className="mt-2 text-gray-400 dark:text-gray-500">{actionLabel}</div>}
+    </div>
+  )
+}
+
+// MRStateChip renders one review-identity pill plus actionable ahead/behind
+// sync chips. Passive state, branch, CI, approval and discussion details live in
+// the review pill's hover card so the metadata row stays scannable.
 export function MRStateChip({
   agent,
   onPush,
@@ -190,7 +218,7 @@ export function MRStateChip({
   const label = review.id != null ? `${noun} ${review.id}` : noun
   return (
     <span className="inline-flex items-center gap-1.5">
-      <Tooltip content={`Open ${review.provider} ${noun} #${review.id}${st?.state ? ` (${st.state})` : ''}`}>
+      <Tooltip content={<ReviewTooltipContent agent={agent} actionLabel={`Click to open on ${providerLabel(review.provider)}`} />} align="left">
         <a
           href={review.url}
           target="_blank"
@@ -226,125 +254,7 @@ export function MRStateChip({
         onPull={onPull}
         disabled={busy}
       />
-      <CIChip status={st?.ci_status} />
-      {st && st.approvals_required != null && st.approvals_required > 0 && (
-        <Tooltip content="Approvals">
-          <Badge
-            tone={(st.approvals ?? 0) >= st.approvals_required ? 'green' : 'neutral'}
-            icon={<CircleCheck className="w-3 h-3" />}
-          >
-            {st.approvals ?? 0}/{st.approvals_required}
-          </Badge>
-        </Tooltip>
-      )}
-      {st && (st.unresolved_discussions ?? 0) > 0 && (
-        <Tooltip content="Unresolved discussions">
-          <Badge tone="yellow" icon={<MessageSquare className="w-3 h-3" />}>
-            {st.unresolved_discussions}
-          </Badge>
-        </Tooltip>
-      )}
     </span>
-  )
-}
-
-// DownstreamBranchEditor is an inline editor for a head's downstream branch name
-// (the name its work is pushed AS). Mirrors the base-branch editor. Soft-locked
-// after first publish (the backend rejects a rename of a linked head), so it is
-// read-only once linked.
-export function DownstreamBranchEditor({
-  agent,
-  onSave,
-  saving,
-}: {
-  agent: AgentResponse
-  onSave: (next: string) => void
-  saving?: boolean
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(agent.downstream_branch ?? '')
-  const linked = !!agent.review
-  const value = agent.downstream_branch || ''
-  if (!value && !editing) return null
-
-  if (editing && !linked) {
-    return (
-      <span className="text-xs font-mono flex items-center gap-1.5">
-        <span className="font-sans text-gray-400 dark:text-gray-500">MR branch</span>
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              setEditing(false)
-              if (draft.trim() && draft.trim() !== value) onSave(draft.trim())
-            } else if (e.key === 'Escape') {
-              setEditing(false)
-              setDraft(value)
-            }
-          }}
-          onBlur={() => {
-            setEditing(false)
-            if (draft.trim() && draft.trim() !== value) onSave(draft.trim())
-          }}
-          className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 font-mono text-xs w-40"
-        />
-      </span>
-    )
-  }
-
-  return (
-    <span className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-      <span className="font-sans text-gray-400 dark:text-gray-500">MR branch</span>
-      {/* select-text on both spellings: the name is something you want to grab
-          (a `git fetch` needs it), and a <button> is not selectable by default.
-          A locked (linked) MR renders it as a plain span rather than a disabled
-          button - a disabled button can't be selected from at all. */}
-      {linked ? (
-        <Tooltip content="Locked: renaming would orphan the open MR">
-          <span className="px-1.5 py-0.5 select-text cursor-text">{value}</span>
-        </Tooltip>
-      ) : (
-        <Tooltip content="Edit downstream branch name">
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => { setDraft(value); setEditing(true) }}
-            className="px-1.5 py-0.5 rounded select-text hover:bg-gray-100 dark:hover:bg-gray-800 cursor-text"
-          >
-            {value}
-          </button>
-        </Tooltip>
-      )}
-      <CopyBranchButton branch={value} what="MR branch name" />
-    </span>
-  )
-}
-
-// CopyBranchButton is the small copy affordance beside a branch name: it flashes
-// a tick/X on the icon and raises the shared copy toast (title + the name in a
-// code block), like every other copy in the app.
-function CopyBranchButton({ branch, what }: { branch: string; what: string }) {
-  const { state, flash } = useCopyFlash(1200)
-  return (
-    <Tooltip
-      content={
-        <>
-          <div>Copy {what}</div>
-          <div className="text-gray-500 dark:text-gray-400">{branch}</div>
-        </>
-      }
-    >
-      <button
-        type="button"
-        aria-label={`Copy ${what}`}
-        className="cursor-pointer shrink-0 text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
-        onClick={() => { void copyWithToast(branch, { what }).then(flash) }}
-      >
-        <CopyStateIcon state={state} size="w-3 h-3" />
-      </button>
-    </Tooltip>
   )
 }
 

@@ -123,6 +123,8 @@ export type { ListReviewsResponse } from './models/ListReviewsResponse';
 export type { MarkReadBody } from './models/MarkReadBody';
 export type { McpServer } from './models/McpServer';
 export { MergeConflictError } from './models/MergeConflictError';
+export { MessageOrigin } from './models/MessageOrigin';
+export { MessageReason } from './models/MessageReason';
 export { MessagesRetractedEvent } from './models/MessagesRetractedEvent';
 export { ModelChangedEvent } from './models/ModelChangedEvent';
 export { NetworkConfig } from './models/NetworkConfig';

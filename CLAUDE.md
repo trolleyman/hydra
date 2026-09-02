@@ -38,6 +38,10 @@ Use aube when available and npm otherwise. Run TypeScript scripts under
 - `rg` is recursive by default. Never use `-r` to mean recursive; in ripgrep it
   means `--replace`.
 - Never put raw control bytes in source; use escape sequences.
+- Hydra has a single user, and its client and server update together. Do not add
+  backward-compatibility shims, legacy aliases, deprecation paths, or dual-format
+  handling unless the user explicitly asks for them; replace the old behavior
+  outright.
 - Define API changes in `api/openapi.yaml`, then run `mage generate:go`.
 - Use the shared tooltip, typography, file-path, and URL components described in
   [docs/agent-guide.md](docs/agent-guide.md) instead of recreating them.
