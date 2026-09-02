@@ -19,6 +19,15 @@ secret locations. Masks apply after every read and write grant, so allowing a
 parent such as `~` does not expose a masked child. Project-relative masks and
 `.hydraignore` continue to protect secrets inside otherwise readable worktrees.
 
+An agent that needs one existing host file or directory outside this view can
+call `mcp__hydra__request_read_access` with the path and a reason. Hydra resolves
+the path on the host and shows the canonical target in an approval card. Allow
+once records a per-head read-only grant; Always allow also adds the path to that
+agent type's `readable_paths` in the trusted project config. Applying either
+choice automatically rebuilds and resumes the sandbox. The per-head grant is
+removed when the head is killed or archived, and `masked_paths` still wins over
+both forms of grant.
+
 ## Policy
 
 Head processes use an allow-list instead of inheriting the daemon environment.

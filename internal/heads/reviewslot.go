@@ -314,7 +314,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		MaterializeCachePaths: true,
 		WritablePaths:         append(writable, seed.WritablePaths...),
 		ReadablePaths:         readable,
-		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, id, masked),
 		Network:               net,
 		Binds:                 seed.Binds,
 		ImmutablePaths:        seed.ImmutablePaths,

@@ -79,9 +79,17 @@ test_prefetch = false
 # writable_paths = []
 
 ## extra host paths exposed read-only in the sandbox, unioned on top of the
-## built-in developer/tool allow-list and across config layers. Known credential
-## paths stay masked even when they sit below an allowed parent.
-readable_paths = ["~/.config/go"]
+## built-in developer/tool allow-list and across config layers. A path can be ~
+## (HOME), absolute, or a $VAR. Known credential paths remain masked even when
+## they sit below an allowed parent.
+## Built-in readable paths (writable paths are also readable):
+##     ~/.cache, ~/.gitconfig, ~/.gitignore_global, ~/.cargo, ~/.rustup
+##     ~/.gradle, ~/.m2/repository, ~/.nuget/packages, ~/.npm, ~/.nvm
+##     ~/.bun, ~/.deno, ~/.pyenv, ~/.rbenv, ~/.sdkman
+##     ~/.jdks, ~/.local/bin, ~/.local/share/aube, ~/.local/share/claude, ~/.local/share/codex
+##     ~/.local/share/kotlin, ~/.local/share/mise, ~/.local/share/pnpm, ~/.local/share/JetBrains, ~/Android/Sdk
+##     ~/Library/Android/sdk, ~/Library/pnpm, ~/.config/git, ~/.config/mise/config.toml
+# readable_paths = ["~/.cache", "~/.gitconfig", "~/.gitignore_global", "~/.cargo", "~/.rustup", "~/.gradle", "~/.m2/repository", "~/.nuget/packages", "~/.npm", "~/.nvm", "~/.bun", "~/.deno", "~/.pyenv", "~/.rbenv", "~/.sdkman", "~/.jdks", "~/.local/bin", "~/.local/share/aube", "~/.local/share/claude", "~/.local/share/codex", "~/.local/share/kotlin", "~/.local/share/mise", "~/.local/share/pnpm", "~/.local/share/JetBrains", "~/Android/Sdk", "~/Library/Android/sdk", "~/Library/pnpm", "~/.config/git", "~/.config/mise/config.toml"]
 
 ## extra paths hidden in the sandbox (added to the built-in fail-safe masks and
 ## applied after all read/write allowances).

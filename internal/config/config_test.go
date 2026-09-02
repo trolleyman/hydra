@@ -1531,3 +1531,12 @@ func TestAgentConfigMergePrePromptUnions(t *testing.T) {
 		t.Errorf("identical = %q", got)
 	}
 }
+
+func TestReadablePathsDocNamesEveryBuiltInPath(t *testing.T) {
+	doc := readablePathsDoc()
+	for _, path := range sandbox.Defaults().ReadablePaths {
+		if !strings.Contains(doc, path) {
+			t.Errorf("readable_paths generated comment omits built-in path %q", path)
+		}
+	}
+}

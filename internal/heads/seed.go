@@ -553,12 +553,20 @@ func seedGatePolicy(res *seedResult, _ string, id, projectRoot, worktreePath, ho
 	res.Env = append(res.Env, gate.EnvPolicyPath+"="+visiblePath)
 
 	approvalDir := paths.GetApprovalsDirFromProjectRoot(projectRoot, id)
-	if err := os.MkdirAll(approvalDir, 0755); err != nil {
+	if err := gate.EnsureGrantedReadablePathsFile(approvalDir); err != nil {
 		return errtrace.Wrap(err)
 	}
 	res.WritablePaths = append(res.WritablePaths, approvalDir)
 	res.Env = append(res.Env, gate.EnvApprovalDir+"="+approvalDir)
 	return nil
+}
+
+// resolvedSandboxMasks adds the daemon-owned read-grant store to the configured
+// masks. The rest of the approvals directory is intentionally writable so an
+// agent can ask; this one file is the capability and must never be agent-writable.
+func resolvedSandboxMasks(projectRoot, worktreePath, id string, masked []string) []string {
+	resolved := sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked)
+	return append(resolved, gate.GrantedReadablePathsPath(paths.GetApprovalsDirFromProjectRoot(projectRoot, id)))
 }
 
 // seedGeminiPrePrompt delivers the pre-prompt to Gemini, which has no

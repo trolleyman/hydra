@@ -56,9 +56,10 @@ export async function decideToolApproval(
   if (open) toasts.dismiss(open.id, { silent: true })
   // host_command echoes the approved command back: the daemon runs THAT text
   // rather than re-reading the head-writable request file (the TOCTOU guard).
-  const command = approval.kind === 'host_command' ? approval.target : undefined
-  await runWithToast(
-    () => api.default.decideAgentApproval(projectId, agentId, approval.reqid, { decision, remember: false, command }),
+	const command = approval.kind === 'host_command' ? approval.target : undefined
+	const path = approval.kind === 'filesystem_read' ? approval.target : undefined
+	await runWithToast(
+	  () => api.default.decideAgentApproval(projectId, agentId, approval.reqid, { decision, remember: false, command, path }),
     { errorPrefix: decision === ApprovalDecisionRequest.decision.ALLOW ? 'Failed to allow request' : 'Failed to deny request' },
   )
 }

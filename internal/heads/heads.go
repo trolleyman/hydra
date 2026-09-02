@@ -791,7 +791,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		MaterializeCachePaths: !projectDirectory,
 		WritablePaths:         append(writable, seed.WritablePaths...),
 		ReadablePaths:         readable,
-		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, opts.ID, masked),
 		Network:               net,
 		Binds:                 seed.Binds,
 		ImmutablePaths:        seed.ImmutablePaths,
@@ -1226,7 +1226,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			MaterializeCachePaths: !head.UsesProjectDirectory(),
 			WritablePaths:         append(writable, seed.WritablePaths...),
 			ReadablePaths:         readable,
-			MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+			MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, head.ID, masked),
 			Network:               net,
 			Binds:                 seed.Binds,
 			ImmutablePaths:        seed.ImmutablePaths,
@@ -1381,6 +1381,10 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// reaches that head. It must therefore be idempotent - it runs on every launch
 	// - and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
 	writable, readable, masked, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	// "Allow once" filesystem approvals live with this head's runtime state. They
+	// are consumed on every resume so an automatic sandbox rebuild (or daemon
+	// restart) keeps the grant, and disappear when the head is killed/archived.
+	readable = append(readable, gate.LoadGrantedReadablePaths(paths.GetApprovalsDirFromProjectRoot(projectRoot, head.ID))...)
 	// If the pre_spawn_script was removed since this head last launched, drop any
 	// env it previously persisted so stale vars stop leaking into its shells (a
 	// script that still runs re-truncates the file itself on every launch).
@@ -1459,7 +1463,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		MaterializeCachePaths: !head.UsesProjectDirectory(),
 		WritablePaths:         append(writable, seed.WritablePaths...),
 		ReadablePaths:         readable,
-		MaskedPaths:           sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, head.ID, masked),
 		Network:               net,
 		Binds:                 seed.Binds,
 		ImmutablePaths:        seed.ImmutablePaths,
@@ -1926,7 +1930,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 		MaterializeCachePaths: !head.UsesProjectDirectory(),
 		WritablePaths:         writable,
 		ReadablePaths:         readable,
-		MaskedPaths:           sandbox.ResolveMaskedPaths(head.ProjectPath, worktree, masked),
+		MaskedPaths:           resolvedSandboxMasks(head.ProjectPath, worktree, head.ID, masked),
 		Network:               net,
 		Env:                   env,
 		Argv:                  []string{"bash", "-c", sandbox.StrictScript(script)},

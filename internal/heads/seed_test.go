@@ -205,6 +205,25 @@ command = "drop"
 	}
 }
 
+func TestReadableGrantStoreIsCreatedAndMasked(t *testing.T) {
+	projectRoot, home := t.TempDir(), t.TempDir()
+	worktree := filepath.Join(projectRoot, "work")
+	if err := os.MkdirAll(worktree, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const id = "grant-head"
+	if _, err := seedHead(projectRoot, id, sandbox.AgentTypeCodex, worktree, home, "", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff); err != nil {
+		t.Fatal(err)
+	}
+	grantFile := gate.GrantedReadablePathsPath(paths.GetApprovalsDirFromProjectRoot(projectRoot, id))
+	if _, err := os.Stat(grantFile); err != nil {
+		t.Fatalf("grant store was not created before sandbox construction: %v", err)
+	}
+	if got := resolvedSandboxMasks(projectRoot, worktree, id, nil); !slices.Contains(got, grantFile) {
+		t.Fatalf("sandbox masks = %v, want host-only grant store %q", got, grantFile)
+	}
+}
+
 func TestSeededInstructionFilesArePerSession(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))

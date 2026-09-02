@@ -2716,7 +2716,7 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "sandbox", key: "readable_paths",
-			doc: "extra host paths exposed read-only in the sandbox, unioned on top of the built-in developer/tool allow-list and across config layers. A path can be ~ (HOME), absolute, or a $VAR. Known credential paths remain masked even when they sit below an allowed parent.",
+			doc: readablePathsDoc(),
 			def: func() string { return tomlStringArray(sandbox.Defaults().ReadablePaths) },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.ReadablePaths }),
 		},
@@ -2912,6 +2912,17 @@ func defaultsSpec() []specEntry {
 			get: policySlice(func(p *PolicyConfig) []string { return p.KnownTools }),
 		},
 	}
+}
+
+func readablePathsDoc() string {
+	paths := sandbox.Defaults().ReadablePaths
+	lines := make([]string, 0, (len(paths)+4)/5)
+	for len(paths) > 0 {
+		n := min(5, len(paths))
+		lines = append(lines, "    "+strings.Join(paths[:n], ", "))
+		paths = paths[n:]
+	}
+	return "extra host paths exposed read-only in the sandbox, unioned on top of the built-in developer/tool allow-list and across config layers. A path can be ~ (HOME), absolute, or a $VAR. Known credential paths remain masked even when they sit below an allowed parent.\nBuilt-in readable paths (writable paths are also readable):\n" + strings.Join(lines, "\n")
 }
 
 // managedKeySet returns the set of setting keys the renderer owns. A commented

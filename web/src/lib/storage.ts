@@ -5,7 +5,7 @@
 // place. Every key shares the `hydra-` prefix; keys with dynamic segments are
 // exposed as builder functions so their prefix lives in exactly one spot.
 
-import { hasDesktopBridge, postDesktopMessage } from './desktopBridge'
+import { hasDesktopBridge, postDesktopMessage } from './desktopBridge.ts'
 
 const pendingDesktopWrites = new Map<string, string | null>()
 let desktopWriteTimer: number | undefined

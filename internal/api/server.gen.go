@@ -817,7 +817,10 @@ type ApprovalDecisionRequest struct {
 	// Decision The user's verdict for the parked tool call
 	Decision ApprovalDecisionRequestDecision `json:"decision"`
 
-	// Remember When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again
+	// Path For a filesystem_read approval only: the canonical host path the UI displayed and the user approved. The daemon grants this echoed path, never the target in the agent-writable request file.
+	Path *string `json:"path,omitempty"`
+
+	// Remember When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again
 	Remember *bool `json:"remember,omitempty"`
 }
 
@@ -837,7 +840,7 @@ type ApprovalRequest struct {
 	// Description The agent's own explanation of what it is asking for and why it needs to happen outside the sandbox (`hydra host-run --why`). Shown above the command in the approval card, so the user judges a stated intent rather than reverse-engineering one from a shell script.
 	Description *string `json:"description"`
 
-	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)
+	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', 'host_command' (run a command on the host, outside the sandbox), or 'filesystem_read' (mount a host path read-only)
 	Kind string `json:"kind"`
 
 	// Reason One-line explanation of why the gate parked the call
