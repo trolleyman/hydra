@@ -9,6 +9,7 @@ import { apiErrorBody, formatError } from '../api/format_error'
 import { ApiError, ErrorResponse } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch, DiffFile, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
+import { DIFF_CONTEXT_OPTIONS, parseDiffContextLines, type DiffContextLines } from '../lib/diffPrefs'
 import {
   ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
   GitCompareArrows, ArrowRightLeft, Menu,
@@ -333,7 +334,7 @@ function SettingsPopup({ settings, onChange }: { settings: RepoSettings; onChang
 // A trimmed cousin of SettingsPopup for the diff view's two toggles, mirroring
 // the diff viewer's own options so the two feel consistent.
 
-type DiffSettings = { fileView: FileView; singleFile: boolean; sideBySide: boolean; wordHighlight: boolean; ignoreWhitespace: boolean; imageDiffMode: ImageDiffMode }
+type DiffSettings = { fileView: FileView; singleFile: boolean; sideBySide: boolean; wordHighlight: boolean; ignoreWhitespace: boolean; contextLines: DiffContextLines; imageDiffMode: ImageDiffMode }
 
 // DiffSettingsFields renders the branch-compare view's file-list / diff / image
 // options, shared by the desktop popup (DiffSettingsPopup) and the overflow menu.
@@ -378,6 +379,21 @@ function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; on
               className="w-3 h-3 accent-blue-500"
             />
             <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
+          </label>
+        ))}
+      </div>
+      <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2"># lines context</p>
+      <div className="flex flex-col gap-0.5">
+        {DIFF_CONTEXT_OPTIONS.map((option) => (
+          <label key={option} className="flex items-center gap-2 py-0.5 cursor-pointer">
+            <input
+              type="radio"
+              name="hydra-repo-diff-context-lines"
+              checked={settings.contextLines === option}
+              onChange={() => onChange({ ...settings, contextLines: option })}
+              className="w-3 h-3 accent-blue-500"
+            />
+            <span className="text-xs text-gray-700 dark:text-gray-300">{option}</span>
           </label>
         ))}
       </div>
@@ -827,6 +843,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       sideBySide: readLocal(StorageKeys.diffSideBySide) === 'true',
       wordHighlight: readLocal(StorageKeys.diffWordHighlight) !== 'false',
       ignoreWhitespace: readLocal(StorageKeys.diffIgnoreWhitespace) === 'true',
+      contextLines: parseDiffContextLines(readLocal(StorageKeys.diffContextLines)),
       imageDiffMode,
     }
   })
@@ -835,6 +852,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(diffSettings.sideBySide)) }, [diffSettings.sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffWordHighlight, String(diffSettings.wordHighlight)) }, [diffSettings.wordHighlight])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(diffSettings.ignoreWhitespace)) }, [diffSettings.ignoreWhitespace])
+  useEffect(() => { writeLocal(StorageKeys.diffContextLines, String(diffSettings.contextLines)) }, [diffSettings.contextLines])
   useEffect(() => { writeLocal(StorageKeys.diffImageMode, diffSettings.imageDiffMode) }, [diffSettings.imageDiffMode])
   // In one-file-at-a-time mode, the file whose diff is shown comes from the
   // ?dfile= search param (clicking a file in the sidebar sets it); it is derived
@@ -1202,12 +1220,12 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     fileContextsRef.current = new Map()
     setFileContexts(new Map())
     setCollapsedDiffFiles(new Set())
-    api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, undefined, 3, true)
+    api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, undefined, diffSettings.contextLines, true)
       .then((r) => { if (!cancelled) setDiff(r) })
       .catch((err) => { if (!cancelled) { setDiff(null); setDiffError(formatError(err)) } })
       .finally(() => { if (!cancelled) setDiffLoading(false) })
     return () => { cancelled = true }
-  }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
+  }, [diffActive, projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, diffSettings.contextLines])
 
   // Leaving diff mode or retargeting the comparison drops the mobile drill-down
   // back to the changed-files list (so it never opens onto a stale selection).
@@ -1271,7 +1289,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // one file in full and let it switch to the client-side reveal model, so later
   // expanders are instant and only open the gap they belong to; a file too big
   // even for that comes back at the wider windowed context in the same response.
-  const expandDiffFile = useCallback(async (path: string, context = 3) => {
+  const expandDiffFile = useCallback(async (path: string, context: number = diffSettings.contextLines) => {
     try {
       const fileDiff = await api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, path, context,
         true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
@@ -1287,7 +1305,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     } catch (e) {
       console.error('Failed to fetch repository file diff:', e)
     }
-  }, [projectId, activeRef, compareRef, diffSettings.ignoreWhitespace])
+  }, [projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, diffSettings.contextLines])
 
   const noopComment = useCallback(() => {}, [])
   const getDiffFileRef = (path: string) => (el: HTMLDivElement | null) => {
@@ -1656,7 +1674,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                     onToggleCollapse={toggleDiffFileCollapse}
                     onComment={noopComment}
                     onExpand={expandDiffFile}
-                    currentContext={fileContexts.get(f.path) ?? 3}
+                    currentContext={fileContexts.get(f.path) ?? diffSettings.contextLines}
                     fileRef={getDiffFileRef(f.path)}
                     readOnly
                     headless={diffSettings.singleFile}
