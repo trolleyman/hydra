@@ -60,17 +60,8 @@ export const SBS_MARKER = `select-none font-mono ${CODE_TEXT} w-[1em] shrink-0 t
 export const SBS_CODE = `pl-1 font-mono ${CODE_TEXT} ${CODE_LEADING} flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0`
 
 export const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
-export const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
-// The chevron cluster is sized for TWO buttons whether it holds one or two, so a
-// file's edge expanders (one chevron) line their count up with the gap expanders
-// (two) instead of sitting 18px to the left of them.
-export const EXPANDER_BTNS = 'flex items-center gap-0.5 shrink-0 mr-1 w-[34px]'
-// The "··· N lines ···" count is a FIXED box rather than the row's leftover
-// space: as flex-1 it re-centred itself around whatever context label sat beside
-// it, so the counts wandered from one expander to the next down a file. w-44
-// holds a five-digit count; `shrink` lets a narrow pane squeeze it (truncating,
-// never wrapping) so the row stays exactly one line tall at any width.
-export const EXPANDER_COUNT = `w-44 shrink truncate text-center ${CODE_TEXT} text-blue-400 dark:text-blue-500 font-mono py-0.5 rounded cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-900/30`
+export const EXPANDER_BTN = `inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 ${CODE_TEXT} text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-900/50 cursor-pointer transition-colors duration-100`
+export const EXPANDER_BTNS = 'flex min-w-0 items-center gap-0.5 shrink-0 mr-2'
 // The context label carries the file's own token markup, so its colours come
 // from the highlight theme; the gray is only what untokenised text falls back
 // to, and the opacity keeps the whole thing behind the code it labels.
@@ -84,11 +75,10 @@ export const HIDDEN_BLOCK = 'px-4 py-8 flex flex-col items-center justify-center
 
 export interface SbsPair { old: string | null; new: string | null }
 
-// An expander row, described precisely enough to measure: how many chevron
-// buttons it carries, and the line count in its "··· N lines ···" label (null
-// for the button-only expanders the windowed-hunk path renders) - so the probe
-// lays out the row the component will actually render.
-export interface ExpanderShape { buttons: 1 | 2; hidden: number | null }
+// An expander row, described precisely enough to measure: how many labelled
+// buttons it carries and the hidden line count used by Show all (null when a
+// windowed file does not know its total length).
+export interface ExpanderShape { buttons: 1 | 2 | 3; hidden: number | null }
 
 // BodyShape is the render-path-agnostic description of a file body: which code
 // lines are visible and which expander rows sit between them, or which
@@ -100,10 +90,8 @@ export type BodyShape =
   | { kind: 'rows'; lines: string[]; expanders: ExpanderShape[] }
   | { kind: 'sbsRows'; pairs: SbsPair[]; expanders: ExpanderShape[] }
 
-// The expander's line-count label and the hidden file's "N lines changed" line,
-// spelled exactly as the components render them - at a narrow width the wrap
-// depends on the real digits.
-export const gapLabel = (hidden: number) => `···  ${hidden} line${hidden !== 1 ? 's' : ''}  ···`
+// The hidden file's "N lines changed" line, spelled exactly as the component
+// renders it - at a narrow width the wrap depends on the real digits.
 export const hiddenLabel = (changed: number) => `${changed} lines changed`
 
 // ── Offscreen probe ───────────────────────────────────────────────────────────
@@ -117,7 +105,7 @@ interface Probe {
   sbsNew: HTMLSpanElement
   expander: HTMLDivElement
   expanderBtn2: HTMLSpanElement
-  expanderLabel: HTMLSpanElement
+  expanderBtn3: HTMLSpanElement
   notice: HTMLDivElement
   hiddenBlock: HTMLDivElement
   hiddenCount: HTMLDivElement
@@ -164,16 +152,16 @@ function buildProbe(): Probe | null {
   const sbsNew = half()
 
   // Expander row: only its height matters, so the replica carries the same
-  // padding/border chrome and the taller of its two children (the icon buttons
-  // and the "··· N lines ···" count). Neither the count nor the context label
-  // beside it can wrap, so this is one line at any width - but it is still
+  // padding/border chrome and the same labelled action buttons. The labels and
+  // context beside them cannot wrap, so this is one line at any width - but it is still
   // measured rather than assumed, since the chrome around it is free to change.
   const expander = mk('div', EXPANDER_ROW, host)
   const btns = mk('div', EXPANDER_BTNS, expander)
-  mk('span', `${EXPANDER_BTN} block`, btns).appendChild(mk('span', 'block w-3 h-3'))
+  mk('span', EXPANDER_BTN, btns).textContent = 'Up 20 lines'
   const expanderBtn2 = mk('span', `${EXPANDER_BTN} block`, btns)
-  expanderBtn2.appendChild(mk('span', 'block w-3 h-3'))
-  const expanderLabel = mk('span', `${EXPANDER_COUNT} block`, expander)
+  expanderBtn2.textContent = 'Down 20 lines'
+  const expanderBtn3 = mk('span', `${EXPANDER_BTN} block`, btns)
+  expanderBtn3.textContent = 'Show all 999 lines'
 
   const notice = mk('div', NOTICE_BLOCK, host)
   notice.textContent = 'Binary file changed'
@@ -195,7 +183,7 @@ function buildProbe(): Probe | null {
     probeUnavailable = true
     return null
   }
-  probe = { host, unifiedRow, unifiedCode, sbsRow, sbsOld, sbsNew, expander, expanderBtn2, expanderLabel, notice, hiddenBlock, hiddenCount, ruler }
+  probe = { host, unifiedRow, unifiedCode, sbsRow, sbsOld, sbsNew, expander, expanderBtn2, expanderBtn3, notice, hiddenBlock, hiddenCount, ruler }
   return probe
 }
 
@@ -237,9 +225,9 @@ function measureExpanders(p: Probe, shapes: ExpanderShape[]): number {
     const key = `${e.buttons}:${e.hidden}`
     let h = seen.get(key)
     if (h === undefined) {
-      p.expanderBtn2.style.display = e.buttons === 2 ? '' : 'none'
-      p.expanderLabel.style.display = e.hidden == null ? 'none' : ''
-      p.expanderLabel.textContent = e.hidden == null ? '' : gapLabel(e.hidden)
+      p.expanderBtn2.style.display = e.buttons >= 2 ? '' : 'none'
+      p.expanderBtn3.style.display = e.buttons >= 3 ? '' : 'none'
+      p.expanderBtn3.textContent = e.hidden == null ? '' : `Show all ${e.hidden} lines`
       h = p.expander.getBoundingClientRect().height
       seen.set(key, h)
     }

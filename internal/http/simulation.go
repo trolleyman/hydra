@@ -2868,6 +2868,21 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					api.DiffLine{Type: api.Addition, Content: "See https://example.com/internal/app/services/auth/providers/oauth/google/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/client.go", NewLineNum: ptr(4)},
 					api.DiffLine{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(5)},
 				),
+				simFile("Cargo.lock", api.DiffFileChangeTypeModified, 2, 2,
+					"@@ -8,2 +8,2 @@", 8, 8,
+					api.DiffLine{Type: api.Deletion, Content: "version = \"1.2.3\"", OldLineNum: ptr(8)},
+					api.DiffLine{Type: api.Deletion, Content: "checksum = \"old-checksum\"", OldLineNum: ptr(9)},
+					api.DiffLine{Type: api.Addition, Content: "version = \"1.2.4\"", NewLineNum: ptr(8)},
+					api.DiffLine{Type: api.Addition, Content: "checksum = \"new-checksum\"", NewLineNum: ptr(9)},
+				),
+				simFile("deploy/policy.jsonnet", api.DiffFileChangeTypeAdded, 5, 0,
+					"@@ -0,0 +1,5 @@", 0, 1,
+					api.DiffLine{Type: api.Addition, Content: "local environment = 'staging';", NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "{", NewLineNum: ptr(2)},
+					api.DiffLine{Type: api.Addition, Content: "  environment: environment,", NewLineNum: ptr(3)},
+					api.DiffLine{Type: api.Addition, Content: "  replicas: if environment == 'production' then 4 else 2,", NewLineNum: ptr(4)},
+					api.DiffLine{Type: api.Addition, Content: "}", NewLineNum: ptr(5)},
+				),
 				simFile("docs/architecture/diagrams/overview.md", api.DiffFileChangeTypeAdded, 2, 0,
 					"@@ -0,0 +1,2 @@", 0, 1,
 					api.DiffLine{Type: api.Addition, Content: "# Architecture overview", NewLineNum: ptr(1)},
@@ -2946,8 +2961,8 @@ func simContext(params api.GetAgentDiffParams) int {
 // simApplyContext renders a fixture diff at the requested context. For a
 // full_context request it reconstructs each file as a single contiguous
 // whole-file hunk (mirroring `git diff -U<huge>` in production) so the diff
-// viewer drives its full-content reveal model - compact, with "··· N lines ···"
-// collapses and no fabricated edge arrows. Otherwise it just widens each hunk's
+// viewer drives its full-content reveal model - compact, with labelled
+// Up/Down/Show all controls and no fabricated edge actions. Otherwise it just widens each hunk's
 // surrounding context (network-expand on demand).
 // The cap is the caller's max_full_lines, so the simulation reproduces both
 // sides of the real server's behaviour: the bulk request (6000) leaves a change
@@ -3939,7 +3954,7 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 		{
 			// A full-context ("expanded") file so the diff viewer's context model
 			// kicks in: a single change mid-file with the surrounding lines
-			// collapsed behind ⌄/⌃ expanders ("··· N lines ···").
+			// collapsed behind the labelled Up/Down/Show all controls.
 			Path:       "internal/heads/heads.go",
 			ChangeType: api.DiffFileChangeTypeModified,
 			Additions:  1,

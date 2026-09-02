@@ -258,3 +258,402 @@ export const LAZY_LANGUAGES: Record<string, () => Promise<{ default: Syntax }>> 
   yang: () => import("refractor/yang"),
   zig: () => import("refractor/zig"),
 }
+
+export const LAZY_LANGUAGE_ALIASES: Record<string, string[]> = {
+  "abap": [],
+  "abnf": [],
+  "actionscript": [],
+  "ada": [],
+  "agda": [],
+  "al": [],
+  "antlr4": [
+    "g4"
+  ],
+  "apacheconf": [],
+  "apex": [],
+  "apl": [],
+  "applescript": [],
+  "aql": [],
+  "arduino": [
+    "ino"
+  ],
+  "arff": [],
+  "armasm": [
+    "arm-asm"
+  ],
+  "arturo": [
+    "art"
+  ],
+  "asciidoc": [
+    "adoc"
+  ],
+  "asm6502": [],
+  "asmatmel": [],
+  "aspnet": [],
+  "autohotkey": [],
+  "autoit": [],
+  "avisynth": [
+    "avs"
+  ],
+  "avro-idl": [
+    "avdl"
+  ],
+  "awk": [
+    "gawk"
+  ],
+  "basic": [],
+  "batch": [],
+  "bbcode": [
+    "shortcode"
+  ],
+  "bbj": [],
+  "bicep": [],
+  "birb": [],
+  "bison": [],
+  "bnf": [
+    "rbnf"
+  ],
+  "bqn": [],
+  "brainfuck": [],
+  "brightscript": [],
+  "bro": [],
+  "bsl": [
+    "oscript"
+  ],
+  "cfscript": [
+    "cfc"
+  ],
+  "chaiscript": [],
+  "cil": [],
+  "cilkc": [
+    "cilk-c"
+  ],
+  "cilkcpp": [
+    "cilk",
+    "cilk-cpp"
+  ],
+  "clojure": [],
+  "cmake": [],
+  "cobol": [],
+  "coffeescript": [
+    "coffee"
+  ],
+  "concurnas": [
+    "conc"
+  ],
+  "cooklang": [],
+  "coq": [],
+  "crystal": [],
+  "cshtml": [
+    "razor"
+  ],
+  "csp": [],
+  "css-extras": [],
+  "csv": [],
+  "cue": [],
+  "cypher": [],
+  "d": [],
+  "dataweave": [],
+  "dax": [],
+  "dhall": [],
+  "django": [
+    "jinja2"
+  ],
+  "dns-zone-file": [
+    "dns-zone"
+  ],
+  "dot": [
+    "gv"
+  ],
+  "ebnf": [],
+  "editorconfig": [],
+  "eiffel": [],
+  "ejs": [
+    "eta"
+  ],
+  "elm": [],
+  "erb": [],
+  "etlua": [],
+  "excel-formula": [
+    "xls",
+    "xlsx"
+  ],
+  "factor": [],
+  "false": [],
+  "firestore-security-rules": [],
+  "flow": [],
+  "fortran": [],
+  "fsharp": [],
+  "ftl": [],
+  "gap": [],
+  "gcode": [],
+  "gdscript": [],
+  "gedcom": [],
+  "gettext": [
+    "po"
+  ],
+  "gherkin": [],
+  "git": [],
+  "glsl": [],
+  "gml": [
+    "gamemakerlanguage"
+  ],
+  "gn": [
+    "gni"
+  ],
+  "go-module": [
+    "go-mod"
+  ],
+  "gradle": [],
+  "haml": [],
+  "handlebars": [
+    "hbs",
+    "mustache"
+  ],
+  "haxe": [],
+  "hcl": [],
+  "hlsl": [],
+  "hoon": [],
+  "hpkp": [],
+  "hsts": [],
+  "http": [],
+  "ichigojam": [],
+  "icon": [],
+  "icu-message-format": [],
+  "idris": [
+    "idr"
+  ],
+  "iecst": [],
+  "ignore": [
+    "gitignore",
+    "hgignore",
+    "npmignore"
+  ],
+  "inform7": [],
+  "io": [],
+  "j": [],
+  "javadoc": [],
+  "javadoclike": [],
+  "javastacktrace": [],
+  "jexl": [],
+  "jolie": [],
+  "jq": [],
+  "js-extras": [],
+  "js-templates": [],
+  "jsdoc": [],
+  "json5": [],
+  "jsonp": [],
+  "jsstacktrace": [],
+  "julia": [],
+  "keepalived": [],
+  "keyman": [],
+  "kumir": [
+    "kum"
+  ],
+  "kusto": [],
+  "latex": [
+    "context",
+    "tex"
+  ],
+  "latte": [],
+  "lilypond": [
+    "ly"
+  ],
+  "linker-script": [
+    "ld"
+  ],
+  "liquid": [],
+  "lisp": [
+    "elisp",
+    "emacs",
+    "emacs-lisp"
+  ],
+  "livescript": [],
+  "llvm": [],
+  "lolcode": [],
+  "magma": [],
+  "mata": [],
+  "matlab": [],
+  "maxscript": [],
+  "mel": [],
+  "mermaid": [],
+  "metafont": [],
+  "mizar": [],
+  "mongodb": [],
+  "monkey": [],
+  "moonscript": [
+    "moon"
+  ],
+  "n1ql": [],
+  "n4js": [
+    "n4jsd"
+  ],
+  "nand2tetris-hdl": [],
+  "naniscript": [
+    "nani"
+  ],
+  "nasm": [],
+  "neon": [],
+  "nevod": [],
+  "nim": [],
+  "nsis": [],
+  "ocaml": [],
+  "odin": [],
+  "opencl": [],
+  "openqasm": [
+    "qasm"
+  ],
+  "oz": [],
+  "parigp": [],
+  "parser": [],
+  "pascal": [
+    "objectpascal"
+  ],
+  "pascaligo": [],
+  "pcaxis": [
+    "px"
+  ],
+  "peoplecode": [
+    "pcode"
+  ],
+  "php-extras": [],
+  "phpdoc": [],
+  "plant-uml": [
+    "plantuml"
+  ],
+  "plsql": [],
+  "powerquery": [
+    "mscript",
+    "pq"
+  ],
+  "processing": [],
+  "prolog": [],
+  "promql": [],
+  "properties": [],
+  "psl": [],
+  "pug": [],
+  "puppet": [],
+  "pure": [],
+  "purebasic": [
+    "pbfasm"
+  ],
+  "purescript": [
+    "purs"
+  ],
+  "q": [],
+  "qml": [],
+  "qore": [],
+  "qsharp": [
+    "qs"
+  ],
+  "racket": [
+    "rkt"
+  ],
+  "reason": [],
+  "regex": [],
+  "rego": [],
+  "renpy": [
+    "rpy"
+  ],
+  "rescript": [
+    "res"
+  ],
+  "rest": [],
+  "rip": [],
+  "roboconf": [],
+  "robotframework": [
+    "robot"
+  ],
+  "sas": [],
+  "sass": [],
+  "scheme": [],
+  "shell-session": [
+    "sh-session",
+    "shellsession"
+  ],
+  "smali": [],
+  "smalltalk": [],
+  "smarty": [],
+  "sml": [
+    "smlnj"
+  ],
+  "solidity": [
+    "sol"
+  ],
+  "solution-file": [
+    "sln"
+  ],
+  "soy": [],
+  "sparql": [
+    "rq"
+  ],
+  "splunk-spl": [],
+  "sqf": [],
+  "squirrel": [],
+  "stan": [],
+  "stata": [],
+  "stylus": [],
+  "supercollider": [
+    "sclang"
+  ],
+  "systemd": [],
+  "t4-cs": [
+    "t4"
+  ],
+  "t4-templating": [],
+  "t4-vb": [],
+  "tap": [],
+  "tcl": [],
+  "textile": [],
+  "tremor": [
+    "trickle",
+    "troy"
+  ],
+  "tt2": [],
+  "turtle": [
+    "trig"
+  ],
+  "twig": [],
+  "typoscript": [
+    "tsconfig"
+  ],
+  "unrealscript": [
+    "uc",
+    "uscript"
+  ],
+  "uorazor": [],
+  "uri": [
+    "url"
+  ],
+  "v": [],
+  "vala": [],
+  "vbnet": [],
+  "velocity": [],
+  "verilog": [],
+  "vhdl": [],
+  "visual-basic": [
+    "vb",
+    "vba"
+  ],
+  "warpscript": [],
+  "wasm": [],
+  "web-idl": [
+    "webidl"
+  ],
+  "wgsl": [],
+  "wiki": [],
+  "wolfram": [
+    "mathematica",
+    "nb",
+    "wl"
+  ],
+  "wren": [],
+  "xeora": [
+    "xeoracube"
+  ],
+  "xml-doc": [],
+  "xojo": [],
+  "xquery": [],
+  "yang": [],
+  "zig": []
+}
