@@ -262,7 +262,54 @@ describe('sectioned search output', () => {
     }
   })
 
-  it('renders one inset rule between nonconsecutive matches in the same file', () => {
+  it('highlights marked Markdown and Go sections by their file headings', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'file', label: 'docs/policy.md' }, lines: ['marker'] },
+      {
+        kind: 'view',
+        view: { path: 'docs/policy.md', start: 1, end: null, numbered: false, command: 'git show HEAD:docs/policy.md' },
+        lines: ['# Policy', 'Status: **implemented.**'],
+      },
+      { kind: 'section', section: { kind: 'file', label: 'internal/policy.go' }, lines: ['marker'] },
+      {
+        kind: 'view',
+        view: { path: 'internal/policy.go', start: 1, end: null, numbered: false, command: 'git show HEAD:internal/policy.go' },
+        lines: ['package policy'],
+      },
+    ])
+
+    expect(rows.map((row) => row.header?.label ?? row.html)).toEqual([
+      'docs/policy.md',
+      expect.stringContaining('token title important'),
+      expect.stringContaining('token bold'),
+      'internal/policy.go',
+      expect.stringContaining('token keyword'),
+    ])
+  })
+
+  it('derives file headings from unified diff boundaries', () => {
+    const rows = scriptOutputRows([{
+      kind: 'git',
+      command: 'git diff main',
+      lines: [
+        'diff --git a/internal/a.go b/internal/a.go',
+        '--- a/internal/a.go',
+        '+++ b/internal/a.go',
+        '@@ -1 +1 @@',
+        '-old',
+        '+new',
+        'diff --git a/docs/old.md b/docs/new.md',
+        '--- a/docs/old.md',
+        '+++ b/docs/new.md',
+      ],
+    }])
+
+    expect(rows.filter((row) => row.header).map((row) => row.header?.label)).toEqual([
+      'internal/a.go', 'docs/new.md',
+    ])
+  })
+
+  it('renders one full-width rule between nonconsecutive matches in the same file', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',
       command: 'rg -n value a.ts',
@@ -273,7 +320,28 @@ describe('sectioned search output', () => {
 
     expect(rows.filter((row) => row.divider)).toHaveLength(1)
     const divider = container.querySelector('[data-copy-skip].border-t')
-    expect(divider).toHaveClass('mx-2.5')
+    expect(divider).toHaveClass('col-span-2')
+    expect(divider).not.toHaveClass('mx-2.5')
+  })
+
+  it('turns an rg context separator into a rule only within the same file', () => {
+    const same = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value a.go',
+      match: { paths: ['a.go'], numbered: true },
+      lines: ['29:first', '30:second', '--', '67:later'],
+    }])
+    expect(same.filter((row) => row.divider)).toHaveLength(1)
+    expect(same.filter((row) => !row.header && !row.divider).map((row) => row.num)).toEqual(['29', '30', '67'])
+
+    const different = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value src',
+      match: { paths: [], numbered: true },
+      lines: ['src/a.go:29:first', '--', 'src/b.go:67:later'],
+    }])
+    expect(different.filter((row) => row.divider)).toHaveLength(0)
+    expect(different.filter((row) => row.header).map((row) => row.header?.label)).toEqual(['src/a.go', 'src/b.go'])
   })
 })
 

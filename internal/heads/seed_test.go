@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -50,14 +51,23 @@ func TestSeedHeadClaudeConfigIsPerHead(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
 	target := path.Join(home, ".claude.json")
 
-	first := bindSource(t, seedClaudeHead(t, projectRoot, home, "head-one", gate.Policy{}), target)
-	second := bindSource(t, seedClaudeHead(t, projectRoot, home, "head-two", gate.Policy{}), target)
+	firstSeed := seedClaudeHead(t, projectRoot, home, "head-one", gate.Policy{})
+	secondSeed := seedClaudeHead(t, projectRoot, home, "head-two", gate.Policy{})
+	var first, second string
+	if runtime.GOOS == "darwin" {
+		first = filepath.Join(envValue(firstSeed.Env, "CLAUDE_CONFIG_DIR"), ".claude.json")
+		second = filepath.Join(envValue(secondSeed.Env, "CLAUDE_CONFIG_DIR"), ".claude.json")
+	} else {
+		first = bindSource(t, firstSeed, target)
+		second = bindSource(t, secondSeed, target)
+	}
 	if first == second {
 		t.Errorf("both heads seeded the same config file %q; it must be per-head", first)
 	}
-	for _, p := range []string{first, second} {
-		if srv := readMCPServer(t, p, gate.HydraControlServer); srv["command"] != SandboxHydraBinPath {
-			t.Errorf("%s: control server = %+v, want command %q", p, srv, SandboxHydraBinPath)
+	for i, p := range []string{first, second} {
+		want := []*seedResult{firstSeed, secondSeed}[i].HydraBinPath
+		if srv := readMCPServer(t, p, gate.HydraControlServer); srv["command"] != want {
+			t.Errorf("%s: control server = %+v, want command %q", p, srv, want)
 		}
 	}
 }
@@ -89,11 +99,23 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
 
 	off := seedClaudeHead(t, projectRoot, home, "lenient", gate.Policy{})
-	if off.MCPConfigPath != "" {
+	if runtime.GOOS != "darwin" && off.MCPConfigPath != "" {
 		t.Errorf("non-strict policy set MCPConfigPath = %q, want empty", off.MCPConfigPath)
 	}
 
 	res := seedClaudeHead(t, projectRoot, home, "strict-head", gate.Policy{StrictMCP: true})
+	if runtime.GOOS == "darwin" {
+		if !strings.HasPrefix(res.MCPConfigPath, paths.GetSeedDirFromProjectRoot(projectRoot, "strict-head")+string(os.PathSeparator)) {
+			t.Fatalf("MCPConfigPath = %q, want native seed path", res.MCPConfigPath)
+		}
+		if !stringInSlice(res.ImmutablePaths, res.MCPConfigPath) {
+			t.Fatalf("native strict MCP config is not immutable: %v", res.ImmutablePaths)
+		}
+		if srv := readMCPServer(t, res.MCPConfigPath, gate.HydraControlServer); srv["command"] != res.HydraBinPath {
+			t.Errorf("control server = %+v, want command %q", srv, res.HydraBinPath)
+		}
+		return
+	}
 	if res.MCPConfigPath != strictMCPConfigSandboxPath {
 		t.Fatalf("MCPConfigPath = %q, want %q", res.MCPConfigPath, strictMCPConfigSandboxPath)
 	}
@@ -112,13 +134,14 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 	if want := filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "strict-head-mcp-config.json"); bind.Source != want {
 		t.Errorf("bind source = %q, want the per-head %q", bind.Source, want)
 	}
-	if srv := readMCPServer(t, bind.Source, gate.HydraControlServer); srv["command"] != SandboxHydraBinPath {
-		t.Errorf("control server = %+v, want command %q", srv, SandboxHydraBinPath)
+	if srv := readMCPServer(t, bind.Source, gate.HydraControlServer); srv["command"] != res.HydraBinPath {
+		t.Errorf("control server = %+v, want command %q", srv, res.HydraBinPath)
 	}
 }
 
 func TestSeedHeadCodexGateAndFilteredMCP(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	worktree := filepath.Join(projectRoot, "wt", "codex-head")
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
@@ -144,7 +167,7 @@ command = "drop"
 	}
 
 	configTarget := path.Join(home, ".codex", "config.toml")
-	configSource := bindSource(t, res, configTarget)
+	configSource := deliveredCodexSource(t, res, configTarget)
 	var cfg map[string]any
 	data, err := os.ReadFile(configSource)
 	if err != nil {
@@ -158,7 +181,8 @@ command = "drop"
 		t.Fatalf("filtered Codex servers = %#v", servers)
 	}
 
-	hooksSource := bindSource(t, res, path.Join(home, ".codex", "hooks.json"))
+	hooksTarget := path.Join(home, ".codex", "hooks.json")
+	hooksSource := deliveredCodexSource(t, res, hooksTarget)
 	hooks, err := os.ReadFile(hooksSource)
 	if err != nil {
 		t.Fatal(err)
@@ -166,11 +190,11 @@ command = "drop"
 	if !strings.Contains(string(hooks), "gate codex") {
 		t.Fatalf("Codex gate missing from hooks: %s", hooks)
 	}
-	if bind := bindForTarget(res, configTarget); bind == nil || !bind.ReadOnly {
-		t.Fatalf("Codex config bind must be read-only: %+v", bind)
+	if !deliveredReadOnly(res, configTarget, configSource) {
+		t.Fatalf("Codex config is not delivered read-only: target=%q source=%q", configTarget, configSource)
 	}
-	if bind := bindForTarget(res, path.Join(home, ".codex", "hooks.json")); bind == nil || !bind.ReadOnly {
-		t.Fatalf("Codex hooks bind must be read-only: %+v", bind)
+	if !deliveredReadOnly(res, hooksTarget, hooksSource) {
+		t.Fatalf("Codex hooks are not delivered read-only: target=%q source=%q", hooksTarget, hooksSource)
 	}
 	if !envHasPrefix(res.Env, gate.EnvPolicyPath+"=") || !envHasPrefix(res.Env, gate.EnvApprovalDir+"=") {
 		t.Fatalf("Codex gate environment missing: %v", res.Env)
@@ -179,6 +203,7 @@ command = "drop"
 
 func TestSeededInstructionFilesArePerSession(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	for _, dir := range []string{".codex", ".copilot", ".gemini"} {
 		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
 			t.Fatal(err)
@@ -209,8 +234,16 @@ func TestSeededInstructionFilesArePerSession(t *testing.T) {
 				return res
 			}
 
-			headSource := bindSource(t, seed("head", "author instructions"), tt.target)
-			reviewSource := bindSource(t, seed(ReviewSessionID("head"), reviewSystemPrompt), tt.target)
+			headSeed := seed("head", "author instructions")
+			reviewSeed := seed(ReviewSessionID("head"), reviewSystemPrompt)
+			var headSource, reviewSource string
+			if tt.agentType == sandbox.AgentTypeCodex {
+				headSource = deliveredCodexSource(t, headSeed, tt.target)
+				reviewSource = deliveredCodexSource(t, reviewSeed, tt.target)
+			} else {
+				headSource = bindSource(t, headSeed, tt.target)
+				reviewSource = bindSource(t, reviewSeed, tt.target)
+			}
 			if headSource == reviewSource {
 				t.Fatalf("head and review slot share instruction source %q", headSource)
 			}
@@ -232,6 +265,40 @@ func bindForTarget(res *seedResult, target string) *sandbox.Bind {
 		}
 	}
 	return nil
+}
+
+func deliveredCodexSource(t *testing.T, res *seedResult, target string) string {
+	t.Helper()
+	if bind := bindForTarget(res, target); bind != nil {
+		return bind.Source
+	}
+	runtimeHome := envValue(res.Env, "CODEX_HOME")
+	if runtimeHome == "" {
+		t.Fatalf("Codex seed has neither a bind for %q nor CODEX_HOME: %+v", target, res)
+	}
+	return filepath.Join(runtimeHome, filepath.Base(target))
+}
+
+func deliveredReadOnly(res *seedResult, target, source string) bool {
+	if bind := bindForTarget(res, target); bind != nil {
+		return bind.ReadOnly
+	}
+	for _, immutable := range res.ImmutablePaths {
+		if immutable == source {
+			return true
+		}
+	}
+	return false
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 func envHasPrefix(env []string, prefix string) bool {

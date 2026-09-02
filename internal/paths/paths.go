@@ -83,10 +83,10 @@ func resolveUserPath(p, home string) string {
 	return filepath.Clean(p)
 }
 
-// ComparePaths compares two paths using platform-appropriate rules.
-// On Windows it is case-insensitive; on other platforms it is case-sensitive.
+// ComparePaths compares two paths using platform-appropriate rules. Windows and
+// default macOS filesystems are case-insensitive; other platforms are sensitive.
 func ComparePaths(p1, p2 string) bool {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		return strings.EqualFold(p1, p2)
 	}
 	return p1 == p2
@@ -203,6 +203,18 @@ func GetUploadsDirFromProjectRoot(projectRoot string) string {
 // caches (e.g. the captured Gemini default system prompt, keyed by CLI version).
 func GetCacheDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetProjectStateDirFromProjectRoot(projectRoot), "cache")
+}
+
+// GetSeedDirFromProjectRoot returns a session's immutable generated-input
+// directory. Platforms with mountless sandbox delivery expose these real paths.
+func GetSeedDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetProjectStateDirFromProjectRoot(projectRoot), "seed", id)
+}
+
+// GetProviderStateDirFromProjectRoot returns persistent provider-owned state for
+// one session. It survives archive/resume and is removed on permanent purge.
+func GetProviderStateDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetProjectStateDirFromProjectRoot(projectRoot), "providers", id)
 }
 
 func GetDBPathFromProjectRoot(projectRoot string) string {
@@ -674,14 +686,37 @@ func migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir st
 // letter or digit becomes '-' (no collapsing of runs), so e.g.
 // /home/u/code/hydra/.hydra/local/worktrees/x ->
 // -home-u-code-hydra--hydra-local-worktrees-x.
-// ClaudeProjectDir resolves the directory where Claude Code records a worktree's
-// transcripts (~/.claude/projects/<slug>), or "" when it can't be determined.
+// ClaudeConfigDirForSession resolves Claude's writable configuration and session
+// root. Darwin heads use Hydra's persistent per-session provider state; other
+// platforms retain Claude's configured shared user directory.
+func ClaudeConfigDirForSession(projectRoot, id, home string) string {
+	if runtime.GOOS == "darwin" && projectRoot != "" && id != "" {
+		return filepath.Join(GetProviderStateDirFromProjectRoot(projectRoot, id), "claude")
+	}
+	if configured := os.Getenv("CLAUDE_CONFIG_DIR"); configured != "" {
+		return configured
+	}
+	return filepath.Join(home, ".claude")
+}
+
+// ClaudeProjectDirForSession resolves the directory where one Claude session
+// records a worktree's transcripts, or "" when it can't be determined.
+func ClaudeProjectDirForSession(projectRoot, id, home, worktree string) string {
+	if home == "" || worktree == "" {
+		return ""
+	}
+	return filepath.Join(ClaudeConfigDirForSession(projectRoot, id, home), "projects", ClaudeProjectsSlug(worktree))
+}
+
+// ClaudeProjectDir resolves the legacy/shared directory where Claude records a
+// worktree's transcripts. Session-aware callers should use
+// ClaudeProjectDirForSession so Darwin selects its per-head provider state.
 func ClaudeProjectDir(worktree string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || worktree == "" {
 		return ""
 	}
-	return filepath.Join(home, ".claude", "projects", ClaudeProjectsSlug(worktree))
+	return ClaudeProjectDirForSession("", "", home, worktree)
 }
 
 func ClaudeProjectsSlug(p string) string {

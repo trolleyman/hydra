@@ -25,14 +25,20 @@ describe('parseScriptSteps', () => {
 
   it('takes a constant printf line as a marker', () => {
     expect(steps("printf '%s\\n' '--- run log ---'\ncat a.go")[0]).toEqual({
-      kind: 'marker', text: '--- run log ---',
+      kind: 'marker', text: '--- run log ---', section: { kind: 'text', label: 'run log' },
     })
     expect(steps(`printf "%s\\n" "--- context ---"\ncat a.go`)[0]).toEqual({
-      kind: 'marker', text: '--- context ---',
+      kind: 'marker', text: '--- context ---', section: { kind: 'text', label: 'context' },
     })
   })
 
-  it('reads typed output headings without changing their labels', () => {
+  it('reads output headings without changing their labels', () => {
+    expect(steps("printf '%s\\n' '--- lowercase diagnostics ---'")[0]).toEqual({
+      kind: 'marker',
+      text: '--- lowercase diagnostics ---',
+      section: { kind: 'text', label: 'lowercase diagnostics' },
+    })
+    // The old explicit text spelling remains valid for existing transcripts.
     expect(steps("printf '%s\\n' '--- [text] lowercase diagnostics ---'")[0]).toEqual({
       kind: 'marker',
       text: '--- [text] lowercase diagnostics ---',
@@ -184,6 +190,8 @@ describe('parseScriptSteps', () => {
     expect(kinds('git log\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git log -1\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git --no-pager log --graph --oneline --all\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git show --format=fuller --no-ext-diff f5c8c282 -- .hydra/config.toml\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git show --pretty=full HEAD\necho ----')).toEqual(['git', 'marker'])
     // The `| cat` that stops git paging changes nothing about what it printed.
     expect(steps('git log --oneline -1 | cat')[0]).toEqual({ kind: 'git', command: 'git log --oneline -1 | cat', cap: 1 })
     expect(kinds('git log | cat | head -20\necho ----')).toEqual(['git', 'marker'])
@@ -196,6 +204,7 @@ describe('parseScriptSteps', () => {
     ])
     // A listing, or a caller's own format, could put anything on any line.
     expect(kinds('git show --stat --pretty=format:%s\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git show --format=%H:%s\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git diff --name-only\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git status --porcelain=v2\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
@@ -777,11 +786,11 @@ describe('splitScriptOutput', () => {
     ].join('\n')
 
     expect(splitScriptOutput(steps(script), output)?.map((section) => [section.kind, section.lines])).toEqual([
-      ['marker', ['--- run log ---']],
+      ['section', ['--- run log ---']],
       ['view', ['run line']],
-      ['marker', ['--- context ---']],
+      ['section', ['--- context ---']],
       ['view', ['context line']],
-      ['marker', ['--- Hydra log window ---']],
+      ['section', ['--- Hydra log window ---']],
       ['view', ['log one', 'log two']],
     ])
   })
@@ -831,6 +840,35 @@ describe('splitScriptOutput', () => {
     expect(sections?.[1]).toMatchObject({ view: { path: 'docs/macos-desktop-chat.md', start: 164, end: 182 } })
   })
 
+  it('keeps line numbers across marked continuation reads of one file', () => {
+    const path = 'docs/security-audit.md'
+    const script = [
+      `wc -l ${path}`,
+      `sed -n '1,220p' ${path}`,
+      `printf '%s\\n' '--- [file] ${path} (continued) ---'`,
+      `sed -n '221,440p' ${path}`,
+      `printf '%s\\n' '--- [file] ${path} (continued) ---'`,
+      `sed -n '441,700p' ${path}`,
+    ].join('\n')
+    const source = Array.from({ length: 700 }, (_, i) => `line ${i + 1}`)
+    const marker = `--- [file] ${path} (continued) ---`
+    const output = [
+      `700 ${path}`,
+      ...source.slice(0, 220),
+      marker,
+      ...source.slice(220, 440),
+      marker,
+      ...source.slice(440),
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    const views = sections?.filter((section) => section.kind === 'view') ?? []
+
+    expect(sections?.map((section) => section.kind)).toEqual([
+      'disk', 'view', 'section', 'view', 'section', 'view',
+    ])
+    expect(views.map((section) => section.view.start)).toEqual([1, 221, 441])
+  })
+
   it('uses a typed file heading as an exact boundary between short reads', () => {
     const script = [
       "sed -n '1,4p' file1.txt",
@@ -853,12 +891,43 @@ describe('splitScriptOutput', () => {
     })
   })
 
-  it('does not guess which duplicate typed marker came from printf', () => {
-    const script = "cat notes.txt\nprintf '%s\\n' '--- [text] repeated ---'\nmage build"
-    const output = 'before\n--- [text] repeated ---\nafter\n--- [text] repeated ---\nbuild output'
+  it('attributes marked git blob reads to each following file', () => {
+    const script = [
+      "printf '%s\\n' '--- [file] internal/heads/environment.go ---'",
+      'git show ffc83b5e:internal/heads/environment.go',
+      "printf '%s\\n' '--- [file] internal/heads/environment_test.go ---'",
+      'git show ffc83b5e:internal/heads/environment_test.go',
+      "printf '%s\\n' '--- [file] docs/head-environment-isolation.md ---'",
+      'git show ffc83b5e:docs/head-environment-isolation.md',
+    ].join('\n')
+    const output = [
+      '--- [file] internal/heads/environment.go ---',
+      'package heads',
+      '--- [file] internal/heads/environment_test.go ---',
+      'package heads',
+      '--- [file] docs/head-environment-isolation.md ---',
+      '# Head environment isolation',
+    ].join('\n')
     const sections = splitScriptOutput(steps(script), output)
 
-    expect(sections?.some((section) => section.kind === 'section')).not.toBe(true)
+    expect(sections?.map((section) => section.kind)).toEqual([
+      'section', 'view', 'section', 'view', 'section', 'view',
+    ])
+    expect(sections?.filter((section) => section.kind === 'view').map((section) => section.view.path)).toEqual([
+      'internal/heads/environment.go',
+      'internal/heads/environment_test.go',
+      'docs/head-environment-isolation.md',
+    ])
+  })
+
+  it('does not guess which duplicate section marker came from printf', () => {
+    for (const marker of ['--- repeated ---', '--- [text] repeated ---']) {
+      const script = `cat notes.txt\nprintf '%s\\n' '${marker}'\nmage build`
+      const output = `before\n${marker}\nafter\n${marker}\nbuild output`
+      const sections = splitScriptOutput(steps(script), output)
+
+      expect(sections?.some((section) => section.kind === 'section'), marker).not.toBe(true)
+    }
   })
 
   it('keeps a shortened sed gutter between numbered rg results', () => {

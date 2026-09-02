@@ -3,11 +3,11 @@ package heads
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
-	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -58,21 +58,24 @@ func TestStartEgressMode(t *testing.T) {
 		defer stopEgressProxy(id)
 		pol := sandbox.NetworkPolicy{Mode: sandbox.NetHard, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}}
 		env, wrap := startEgress("", id, sandbox.AgentTypeClaude, &pol)
-		if egress.DetectHardMode().Available {
-			if len(env) == 0 || wrap == nil {
-				t.Errorf("hard mode with tooling: expected proxy env + wrap, got env=%v wrap!=nil=%v", env, wrap != nil)
+		switch got := EgressModeFor(id); got {
+		case EgressHard:
+			if len(env) == 0 || !pol.Enabled {
+				t.Errorf("active hard mode: expected proxy env + enabled policy, got env=%v Enabled=%v", env, pol.Enabled)
 			}
-			if got := EgressModeFor(id); got != EgressHard {
-				t.Errorf("mode = %q, want %q", got, EgressHard)
+			if runtime.GOOS == "linux" && wrap == nil {
+				t.Error("Linux hard mode must wrap the sandbox in pasta+nft")
 			}
-		} else {
+			if runtime.GOOS == "darwin" && (wrap != nil || pol.HardProxyPort == 0) {
+				t.Errorf("Darwin hard mode must use a Seatbelt proxy port without an argv wrap: wrap=%v port=%d", wrap != nil, pol.HardProxyPort)
+			}
+		case EgressOff:
 			// Hard never degrades: without pasta/nft the head fails closed.
 			if env != nil || wrap != nil || pol.Enabled {
 				t.Errorf("hard mode without tooling must fail closed, got env=%v wrap!=nil=%v Enabled=%v", env, wrap != nil, pol.Enabled)
 			}
-			if got := EgressModeFor(id); got != EgressOff {
-				t.Errorf("mode = %q, want %q", got, EgressOff)
-			}
+		default:
+			t.Fatalf("hard mode recorded unexpected posture %q", got)
 		}
 	})
 

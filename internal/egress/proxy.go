@@ -10,13 +10,12 @@
 // NOT an inescapable boundary: a process sharing the host network namespace can
 // open a direct socket and ignore the proxy (this is "advisory" mode).
 //
-// The inescapable boundary is HARD mode (internal/egress/hardmode.go + pasta.go):
-// pasta puts the agent in its own network namespace whose nft ruleset drops all
-// egress except TCP to this proxy, so a raw socket has nowhere to go. Hard mode
-// requires a smoke test confirming pasta+nft work on the host, and otherwise
-// fails closed - no network (surfaced via heads.EgressMode). The proxy
-// code below is identical for both modes - only the reachability of a bypass
-// differs. `network mode = "off"` remains the absolute hard off-switch.
+// The inescapable boundary is HARD mode: Linux uses a pasta network namespace
+// plus nft, while Darwin's Seatbelt profile denies every IP route except the one
+// loopback proxy port. A raw socket therefore has nowhere else to go. If the
+// platform boundary cannot be built, hard mode fails closed with no network
+// (surfaced via heads.EgressMode). The proxy code below is identical across
+// platforms; `network mode = "off"` remains the absolute hard off-switch.
 //
 // A request is relayed iff its host is on the effective allow-list (user list +
 // the built-in defaults) AND not on the block-list, which overrides the allow.

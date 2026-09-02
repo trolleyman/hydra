@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -29,11 +30,16 @@ func Available() (bool, string) {
 
 // BuildSpec assembles a sandbox-exec command line. It materializes the embedded
 // Seatbelt profile to a temp file, appends config-driven allow/deny rules, and
-// invokes sandbox-exec with WORK_DIR/HOME_DIR params, mirroring
-// sandbox-demo/macos/sandbox.sb.
+// invokes sandbox-exec with WORK_DIR/HOME_DIR params.
 func BuildSpec(opts Options) (*Spec, error) {
 	if opts.NoSandbox {
 		return errtrace.Wrap2(rawSpec(opts))
+	}
+	if len(opts.Binds) > 0 || len(opts.ROOverlays) > 0 || len(opts.TmpfsDirs) > 0 {
+		return nil, errtrace.Wrap(fmt.Errorf(
+			"macOS sandbox cannot apply mount-based inputs (binds=%d, read-only overlays=%d, tmpfs dirs=%d)",
+			len(opts.Binds), len(opts.ROOverlays), len(opts.TmpfsDirs),
+		))
 	}
 
 	sandboxExec, err := exec.LookPath("sandbox-exec")
@@ -41,10 +47,31 @@ func BuildSpec(opts Options) (*Spec, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("sandbox-exec not found: %w", err))
 	}
 
-	home := opts.Home
+	home := canonicalSBPath(opts.Home)
+	worktree := canonicalSBPath(opts.WorktreePath)
 	var b strings.Builder
 	b.WriteString(sandboxProfileTemplate)
 	b.WriteString("\n;; --- Hydra config-driven rules (appended; last match wins) ---\n")
+
+	// macOS cannot mount a private directory over /tmp. Deny the shared OS temp
+	// roots and every sibling head's scratch directory first. Later, narrower
+	// grants expose this head's own scratch directory and Hydra control socket.
+	if opts.TmpDir != "" {
+		for _, p := range []string{"/tmp", "/private/tmp", os.TempDir(), filepath.Dir(opts.TmpDir)} {
+			fmt.Fprintf(&b, "(deny file-read* file-write* %s)\n", sbPathRule(p))
+		}
+		// Path-canonicalizing tools (notably Git and SQLite) stat each ancestor
+		// before opening a file below TMPDIR. Re-open metadata on the literal
+		// ancestors only: directory enumeration and sibling file data stay denied.
+		for parent := filepath.Dir(canonicalSBPath(opts.TmpDir)); ; parent = filepath.Dir(parent) {
+			fmt.Fprintf(&b, "(allow file-read-metadata %s)\n", sbLiteralPathRule(parent))
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+		}
+		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(opts.TmpDir))
+	}
 
 	// The worktree's git metadata lives in the main repo's common dir. How much is
 	// writable depends on the git-isolation mode (see docs/git-isolation.md); reads are
@@ -64,7 +91,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 		// freshly-configured cache/store (e.g. ~/.local/share/aube) can actually
 		// be written under - a file-write rule can't create a missing parent.
 		ensureWritableDir(p, home)
-		fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(p))
+		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(p))
 	}
 	// Masked paths: deny both read and write.
 	for _, p := range expandAll(opts.MaskedPaths, home) {
@@ -74,15 +101,65 @@ func BuildSpec(opts Options) (*Spec, error) {
 	for _, p := range expandAll(opts.RestoreRO, home) {
 		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
 	}
+	// Immutable runtime and generated policy inputs live at real host paths on
+	// macOS. Grant reads and carve writes back out after every broader writable
+	// rule; Seatbelt's last-match-wins evaluation makes this tamper-resistant.
+	for _, p := range expandAll(opts.ImmutablePaths, home) {
+		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
+		fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(p))
+	}
 	// The base profile grants writes under WORK_DIR. A project-directory read-only session
 	// runs in the real project root, so carve that grant back out after every
 	// config-driven allow. Seatbelt is last-match-wins.
 	if opts.WorkingDirReadOnly {
 		fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(opts.WorktreePath))
 	}
-	// Network.
+	// A head may signal itself and processes it spawned, but not its supervisor
+	// parent or unrelated host processes. Besides containing `kill`/`pkill`, this
+	// prevents an agent from killing the hydra-internal process that owns its
+	// sandbox and control socket.
+	b.WriteString("(deny signal)\n")
+	b.WriteString("(allow signal (target self))\n")
+	b.WriteString("(allow signal (target children))\n")
+	if opts.HardenGUI {
+		// macOS GUI, clipboard, and Apple Events access is brokered by these Mach
+		// services rather than filesystem sockets. Deny their bootstrap lookups.
+		for _, service := range []string{
+			"com.apple.windowserver",
+			"com.apple.windowserver.active",
+			"com.apple.pasteboard.1",
+			"com.apple.pboard",
+			"com.apple.coreservices.appleevents",
+		} {
+			fmt.Fprintf(&b, "(deny mach-lookup (global-name %q))\n", service)
+		}
+	}
+	// Network. Hard mode keeps ordinary IP egress denied and opens only the
+	// host-loopback filtering proxy plus explicitly configured loopback services.
+	// Unix-domain sockets (including mDNSResponder) are unaffected; name
+	// resolution is not itself an egress route, and the host-side proxy resolves
+	// CONNECT destinations independently.
 	if !opts.Network.Enabled {
 		b.WriteString("(deny network*)\n")
+	} else if opts.Network.Mode == NetHard {
+		if opts.Network.HardProxyPort < 1 || opts.Network.HardProxyPort > 65535 {
+			return nil, errtrace.Wrap(fmt.Errorf("macOS hard egress requires a valid filtering proxy port"))
+		}
+		b.WriteString("(deny network-outbound (remote ip))\n")
+		b.WriteString("(deny network-bind (local ip))\n")
+		b.WriteString("(allow network-bind (local tcp \"localhost:*\") (local udp \"localhost:*\"))\n")
+		if port := opts.Network.HardInboundPort; port > 0 && port <= 65535 {
+			fmt.Fprintf(&b, "(allow network-bind (local tcp \"*:%d\"))\n", port)
+		}
+		ports := append([]int{opts.Network.HardProxyPort}, opts.Network.AllowedLoopbackPorts...)
+		seen := make(map[int]bool, len(ports))
+		for _, port := range ports {
+			if port < 1 || port > 65535 || seen[port] {
+				continue
+			}
+			seen[port] = true
+			fmt.Fprintf(&b, "(allow network-outbound (remote tcp \"localhost:%d\"))\n", port)
+		}
 	}
 
 	// Copy-on-write mounts. macOS has no overlay primitive in Seatbelt, but APFS
@@ -113,20 +190,22 @@ func BuildSpec(opts Options) (*Spec, error) {
 	args := []string{
 		sandboxExec,
 		"-f", profilePath,
-		"-D", "WORK_DIR=" + opts.WorktreePath,
+		"-D", "WORK_DIR=" + worktree,
 		"-D", "HOME_DIR=" + home,
 	}
 	// Optionally run the configured pre-spawn script first; it execs into Argv
-	// when it falls through.
-	// Ephemeral $HYDRA_ENV (no persist path): the agent still gets its vars
-	// in-shell, but sharing them with sibling bash shells rides on the Linux
-	// namespace host and its /tmp-mapped per-head TmpDir, which darwin lacks.
-	args = append(args, withPreSpawn(opts.PreSpawnScript, "", opts.Argv)...)
+	// when it falls through. The resolved $HYDRA_ENV is persisted in this head's
+	// private temp directory so sibling sandboxed shells can reuse it.
+	env := RuntimeEnv(opts.Env, opts.TmpDir)
+	if opts.HardenGUI {
+		env = withoutEnvKeys(env, "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS")
+	}
+	args = append(args, withPreSpawn(opts.PreSpawnScript, SandboxPreSpawnEnvFile(opts.TmpDir), opts.Argv)...)
 
 	return &Spec{
 		Path:    sandboxExec,
 		Args:    args,
-		Env:     opts.Env,
+		Env:     env,
 		Dir:     opts.WorktreePath,
 		Cleanup: func() { _ = os.Remove(profilePath) },
 	}, nil
@@ -165,9 +244,38 @@ func cowClone(m CowMount) error {
 // (literal "..") for files. Falls back to subpath when the path can't be
 // stat'd (e.g. not yet created).
 func sbPathRule(p string) string {
-	quoted := strings.ReplaceAll(p, `"`, `\"`)
+	p = canonicalSBPath(p)
 	if info, err := os.Stat(p); err == nil && !info.IsDir() {
-		return `(literal "` + quoted + `")`
+		return sbLiteralPathRule(p)
 	}
+	quoted := strings.ReplaceAll(p, `"`, `\"`)
 	return `(subpath "` + quoted + `")`
+}
+
+func sbLiteralPathRule(p string) string {
+	p = canonicalSBPath(p)
+	quoted := strings.ReplaceAll(p, `"`, `\"`)
+	return `(literal "` + quoted + `")`
+}
+
+// canonicalSBPath resolves macOS's visible compatibility symlinks (notably
+// /tmp -> /private/tmp and /var -> /private/var). Seatbelt compares the kernel's
+// canonical path, so a literal rule using the visible alias does not match.
+func canonicalSBPath(p string) string {
+	if p == "" {
+		return p
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	// The leaf may not exist yet. Resolve the closest existing parent and append
+	// the unresolved suffix so rules for create targets still use canonical roots.
+	parent := filepath.Dir(p)
+	if parent == p {
+		return filepath.Clean(p)
+	}
+	if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+		return filepath.Join(resolved, filepath.Base(p))
+	}
+	return filepath.Clean(p)
 }

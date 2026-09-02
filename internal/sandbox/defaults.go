@@ -12,8 +12,6 @@ type DefaultConfig struct {
 // writable developer/agent paths, a blocklist of credential + secret
 // locations, and read-only restores for tool configs that live under masked
 // directories. Paths use "~" and are expanded per-head against the agent HOME.
-//
-// These mirror sandbox-demo/{linux/claude-sandboxed,macos/sandbox.sb}.
 func Defaults() DefaultConfig {
 	return DefaultConfig{
 		// Writable: broad tool cache/state + toolchain + agent config. The
@@ -31,11 +29,9 @@ func Defaults() DefaultConfig {
 			"~/.gemini",                 // gemini config + creds
 			"~/.copilot",                // copilot config + creds
 			"~/.codex",                  // codex config + creds + session history
-			// NB: /tmp is deliberately NOT here. On Linux it is a per-head
-			// private dir (Options.TmpDir, bound over /tmp in linux.go) so agent
-			// temp files are reclaimed on teardown; on macOS the static profile
-			// (profiles/sandbox.sb) allows /tmp writes. Adding it here would
-			// re-bind the host's shared /tmp and leak temp across heads.
+			// NB: /tmp is deliberately NOT here. Options.TmpDir provides per-head
+			// temporary storage on both Linux and macOS; adding /tmp here would
+			// expose the host's shared scratch directory.
 		},
 		// Masked: credential + secret directories/files hidden entirely.
 		MaskedPaths: []string{

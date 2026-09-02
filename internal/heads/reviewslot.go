@@ -100,7 +100,7 @@ const reviewOpeningPrompt = `Review the current diff now. Raise each actionable 
 func reviewConversationID(projectRoot, id, worktreePath, home string, agentType sandbox.AgentType) string {
 	switch agentType {
 	case sandbox.AgentTypeClaude:
-		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
+		dir := paths.ClaudeProjectDirForSession(projectRoot, id, home, worktreePath)
 		return claudestream.LatestSessionID(dir)
 	case sandbox.AgentTypeCodex:
 		return readCodexSlotConversationID(projectRoot, id)
@@ -185,7 +185,8 @@ func RemoveReviewSessionDir(projectRoot, headID string, agentType sandbox.AgentT
 	if slug == "" {
 		return
 	}
-	if err := os.RemoveAll(filepath.Join(u.HomeDir, ".claude", "projects", slug)); err != nil {
+	dir := paths.ClaudeProjectDirForSession(projectRoot, ReviewSessionID(headID), u.HomeDir, paths.GetReviewCheckoutDirFromProjectRoot(projectRoot, headID))
+	if err := os.RemoveAll(dir); err != nil {
 		log.Printf("warn: heads: purge remove review session dir for %s: %v", headID, err)
 	}
 }
@@ -214,6 +215,8 @@ func KillReviewSession(reg *session.Registry, projectRoot, headID string) {
 	reg.Remove(id)
 	stopEgressProxy(id)
 	removeNamespaceHost(id)
+	removeHeadTmpDir(projectRoot, id)
+	removeSeedInputs(projectRoot, id)
 	// After the supervisor is gone: it has the tree bind-mounted, and pulling a
 	// worktree out from under a live bwrap is how you get a half-removed tree that
 	// `worktree add` then refuses to reclaim.
@@ -266,11 +269,12 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		return "", errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
 	home := currentUser.HomeDir
-	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
+	tmpDir := ensureHeadTmpDir(projectRoot, id)
+	cfg, _ := config.Load(projectRoot)
+	env := agentEnv(agentType, cfg.ResolveInheritedEnv(string(agentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, agentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
-	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(agentType))
 
 	// Read-only git, with no host-mediated way around it. resolveGitIsolation is
@@ -280,14 +284,15 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	policy := resolveGatePolicy(cfg, string(agentType))
 	policy.MCPToolsBlocked = append(append([]string(nil), policy.MCPToolsBlocked...), reviewBlockedTools...)
 
-	seed, err := seedHead(projectRoot, id, agentType, worktreePath, home, reviewSystemPrompt, policy, sandbox.GitIsolationReadonly)
+	reviewPrompt := withPrivateTempPrompt(reviewSystemPrompt, tmpDir)
+	seed, err := seedHead(projectRoot, id, agentType, worktreePath, home, reviewPrompt, policy, sandbox.GitIsolationReadonly)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
 
 	conversationID := reviewConversationID(projectRoot, id, worktreePath, home, agentType)
 	resuming := conversationID != ""
-	argv, err := sandbox.AgentArgv(agentType, resuming, reviewSystemPrompt, "", "", true, conversationID, seed.MCPConfigPath)
+	argv, err := sandbox.AgentArgv(agentType, resuming, reviewPrompt, "", "", true, conversationID, seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -298,23 +303,25 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	egressEnv, egressWrap := startEgressKeyed(projectRoot, id, head.ID, agentType, &net)
 
 	sb := sandbox.Options{
-		AgentType:     agentType,
-		WorktreePath:  worktreePath,
-		GitCommonDir:  commonDirForSandbox(projectRoot, sandbox.GitIsolationReadonly),
-		GitIsolation:  sandbox.GitIsolationReadonly,
-		Home:          home,
-		TmpDir:        ensureHeadTmpDir(projectRoot, head.ID),
-		WritablePaths: append(writable, seed.WritablePaths...),
-		MaskedPaths:   sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:     restore,
-		Network:       net,
-		Binds:         seed.Binds,
-		Env:           append(append(env, seed.Env...), egressEnv...),
-		Argv:          argv,
-		EgressWrap:    egressWrap,
-		HardenGUI:     true,
-		Seccomp:       true,
-		StdioPipes:    true,
+		AgentType:      agentType,
+		WorktreePath:   worktreePath,
+		GitCommonDir:   commonDirForSandbox(projectRoot, sandbox.GitIsolationReadonly),
+		GitIsolation:   sandbox.GitIsolationReadonly,
+		Home:           home,
+		TmpDir:         tmpDir,
+		WritablePaths:  append(writable, seed.WritablePaths...),
+		MaskedPaths:    sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		RestoreRO:      restore,
+		Network:        net,
+		Binds:          seed.Binds,
+		ImmutablePaths: seed.ImmutablePaths,
+		Env:            append(append(env, seed.Env...), egressEnv...),
+		Argv:           argv,
+		HydraBinPath:   seed.HydraBinPath,
+		EgressWrap:     egressWrap,
+		HardenGUI:      true,
+		Seccomp:        true,
+		StdioPipes:     true,
 	}
 
 	if _, err := startAgentSession(reg, projectRoot, id, agentType, worktreePath, rows, cols, sb); err != nil {

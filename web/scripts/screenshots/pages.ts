@@ -901,7 +901,9 @@ export const pages: {
   // tab. Simulation seeds a multi-line pre-spawn script (GetConfig in
   // internal/http/simulation.go), so the capture documents the sandbox
   // policy editor with the ShellEditor's bash highlighting + line-number
-  // gutter, the typed text and the highlight layer aligned. The form lives
+  // gutter, the typed text and the highlight layer aligned. It also seeds two
+  // inherited-environment variable names, documenting the explicit allow-list
+  // editor without exposing any values. The form lives
   // in a viewport-height scroll container, so use a tall viewport to fit the
   // whole page: the pre-spawn + pre-exit editors sit near the bottom, the
   // "Diff Artifacts" editor (the [[artifacts]] scripts) below that, and the

@@ -54,7 +54,7 @@ import { buildOutputSpans, diagnosticSpans } from '../lib/buildOutput'
 import { isJsonOutput } from '../lib/jsonOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
-import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
+import { blamePrefixSpans, gitDiffPath, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
 import type { OutputSpan } from '../lib/outputSpan'
 import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
@@ -2797,6 +2797,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   let run: MatchLine[] = []
   let runLang = ''
   let previous: MatchLine | null = null
+  let separatedFrom: MatchLine | null = null
   let headerPath = ''
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
@@ -2820,16 +2821,21 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
+      separatedFrom ??= previous
       previous = null
-      rows.push({ num: '', html: '', tone: 'plain' })
       continue
+    }
+    const nextPath = line.path || onlyPath
+    if (separatedFrom) {
+      const previousPath = separatedFrom.path || onlyPath
+      if (previousPath && previousPath === nextPath) rows.push(scriptDivider())
+      separatedFrom = null
     }
     const lang = line.path ? langFromPath(line.path) : only
     const discontinuous = previous && !consecutiveMatchLines(previous, line)
     if (lang !== runLang || discontinuous) {
       flush()
       const previousPath = previous?.path || onlyPath
-      const nextPath = line.path || onlyPath
       if (discontinuous && previousPath && previousPath === nextPath) rows.push(scriptDivider())
     }
     runLang = lang
@@ -2932,7 +2938,12 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'git') {
-      for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
+      const highlighted = gitOutputSpans(section.lines)
+      section.lines.forEach((line, i) => {
+        const path = gitDiffPath(line)
+        if (path) add([scriptHeader('file', path)])
+        rows.push({ num: '', html: '', spans: highlighted[i], tone: 'code' })
+      })
       continue
     }
     if (section.kind === 'summary') {
@@ -3174,7 +3185,7 @@ function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
   return (
     <div
       data-copy-skip
-      className={`${gutter ? 'col-span-2' : 'col-span-1'} mx-2.5 border-t border-stone-200 dark:border-white/[0.06]`}
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} border-t border-stone-200 dark:border-white/[0.06]`}
     />
   )
 }

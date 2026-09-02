@@ -73,28 +73,8 @@ func TestHeadContextEnv(t *testing.T) {
 		} else if v != w {
 			t.Errorf("%s = %q, want %q", k, v, w)
 		}
-		// Every variable must be owned by Hydra so it can't leak from the host.
-		if !envKeysHydraOwns[k] {
-			t.Errorf("%s missing from envKeysHydraOwns", k)
-		}
-	}
-}
-
-func TestAgentEnvReplacesInheritedTempPaths(t *testing.T) {
-	t.Setenv("TMPDIR", "/host/project/.hydra/test-tmp")
-	t.Setenv("TMP", "/host/tmp")
-	t.Setenv("TEMP", "/host/temp")
-	got := agentEnv("/home/test", "test", "", "")
-	values := map[string]string{}
-	for _, entry := range got {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			values[key] = value
-		}
-	}
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		if values[key] != "/tmp" {
-			t.Errorf("%s = %q, want /tmp", key, values[key])
+		if !strings.HasPrefix(k, "HYDRA_") {
+			t.Errorf("head context variable %s is not in Hydra's namespace", k)
 		}
 	}
 }

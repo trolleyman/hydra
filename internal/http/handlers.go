@@ -1538,6 +1538,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			MaskedPaths:    &c.Sandbox.MaskedPaths,
 			RestoreRo:      &c.Sandbox.RestoreRO,
 			CowPaths:       &c.Sandbox.CowPaths,
+			InheritEnv:     &c.Sandbox.InheritEnv,
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
 			PreExitScript:  c.Sandbox.PreExitScript,
 		}
@@ -1592,6 +1593,9 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		}
 		if a.Sandbox.CowPaths != nil {
 			sb.CowPaths = *a.Sandbox.CowPaths
+		}
+		if a.Sandbox.InheritEnv != nil {
+			sb.InheritEnv = *a.Sandbox.InheritEnv
 		}
 		if a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
 			sb.PreSpawnScript = a.Sandbox.PreSpawnScript

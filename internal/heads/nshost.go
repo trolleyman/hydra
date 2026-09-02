@@ -137,7 +137,11 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		// path directly and receives the narrow write grant it needs.
 		hostOpts.WritablePaths = append(append([]string(nil), base.WritablePaths...), sockDir)
 	}
-	hostOpts.Argv = []string{SandboxHydraBinPath, "__sandbox-init", "--socket", sandboxSockPath}
+	hydraBin := hostOpts.HydraBinPath
+	if hydraBin == "" {
+		hydraBin = SandboxHydraBinPath
+	}
+	hostOpts.Argv = []string{hydraBin, "__sandbox-init", "--socket", sandboxSockPath}
 	hostOpts.PreSpawnScript = "" // the supervisor itself runs no pre-spawn hook
 
 	spec, err := sandbox.BuildSpec(hostOpts)
@@ -272,7 +276,7 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	// it back and inject the same vars into this head's sibling sandboxed shells
 	// (StartShellSession), which do not re-run the script.
 	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sandbox.SandboxPreSpawnEnvFile(sb.TmpDir), sb.Argv)
-	req := nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes}
+	req := nshost.SpawnRequest{Argv: argv, Env: sandbox.RuntimeEnv(sb.Env, sb.TmpDir), Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes}
 	if sb.StdioPipes {
 		req.StderrPrefix = fmt.Sprintf("[%s:%s] ", agentType, id)
 	}

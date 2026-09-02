@@ -70,6 +70,36 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
+func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
+	hostTmp := filepath.Join(t.TempDir(), "head-tmp")
+	got := RuntimeEnv([]string{
+		"PATH=/usr/bin",
+		"TMPDIR=/shared/one",
+		"TMP=/shared/two",
+		"TEMP=/shared/three",
+		"TMPDIR=/duplicate",
+	}, hostTmp)
+	wantTmp := SandboxTempDir(hostTmp)
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		prefix := key + "="
+		matches := make([]string, 0, 1)
+		for _, entry := range got {
+			if strings.HasPrefix(entry, prefix) {
+				matches = append(matches, entry)
+			}
+		}
+		if len(matches) != 1 || matches[0] != prefix+wantTmp {
+			t.Errorf("%s entries = %v, want [%s]", key, matches, prefix+wantTmp)
+		}
+	}
+	if !slices.Contains(got, "PATH=/usr/bin") {
+		t.Errorf("RuntimeEnv dropped unrelated environment: %v", got)
+	}
+	if got := SandboxPreSpawnEnvFile(hostTmp); got != filepath.Join(wantTmp, PreSpawnEnvFileName) {
+		t.Errorf("SandboxPreSpawnEnvFile() = %q, want %q", got, filepath.Join(wantTmp, PreSpawnEnvFileName))
+	}
+}
+
 // claudeArgv is the fixed head of every Claude argv - the skip-permissions flag
 // plus the inline --mcp-config that carries the Hydra control server - followed
 // by whatever the case under test adds. The MCP flag is built rather than
@@ -97,7 +127,7 @@ func TestAgentArgv(t *testing.T) {
 		{AgentTypeCodex, true, "ignored on resume", "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, c.sessionID, "")
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, c.sessionID, "", "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}
@@ -106,7 +136,7 @@ func TestAgentArgv(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false, "", ""); err == nil {
+	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false, "", "", ""); err == nil {
 		t.Error("AgentArgv with unknown agent type: expected error, got nil")
 	}
 }
@@ -137,7 +167,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 		{"fresh ignores id", false, false, "abc-123", claudeArgv()},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", c.chatMode, c.sessionID, "")
+		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", c.chatMode, c.sessionID, "", "")
 		if err != nil {
 			t.Fatalf("%s: AgentArgv error: %v", c.name, err)
 		}
@@ -146,7 +176,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, "", ""); err == nil {
+	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, "", "", ""); err == nil {
 		t.Error("chat mode for gemini: expected error, got nil")
 	}
 }
@@ -158,7 +188,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 	for _, chatMode := range []bool{false, true} {
 		for _, resume := range []bool{false, true} {
-			argv, err := AgentArgv(AgentTypeClaude, resume, "sys", "task", "opus", chatMode, "sess-1", "")
+			argv, err := AgentArgv(AgentTypeClaude, resume, "sys", "task", "opus", chatMode, "sess-1", "", "")
 			if err != nil {
 				t.Fatalf("chat=%v resume=%v: %v", chatMode, resume, err)
 			}
@@ -195,7 +225,7 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 	// then supplies the control server too - so the inline JSON must be gone,
 	// not doubled up.
 	for _, chatMode := range []bool{false, true} {
-		argv, err := AgentArgv(AgentTypeClaude, false, "sys", "task", "", chatMode, "", "/tmp/hydra-mcp-config.json")
+		argv, err := AgentArgv(AgentTypeClaude, false, "sys", "task", "", chatMode, "", "/tmp/hydra-mcp-config.json", "")
 		if err != nil {
 			t.Fatalf("chat=%v: %v", chatMode, err)
 		}
@@ -210,10 +240,14 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 			t.Errorf("chat=%v: inline server config still present alongside the strict file: %q", chatMode, argv)
 		}
 	}
+	argv, err := AgentArgv(AgentTypeClaude, false, "", "", "", false, "", "/seed/mcp.json", "user")
+	if err != nil || !slices.Contains(argv, "--setting-sources") || !slices.Contains(argv, "user") {
+		t.Fatalf("Claude setting-source isolation argv = %q, %v", argv, err)
+	}
 
 	// Only Claude takes the flag; the others are configured by seeded files.
 	for _, a := range []AgentType{AgentTypeGemini, AgentTypeCodex, AgentTypeBash} {
-		argv, err := AgentArgv(a, false, "", "task", "", false, "", "")
+		argv, err := AgentArgv(a, false, "", "task", "", false, "", "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", a, err)
 		}
@@ -225,7 +259,7 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 
 func TestAgentArgvCodexChat(t *testing.T) {
 	for _, resume := range []bool{false, true} {
-		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", true, "", "")
+		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", true, "", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,7 +286,7 @@ func TestAgentArgvModel(t *testing.T) {
 		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false, "", "")
+		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false, "", "", "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}

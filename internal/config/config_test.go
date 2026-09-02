@@ -24,10 +24,21 @@ func TestDefaultPrePromptRequiresStructuredQuestions(t *testing.T) {
 
 func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 	prompt := BuildFinalPrePrompt(Config{}, string(sandbox.AgentTypeClaude))
-	for _, command := range []string{"--- [text] <text> ---", "--- [file] <path> ---", "--- [dir] <path> ---"} {
+	for _, command := range []string{"--- <text> ---", "--- [file] <path> ---", "--- [dir] <path> ---"} {
 		if !strings.Contains(prompt, command) {
 			t.Errorf("final pre-prompt does not document %q", command)
 		}
+	}
+	if strings.Contains(prompt, "--- [text]") {
+		t.Error("final pre-prompt still asks agents to tag ordinary text headings")
+	}
+	for _, guidance := range []string{"immediately before every command", "including the first", "adjacent bounded `sed` ranges", "exact path"} {
+		if !strings.Contains(prompt, guidance) {
+			t.Errorf("final pre-prompt does not document output-section guidance %q", guidance)
+		}
+	}
+	if !strings.Contains(prompt, "`git diff`") {
+		t.Error("final pre-prompt does not tell agents that unified diffs need no marker")
 	}
 }
 
@@ -1441,12 +1452,14 @@ func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 		MaskedPaths:   []string{"~/.ssh"},
 		RestoreRO:     []string{"~/.config/git"},
 		CowPaths:      []string{"pipeline/out"},
+		InheritEnv:    []string{"ANDROID_HOME"},
 	}
 	base.Merge(SandboxConfig{
 		WritablePaths: []string{"~/.npm", "~/.gradle"}, // ~/.npm is a duplicate
 		MaskedPaths:   []string{"~/.aws"},
 		RestoreRO:     []string{"~/.config/gh"},
 		CowPaths:      []string{"~/.gradle"},
+		InheritEnv:    []string{"ANDROID_HOME", "SSH_AUTH_SOCK"},
 	})
 
 	eq := func(name string, got, want []string) {
@@ -1458,6 +1471,7 @@ func TestSandboxConfigMergeUnionsPathLists(t *testing.T) {
 	eq("MaskedPaths", base.MaskedPaths, []string{"~/.ssh", "~/.aws"})
 	eq("RestoreRO", base.RestoreRO, []string{"~/.config/git", "~/.config/gh"})
 	eq("CowPaths", base.CowPaths, []string{"pipeline/out", "~/.gradle"})
+	eq("InheritEnv", base.InheritEnv, []string{"ANDROID_HOME", "SSH_AUTH_SOCK"})
 }
 
 // TestAgentConfigMergePrePromptUnions verifies pre-prompts union across config
