@@ -76,6 +76,13 @@ batched turn.
 
 ## Conventions
 
+### No compatibility layers by default
+
+Hydra has a single user, and its client and server update together. Replace old
+behavior outright instead of adding backward-compatibility shims, legacy aliases,
+deprecation paths, or dual-format handling. Add compatibility behavior only when
+the user explicitly asks for it.
+
 ### ASCII punctuation only
 
 Do **not** use fancy Unicode punctuation in source, UI strings, or comments. Use

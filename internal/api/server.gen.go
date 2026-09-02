@@ -289,6 +289,22 @@ const (
 	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
 )
 
+// Defines values for MessageOrigin.
+const (
+	MessageOriginAgent  MessageOrigin = "agent"
+	MessageOriginButton MessageOrigin = "button"
+	MessageOriginHydra  MessageOrigin = "hydra"
+)
+
+// Defines values for MessageReason.
+const (
+	MessageReasonFixTest        MessageReason = "fix_test"
+	MessageReasonReviewComments MessageReason = "review_comments"
+	MessageReasonReviewMention  MessageReason = "review_mention"
+	MessageReasonReviewThread   MessageReason = "review_thread"
+	MessageReasonTestsFailed    MessageReason = "tests_failed"
+)
+
 // Defines values for MessagesRetractedEventType.
 const (
 	MessagesRetracted MessagesRetractedEventType = "messages_retracted"
@@ -640,8 +656,11 @@ type AgentConfig struct {
 
 // AgentInputRequest defines model for AgentInputRequest.
 type AgentInputRequest struct {
-	// Origin Why this message exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-	Origin *string `json:"origin,omitempty"`
+	// Origin Who caused a user-shaped message to be sent when it was not typed in the composer.
+	Origin *MessageOrigin `json:"origin,omitempty"`
+
+	// Reason The action or event that caused a non-composer message.
+	Reason *MessageReason `json:"reason,omitempty"`
 
 	// Text Text to send to the agent's stdin (a newline is appended automatically)
 	Text string `json:"text"`
@@ -1479,8 +1498,14 @@ type ChatQueuedMessage struct {
 	// Id The client-generated id, used to reconcile the pending bubble.
 	Id string `json:"id"`
 
-	// Origin Why this message exists when the user did not type it.
-	Origin string `json:"origin,omitempty"`
+	// Origin Who caused this message when it was not typed in the composer.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
 }
 
 // ChatQueuedMessagePayload A message the daemon is holding because a turn was running. It lives in the queue projection only; when it drains it becomes a durable user_message carrying the same id.
@@ -1488,9 +1513,15 @@ type ChatQueuedMessagePayload struct {
 	Content json.RawMessage `json:"content,omitempty"`
 	Id      string          `json:"id,omitempty"`
 
-	// Origin Why this message exists when the user did not type it.
-	Origin string `json:"origin,omitempty"`
-	Status string `json:"status,omitempty"`
+	// Origin Who caused this message when it was not typed in the composer.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
+	Status        string `json:"status,omitempty"`
 }
 
 // ChatQueuedState defines model for ChatQueuedState.
@@ -1696,11 +1727,17 @@ type ChatUserMessagePayload struct {
 	// Id The client-generated id, so a queued bubble reconciles to it.
 	Id string `json:"id,omitempty"`
 
-	// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-	Origin string `json:"origin,omitempty"`
+	// Origin Who caused this turn when it was not typed in the composer. Drives the chat's attribution marker; the agent sees only the text.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
 
 	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
 	Shell *ChatShellResult `json:"shell,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
 }
 
 // ClaudeUsageResponse defines model for ClaudeUsageResponse.
@@ -2345,6 +2382,12 @@ type MergeConflictError struct {
 
 // MergeConflictErrorError defines model for MergeConflictError.Error.
 type MergeConflictErrorError string
+
+// MessageOrigin Who caused a user-shaped message to be sent when it was not typed in the composer.
+type MessageOrigin string
+
+// MessageReason The action or event that caused a non-composer message.
+type MessageReason string
 
 // MessagesRetractedEvent defines model for MessagesRetractedEvent.
 type MessagesRetractedEvent struct {
@@ -4586,16 +4629,22 @@ type UserMessageEvent struct {
 		// Id The client-generated id, so a queued bubble reconciles to it.
 		Id string `json:"id,omitempty"`
 
-		// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-		Origin string `json:"origin,omitempty"`
+		// Origin Who caused this turn when it was not typed in the composer. Drives the chat's attribution marker; the agent sees only the text.
+		Origin MessageOrigin `json:"origin,omitempty"`
 
 		// ParentItemId The tool call this belongs under.
 		ParentItemId string `json:"parent_item_id,omitempty"`
 
+		// Reason Optional context for the button action or Hydra automation.
+		Reason MessageReason `json:"reason,omitempty"`
+
 		// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
-		Shell      *ChatShellResult `json:"shell,omitempty"`
-		Sidechain  bool             `json:"sidechain,omitempty"`
-		StopReason string           `json:"stop_reason,omitempty"`
+		Shell     *ChatShellResult `json:"shell,omitempty"`
+		Sidechain bool             `json:"sidechain,omitempty"`
+
+		// SourceAgentId The sending head when origin is "agent".
+		SourceAgentId string `json:"source_agent_id,omitempty"`
+		StopReason    string `json:"stop_reason,omitempty"`
 
 		// Usage Provider token accounting; the shape differs per provider.
 		Usage json.RawMessage `json:"usage,omitempty"`

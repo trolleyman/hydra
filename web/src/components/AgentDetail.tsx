@@ -4,7 +4,7 @@ import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
-import { ProjectDirectoryFilesystemMode, WorkspaceKind, type AgentResponse, type RepositoryBranch } from '../api'
+import { MessageOrigin, MessageReason, ProjectDirectoryFilesystemMode, WorkspaceKind, type AgentResponse, type RepositoryBranch } from '../api'
 import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, ProviderIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
@@ -1962,7 +1962,8 @@ export function AgentDetail({
     await runWithToast(
       () => api.default.sendAgentInput(projectId ?? '', agent.id, {
         text: "Fetch your MR's unresolved review comments with the `mcp__hydra__get_review_comments` tool and address them, then commit.",
-        origin: 'review_comments',
+        origin: MessageOrigin.MessageOriginButton,
+        reason: MessageReason.MessageReasonReviewComments,
       }),
       { success: 'Asked the agent to address review comments', errorPrefix: 'Failed to send' },
     )

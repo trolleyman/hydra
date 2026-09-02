@@ -8,7 +8,7 @@ import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
+import { MessageOrigin, MessageReason, type AgentResponse, type CommitInfo, type DiffFile, type DiffHunk, type DiffLine, type DiffResponse, type ReviewImageAnchor, type ReviewThread } from './api'
 import { CommitCard, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
 import { ChangeStats } from './components/ChangeStats'
 import { ChangeTypeIcon as SharedChangeTypeIcon } from './components/ChangeTypeIcon'
@@ -3291,7 +3291,10 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
     const res = await runWithToast(
-      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: mergeBaseInstruction(agent, true) }),
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, {
+        text: mergeBaseInstruction(agent, true),
+        origin: MessageOrigin.MessageOriginButton,
+      }),
       { errorPrefix: 'Failed to send fix request to agent' },
     )
     setSending(false)
@@ -3511,7 +3514,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
             text: mergeBaseInstruction(agent, false),
-            origin: 'fix_conflicts',
+            origin: MessageOrigin.MessageOriginButton,
           }),
           { errorPrefix: 'Failed to send update request to agent' },
         )
@@ -4946,7 +4949,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         await api.default.sendAgentInput(projectId, agent.id, {
           text: `Address this review comment on [${where}](${where}) (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
             + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
-          origin: 'review_thread',
+          origin: MessageOrigin.MessageOriginButton,
+          reason: MessageReason.MessageReasonReviewThread,
         })
         showSentToast('Sent the thread to the agent')
       },

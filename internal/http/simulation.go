@@ -4919,9 +4919,11 @@ func handleSimCodexChatWS(conn *safeConn) {
 
 // simQueuedMsg is one held message in the sim's stand-in chat queue.
 type simQueuedMsg struct {
-	ID      string          `json:"id"`
-	Content json.RawMessage `json:"content"`
-	Origin  string          `json:"origin,omitempty"`
+	ID            string            `json:"id"`
+	Content       json.RawMessage   `json:"content"`
+	Origin        api.MessageOrigin `json:"origin,omitempty"`
+	Reason        api.MessageReason `json:"reason,omitempty"`
+	SourceAgentID string            `json:"source_agent_id,omitempty"`
 }
 
 // The sim's cross-connection chat message queue: a process-lifetime stand-in for
@@ -4971,7 +4973,9 @@ func sendSimQueueFrame(conn *safeConn, id string) {
 	// shape the schema forbids - an empty queue is [], never null.
 	msgs := make([]api.ChatQueuedMessage, 0, len(simQueueList(id)))
 	for _, m := range simQueueList(id) {
-		msgs = append(msgs, api.ChatQueuedMessage{Id: m.ID, Content: m.Content, Origin: m.Origin})
+		msgs = append(msgs, api.ChatQueuedMessage{
+			Id: m.ID, Content: m.Content, Origin: m.Origin, Reason: m.Reason, SourceAgentId: m.SourceAgentID,
+		})
 	}
 	writeFrame(conn, api.ChatQueueFrame{Type: api.Queue, Messages: msgs})
 }

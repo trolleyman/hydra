@@ -7,7 +7,7 @@ import { PanelError } from './PanelError'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
 import { TestCaseStatus } from '../api/models/TestCaseStatus'
-import type { ArtifactLogLine, TestsFrame } from '../api'
+import { MessageOrigin, MessageReason, type ArtifactLogLine, type TestsFrame } from '../api'
 import { TONE_BADGE, verdictTone } from './badgeTones'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { CollapseSlide } from './CollapseSlide'
@@ -365,7 +365,11 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
       secondaryLabel: 'Spawn agent',
       details: { prompt },
       onConfirm: () => {
-        void runWithToast(() => api.default.sendAgentInput(projectId, agentId, { text: prompt, origin: 'fix_test' }), {
+        void runWithToast(() => api.default.sendAgentInput(projectId, agentId, {
+          text: prompt,
+          origin: MessageOrigin.MessageOriginButton,
+          reason: MessageReason.MessageReasonFixTest,
+        }), {
           success: 'Sent the test failure to the agent',
           errorPrefix: 'Failed to send to the agent',
         })

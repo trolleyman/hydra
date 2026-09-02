@@ -420,7 +420,8 @@ A queued message lives only in the checkpointed queue projection and rides in
 `state_snapshot` with its stable client-generated id, enqueue sequence and
 content. It is deliberately absent from history - the provider has not received
 a turn yet. Dequeuing removes it from the projection and emits no conversation
-event.
+event. Messages not typed in the composer also retain their `origin`, `reason`,
+and `source_agent_id` provenance fields in the queue snapshot.
 
 Draining the queue is one logical transition: append a durable `user_message`
 carrying the same client id, remove that id from the queue projection, advance

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strconv"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/api"
 )
 
 // The simulated chat's history has to page exactly like chat.Store.Before, or
@@ -103,9 +105,11 @@ func TestSimChatIncludesAttributedAgentMessage(t *testing.T) {
 			continue
 		}
 		var payload struct {
-			Origin string `json:"origin"`
+			Origin        api.MessageOrigin `json:"origin"`
+			SourceAgentID string            `json:"source_agent_id"`
 		}
-		if json.Unmarshal(ev.Payload, &payload) == nil && payload.Origin == "agent:api-tests" {
+		if json.Unmarshal(ev.Payload, &payload) == nil &&
+			payload.Origin == api.MessageOriginAgent && payload.SourceAgentID == "api-tests" {
 			return
 		}
 	}
