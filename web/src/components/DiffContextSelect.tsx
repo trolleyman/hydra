@@ -10,8 +10,8 @@ export function DiffContextSelect({
   className?: string
 }) {
   return (
-    <label className={`flex items-center justify-between gap-3 ${className}`}>
-      <span className="text-xs text-gray-700 dark:text-gray-300">Context lines:</span>
+    <label className={`flex items-center gap-2 ${className}`}>
+      <span className="text-xs text-gray-700 dark:text-gray-300">Context lines</span>
       <select
         value={value}
         onChange={(event) => onChange(parseDiffContextLines(event.target.value))}
