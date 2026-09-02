@@ -301,6 +301,10 @@ and `web/src/DiffViewer.tsx`):
   `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
   `forwardSidebarWheelToMain` (`__root.tsx`) forwards leftover sidebar wheel
   delta into `[data-main-scroll]` / `[data-inspector-scroll]`.
+- Native desktop windows put Back and Forward controls in the global top bar,
+  between the sidebar toggle and project dropdown. They follow TanStack's
+  in-window navigation history and stay disabled when no entry exists in that
+  direction; browser tabs rely on their own browser chrome instead.
 - All resizing is hand-rolled pointer/mouse drag - no split-pane library: sidebar
   width (`__root.tsx`), diff file-list width (`DiffViewer.tsx`), terminal height
   (`AgentTerminal.tsx`).
