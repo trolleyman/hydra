@@ -442,7 +442,7 @@ func (in *instance) buildSpec(spec config.PreviewScript, childPort int) (*sandbo
 		"HYDRA_PREVIEW_SOURCE="+in.runDir,
 		"HYDRA_PREVIEW_REF="+in.version.SHA,
 	)
-	env = append(env, sandbox.MiseTrustEnv(in.root, in.runDir)...)
+	env = append(env, sandbox.MiseEnv(in.root, in.runDir)...)
 
 	command := spec.Script
 	if spec.IsStrict() {

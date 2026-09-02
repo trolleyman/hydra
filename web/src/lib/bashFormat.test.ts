@@ -102,6 +102,22 @@ npm run lint'`
     )
   })
 
+  it('removes incidental indentation shared by every command after a description', () => {
+    const command = `# Inspect the files
+ rg -n cache web/src
+ sed -n '1,80p' web/src/cache.ts`
+
+    expect(formatBashForDisplay(command, 'web')).toBe(
+      "# Inspect the files\ncd web\nrg -n cache web/src\nsed -n '1,80p' web/src/cache.ts",
+    )
+  })
+
+  it('preserves indentation relative to a shared body indent', () => {
+    expect(formatBashForDisplay(' if true; then\n  echo yes\n fi')).toBe(
+      'if true; then\n echo yes\nfi',
+    )
+  })
+
   it('drops line-continuation backslashes but keeps the line breaks', () => {
     const command = `\\\nperl -pi -e 's/a/b/g' docs/screenshots.md && \\\ngrep -rn "bun" docs/screenshots.md`
     expect(formatBashForDisplay(command)).toBe(`perl -pi -e 's/a/b/g' docs/screenshots.md &&\ngrep -rn "bun" docs/screenshots.md`)
@@ -165,9 +181,9 @@ npm run lint'`
     // A subshell is one step: its `;`/`&&` join, and the `)` is never orphaned.
     ['(fuser -k 21765/tcp >/dev/null 2>&1; true)', '(fuser -k 21765/tcp >/dev/null 2>&1; true)'],
     ['(fuser -k 21765/tcp; true) && sleep 1', '(fuser -k 21765/tcp; true) &&\nsleep 1'],
-    ['echo a && (cd web; bun test) && echo b', 'echo a &&\n(cd web; bun test) &&\necho b'],
+    ['echo a && (cd web; bun test) && echo b', 'echo a &&\n(cd web; bun test) && echo b'],
     // Blocks inside one stay inline too, rather than half-formatted.
-    ['(if [ -f x ]; then echo a; fi) && echo b', '(if [ -f x ]; then echo a; fi) &&\necho b'],
+    ['(if [ -f x ]; then echo a; fi) && echo b', '(if [ -f x ]; then echo a; fi) && echo b'],
   ])('keeps a subshell on one line in %j', (command, expected) => {
     expect(formatBashForDisplay(command)).toBe(expected)
   })
@@ -186,7 +202,7 @@ npm run lint'`
 
   it('formats the shell that follows a heredoc', () => {
     expect(formatBashForDisplay('cat <<-EOF\n\tbody\n\tEOF\nnode f.ts && echo ok')).toBe(
-      'cat <<-EOF\n\tbody\n\tEOF\nnode f.ts &&\necho ok',
+      'cat <<-EOF\n\tbody\n\tEOF\nnode f.ts && echo ok',
     )
   })
 
@@ -221,7 +237,7 @@ npm run lint'`
     // An author's own indentation still wins - it is not added to.
     expect(formatBashForDisplay('{ a\n  b\n}')).toBe('{\n    a\n  b\n}')
     // A `${x}` and a `{a,b}` expansion are words, not groups.
-    expect(formatBashForDisplay('echo "${HOME}" && echo {a,b}')).toBe('echo "${HOME}" &&\necho {a,b}')
+    expect(formatBashForDisplay('echo "${HOME}" && echo {a,b}')).toBe('echo "${HOME}" && echo {a,b}')
     // The pipe belongs to the group, so it stays on the line the `}` closes.
     expect(formatBashForDisplay('{ a; b; } | head -5')).toBe('{\n    a\n    b\n} | head -5')
   })
@@ -257,7 +273,7 @@ npm run lint'`
   })
 
   it('keeps what follows a closed block on the same chain', () => {
-    expect(formatBashForDisplay('for i in 1; do echo $i; done && echo ok')).toBe('for i in 1; do\n    echo $i\ndone &&\necho ok')
+    expect(formatBashForDisplay('for i in 1; do echo $i; done && echo ok')).toBe('for i in 1; do\n    echo $i\ndone && echo ok')
   })
 
   it('leaves a keyword inside quotes alone', () => {
@@ -273,8 +289,16 @@ npm run lint'`
     ['command -v bun || true', 'command -v bun || true'],
     ['test -e optional.conf || :', 'test -e optional.conf || :'],
     ['command -v codex || true && codex --help', 'command -v codex || true &&\ncodex --help'],
-    ['command -v bun || echo missing', 'command -v bun ||\necho missing'],
+    ['command -v bun || echo missing', 'command -v bun || echo missing'],
   ])('formats conventional fallbacks in %s', (command, expected) => {
+    expect(formatBashForDisplay(command)).toBe(expected)
+  })
+
+  it.each([
+    ["run-check && echo 'finished'", "run-check && echo 'finished'"],
+    ["run-check || echo 'failed'", "run-check || echo 'failed'"],
+    ["run-check && echo 'finished' && publish", "run-check && echo 'finished' &&\npublish"],
+  ])('keeps a trailing echo attached in %s', (command, expected) => {
     expect(formatBashForDisplay(command)).toBe(expected)
   })
 

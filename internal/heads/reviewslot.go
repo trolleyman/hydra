@@ -272,7 +272,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	tmpDir := ensureHeadTmpDir(projectRoot, id)
 	cfg, _ := config.Load(projectRoot)
 	env := agentEnv(agentType, cfg.ResolveInheritedEnv(string(agentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, agentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
 	writable, readable, masked, _, net, _ := cfg.ResolveSandboxOptions(string(agentType))
@@ -319,6 +319,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		Binds:                 seed.Binds,
 		ImmutablePaths:        seed.ImmutablePaths,
 		Env:                   append(append(env, seed.Env...), egressEnv...),
+		InheritedEnv:          cfg.ResolveInheritedEnv(string(agentType)),
 		Argv:                  argv,
 		HydraBinPath:          seed.HydraBinPath,
 		EgressWrap:            egressWrap,

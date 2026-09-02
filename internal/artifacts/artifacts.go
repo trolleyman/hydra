@@ -1431,7 +1431,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	)
 	// Trust the checkout's copied mise config when the host trusts the project's,
 	// so mise-managed toolchains (go, bun, ...) resolve inside the run dir.
-	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
+	env = append(env, sandbox.MiseEnv(m.projectRoot, runDir)...)
 
 	command := spec.Script
 	if spec.IsStrict() {

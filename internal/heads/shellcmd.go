@@ -160,7 +160,7 @@ func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sa
 	home, _ := os.UserHomeDir()
 	cfg, _ := config.Load(projectRoot)
 	env := agentEnv(agentType, cfg.ResolveInheritedEnv(string(agentType)), home, "", readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktree)...)
+	env = append(env, sandbox.MiseEnv(projectRoot, worktree)...)
 	env = append(env, readPreSpawnEnv(sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, sessionID)))...)
 
 	opts := sandbox.Options{
@@ -168,6 +168,7 @@ func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sa
 		WorktreePath: worktree,
 		Home:         home,
 		Env:          env,
+		InheritedEnv: cfg.ResolveInheritedEnv(string(agentType)),
 		Argv:         []string{"bash", "-c", command},
 	}
 

@@ -227,7 +227,7 @@ func BuildSpec(opts Options) (spec *Spec, retErr error) {
 	// Optionally run the configured pre-spawn script first; it execs into Argv
 	// when it falls through. The resolved $HYDRA_ENV is persisted in this head's
 	// private temp directory so sibling sandboxed shells can reuse it.
-	env := SharedCacheEnv(RuntimeEnv(opts.Env, opts.TmpDir), opts.CacheRoot, opts.Caches)
+	env := SharedCacheEnv(RuntimeEnv(opts.Env, opts.TmpDir, opts.InheritedEnv...), opts.CacheRoot, opts.Caches)
 	if opts.HardenGUI {
 		env = withoutEnvKeys(env, "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS")
 	}

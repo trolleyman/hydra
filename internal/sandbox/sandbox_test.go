@@ -3,6 +3,7 @@ package sandbox
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -84,22 +85,24 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 		"GOBIN=/shared/go/bin",
 		"XDG_CACHE_HOME=/shared/cache",
 		"MISE_CACHE_DIR=/shared/mise-cache",
+		"MISE_INSTALL_PATH=/home/u/.local/share/mise/bootstrap/mise-2026.8.15",
 	}, hostTmp)
 	wantTmp := SandboxTempDir(hostTmp)
 	wants := map[string]string{
-		"TMPDIR":         wantTmp,
-		"TMP":            wantTmp,
-		"TEMP":           wantTmp,
-		"XDG_CACHE_HOME": filepath.Join(wantTmp, "cache"),
-		"XDG_STATE_HOME": filepath.Join(wantTmp, "state"),
-		"GOCACHE":        filepath.Join(wantTmp, "cache", "go-build"),
-		"GOMODCACHE":     filepath.Join(wantTmp, "go", "pkg", "mod"),
-		"GOPATH":         filepath.Join(wantTmp, "go"),
-		"GOBIN":          filepath.Join(wantTmp, "go", "bin"),
-		"MAGEFILE_CACHE": filepath.Join(wantTmp, "cache", "mage"),
-		"MISE_CACHE_DIR": filepath.Join(wantTmp, "cache", "mise"),
-		"MISE_DATA_DIR":  filepath.Join(wantTmp, "data", "mise"),
-		"MISE_STATE_DIR": filepath.Join(wantTmp, "state", "mise"),
+		"TMPDIR":            wantTmp,
+		"TMP":               wantTmp,
+		"TEMP":              wantTmp,
+		"XDG_CACHE_HOME":    filepath.Join(wantTmp, "cache"),
+		"XDG_STATE_HOME":    filepath.Join(wantTmp, "state"),
+		"GOCACHE":           filepath.Join(wantTmp, "cache", "go-build"),
+		"GOMODCACHE":        filepath.Join(wantTmp, "go", "pkg", "mod"),
+		"GOPATH":            filepath.Join(wantTmp, "go"),
+		"GOBIN":             filepath.Join(wantTmp, "go", "bin"),
+		"MAGEFILE_CACHE":    filepath.Join(wantTmp, "cache", "mage"),
+		"MISE_CACHE_DIR":    filepath.Join(wantTmp, "cache", "mise"),
+		"MISE_DATA_DIR":     filepath.Join(wantTmp, "data", "mise"),
+		"MISE_STATE_DIR":    filepath.Join(wantTmp, "state", "mise"),
+		"MISE_INSTALL_PATH": "/home/u/.local/share/mise/bootstrap/mise-2026.8.15",
 	}
 	for key, want := range wants {
 		prefix := key + "="
@@ -122,12 +125,47 @@ func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
 	}
 }
 
+func TestRuntimeEnvHonorsInheritedApplicationPaths(t *testing.T) {
+	hostTmp := filepath.Join(t.TempDir(), "head-tmp")
+	got := RuntimeEnv([]string{
+		"HOME=/home/u",
+		"PATH=/usr/bin",
+		"TMPDIR=/host/tmp",
+		"GOCACHE=/host/go-build",
+		"GOBIN=/host/go-bin",
+		"PLAYWRIGHT_BROWSERS_PATH=/host/playwright",
+		"MISE_DATA_DIR=/host/mise-data",
+		"MISE_SHARED_INSTALL_DIRS=/host/mise-installs",
+	}, hostTmp, "GOCACHE", "GOBIN", "PLAYWRIGHT_BROWSERS_PATH", "MISE_DATA_DIR", "MISE_SHARED_INSTALL_DIRS")
+	env := make(map[string]string)
+	for _, entry := range got {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[key] = value
+		}
+	}
+	for key, want := range map[string]string{
+		"GOCACHE":                  "/host/go-build",
+		"GOBIN":                    "/host/go-bin",
+		"PLAYWRIGHT_BROWSERS_PATH": "/host/playwright",
+		"MISE_DATA_DIR":            "/host/mise-data",
+		"MISE_SHARED_INSTALL_DIRS": "/host/mise-installs",
+	} {
+		if env[key] != want {
+			t.Errorf("%s = %q, want %q", key, env[key], want)
+		}
+	}
+	if env["TMPDIR"] != SandboxTempDir(hostTmp) {
+		t.Errorf("managed TMPDIR = %q, want private temp", env["TMPDIR"])
+	}
+	wantPath := "/host/go-bin" + string(os.PathListSeparator) + "/usr/bin"
+	if env["PATH"] != wantPath {
+		t.Errorf("PATH = %q, want inherited GOBIN prefix %q", env["PATH"], wantPath)
+	}
+}
+
 func TestPrepareSharedCachesCreatesBackingAndWorktreeLink(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "cache")
-	worktree := filepath.Join(t.TempDir(), "worktree")
-	if err := os.MkdirAll(worktree, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	worktree := cacheTestWorktree(t, "web/cache\n")
 	opts := Options{
 		WorktreePath: worktree,
 		CacheRoot:    root,
@@ -153,6 +191,120 @@ func TestPrepareSharedCachesCreatesBackingAndWorktreeLink(t *testing.T) {
 	if !slices.Contains(env, "GOCACHE="+filepath.Join(root, "go_build")) {
 		t.Fatalf("shared cache did not override private GOCACHE: %v", env)
 	}
+}
+
+func TestPrepareSharedCachesRejectsUnignoredPath(t *testing.T) {
+	worktree := cacheTestWorktree(t, "")
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"web": {Path: "web/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "is not ignored by Git") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want Git-ignore error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, "web", "cache")); !os.IsNotExist(err) {
+		t.Fatalf("unignored cache path was materialized: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesDoesNotLinkReadOnlyWorkingDirectory(t *testing.T) {
+	worktree := t.TempDir()
+	opts := Options{
+		WorktreePath:          worktree,
+		WorkingDirReadOnly:    true,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"web": {Path: "web/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, "web", "cache")); !os.IsNotExist(err) {
+		t.Fatalf("read-only cache path was materialized: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesRejectsSymlinkParent(t *testing.T) {
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(worktree, "build")); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"generated": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "parent") || !strings.Contains(err.Error(), "is a symlink") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want symlink-parent error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "cache")); !os.IsNotExist(err) {
+		t.Fatalf("cache link escaped through parent symlink: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesUpdatesHydraCacheLink(t *testing.T) {
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             cacheRoot,
+		Caches:                map[string]SharedCache{"old": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.Caches = map[string]SharedCache{"new": {Path: "build/cache"}}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.Readlink(filepath.Join(worktree, "build", "cache"))
+	if err != nil || got != filepath.Join(cacheRoot, "new") {
+		t.Fatalf("updated cache link = %q, %v", got, err)
+	}
+}
+
+func TestPrepareSharedCachesPreservesUnownedSymlink(t *testing.T) {
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(worktree, "build", "cache")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"generated": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "is not a Hydra cache link") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want unowned-link error", err)
+	}
+	if got, err := os.Readlink(link); err != nil || got != outside {
+		t.Fatalf("unowned link changed to %q, %v", got, err)
+	}
+}
+
+func cacheTestWorktree(t *testing.T, ignore string) string {
+	t.Helper()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "init", "--quiet", worktree).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".gitignore"), []byte(ignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return worktree
 }
 
 // claudeArgv is the fixed head of every Claude argv - the skip-permissions flag

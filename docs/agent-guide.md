@@ -117,7 +117,7 @@ header replaces it. A header has an inset rule
 immediately above and below its padded label, with no outer vertical margin; file
 and directory labels use the shared path tooltip treatments. Search results are
 grouped by each path their output names. A nonconsecutive jump between matches in
-gets one full-width rule across the gutter and source at the omitted-line
+one file gets one full-width rule across the gutter and source at the omitted-line
 boundary. The structural header and its rules carry `data-copy-skip`, leaving
 copied source free of presentation chrome.
 
@@ -176,6 +176,11 @@ content uses `align="left"`. `InfoTooltip` is the preset for the `i` trigger nex
 to a section heading. Diff file-list entries show their full paths with the
 shared `FilePathLabel` treatment, while directory entries use
 `DirectoryTooltip`.
+
+Source-output file headers reveal their full path only when the visible label
+wraps or clips. That tooltip keeps its vertical placement tied to the header and
+points horizontally at the cursor, so a long wrapping path does not open a box
+far away from the text being inspected.
 
 Every tooltip can be entered: the short grace period between leaving the trigger
 and entering the box keeps it open so text can be selected and links clicked.

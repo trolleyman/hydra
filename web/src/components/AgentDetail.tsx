@@ -2390,7 +2390,7 @@ export function AgentDetail({
                   with the show-diff button pinned after it (outside the
                   scroll). No hide counterpart: the diff screen's own back
                   chevron returns to the chat. */}
-              <div className="shrink-0 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60 flex items-center gap-2">
+              <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <AgentMetaRow
                     agent={agent}
@@ -2411,11 +2411,13 @@ export function AgentDetail({
                     onUpdateProjectDirectoryPermissions={updateProjectDirectoryPermissions}
                   />
                 </div>
-                <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
-                  <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
-                    <FileDiff className="w-4 h-4" />
-                  </button>
-                </Tooltip>
+                <div className="shrink-0 self-start">
+                  <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
+                    <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
+                      <FileDiff className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
               {/* No padding around the chat/terminal on mobile - it fills the
                   screen edge-to-edge; only the prompt keeps a small inset. */}

@@ -1333,6 +1333,27 @@ rg -n "NewManager" internal/cli internal/http | head -140`
     })
   })
 
+  it('keeps a guarded read numbered after a recursive search', () => {
+    const script = `sed -n '1,2p' web/src/components/Tooltip.tsx
+rg -n 'FilePathLabel' web/src -g '*.tsx'
+sed -n '1,3p' web/src/components/FilePathLabel.tsx 2>/dev/null || true`
+    const output = [
+      "import React from 'react'",
+      "import { createPortal } from 'react-dom'",
+      'web/src/components/FilePathLabel.tsx:9:export function FilePathLabel() {',
+      "import type { ReactNode } from 'react'",
+      "import { getFileIcon } from '../lib/fileIcons'",
+      '',
+    ].join('\n')
+
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((section) => section.kind)).toEqual(['view', 'matches', 'view'])
+    expect(sections?.[2]).toMatchObject({
+      kind: 'view',
+      view: { path: 'web/src/components/FilePathLabel.tsx', start: 1, end: 3 },
+    })
+  })
+
   it('uses the richest compatible JS-family grammar when source boundaries are unknown', () => {
     const script = `rg -n "extractFiles" web/src/api/*.test.ts | head -120
 sed -n '1,10p' web/src/api/uploads.test.ts

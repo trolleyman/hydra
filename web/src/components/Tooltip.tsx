@@ -59,6 +59,10 @@ export interface TooltipProps {
   /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
+  /** Show only when the marked descendant is clipped or occupies multiple lines. */
+  onlyWhenOverflowing?: boolean
+  /** Keep the vertical anchor on the trigger, but point horizontally at the cursor. */
+  anchorX?: 'trigger' | 'pointer'
   /**
    * A keyboard shortcut for this control, rendered as keycaps beside the label
    * and lowlit (see ShortcutHint). `note` is what the keys do
@@ -93,6 +97,8 @@ export function Tooltip({
   title,
   align,
   offset = 0,
+  onlyWhenOverflowing = false,
+  anchorX = 'trigger',
   shortcut,
   footnote,
 }: TooltipProps) {
@@ -124,6 +130,17 @@ export function Tooltip({
   const overTooltip = useRef(false)
   const overTrigger = useRef(false)
   const selectingTooltip = useRef(false)
+  const pointerX = useRef<number | null>(null)
+
+  const triggerOverflows = useCallback(() => {
+    if (!onlyWhenOverflowing) return true
+    const wrapper = wrapperRef.current
+    const target = wrapper?.querySelector<HTMLElement>('[data-tooltip-overflow]') ?? wrapper
+    if (!target) return false
+    const lineHeight = Number.parseFloat(getComputedStyle(target).lineHeight)
+    const wrapped = Number.isFinite(lineHeight) && target.scrollHeight > lineHeight + 1
+    return wrapped || target.scrollWidth > target.clientWidth + 1 || target.scrollHeight > target.clientHeight + 1
+  }, [onlyWhenOverflowing])
 
   const computePos = useCallback((): Position | null => {
     const el = wrapperRef.current
@@ -139,7 +156,9 @@ export function Tooltip({
 
     // Clamp horizontally so the box never spills off-screen, then shift the arrow
     // back by the same offset so it still points at the trigger.
-    const centerX = rect.left + rect.width / 2
+    const centerX = anchorX === 'pointer' && pointerX.current != null
+      ? pointerX.current
+      : rect.left + rect.width / 2
     let left = centerX
     if (left - halfWidth < clampPad) left = halfWidth + clampPad
     else if (left + halfWidth > window.innerWidth - clampPad)
@@ -177,7 +196,7 @@ export function Tooltip({
       arrowX: `calc(50% + ${arrowOffset}px)`,
       maxHeight,
     }
-  }, [side, offset])
+  }, [side, offset, anchorX])
 
   const clearTimers = useCallback(() => {
     if (showTimer.current !== null) {
@@ -199,6 +218,7 @@ export function Tooltip({
   }, [])
 
   const show = useCallback(() => {
+    if (!triggerOverflows()) return
     const p = computePos()
     if (!p) return
     setInDark(!!wrapperRef.current?.closest('.dark'))
@@ -209,7 +229,7 @@ export function Tooltip({
       fadeFrame.current = null
       setOpaque(true)
     })
-  }, [computePos])
+  }, [computePos, triggerOverflows])
 
   const beginHide = useCallback(() => {
     setOpaque(false)
@@ -245,7 +265,8 @@ export function Tooltip({
     }, 100)
   }, [beginHide, clearTimers])
 
-  const handleMouseEnter = useCallback(() => {
+  const handleMouseEnter = useCallback((e: React.MouseEvent) => {
+    pointerX.current = e.clientX
     overTrigger.current = true
     clearTimers()
     if (visible) {
@@ -254,6 +275,13 @@ export function Tooltip({
     }
     showTimer.current = window.setTimeout(show, HOVER_DELAY_MS)
   }, [clearTimers, show, visible])
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    pointerX.current = e.clientX
+    if (!visible) return
+    const p = computePos()
+    if (p) setPos((prev) => (samePos(prev, p) ? prev : p))
+  }, [computePos, visible])
 
   const handleMouseLeave = useCallback(
     (e: React.MouseEvent) => {
@@ -375,6 +403,7 @@ export function Tooltip({
       ref={wrapperRef}
       className={`inline-flex ${className ?? ''}`}
       onMouseEnter={handleMouseEnter}
+      onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onFocus={handleFocus}
       onBlur={handleBlur}
