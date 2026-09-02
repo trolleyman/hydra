@@ -548,6 +548,12 @@ body {
 
 /* Dark: One Dark, matching the palette this UI used before the Prism switch. */
 .dark .token.comment, .dark .token.prolog, .dark .token.doctype, .dark .token.cdata { color: #5c6370; }
+/* Changed words need more separation from their red/green fill when they sit
+   inside the deliberately muted comment token. A restrained mid-grey is clear
+   without the selected-text look of near-white. Keep this scoped to the word
+   mark: ordinary comments and every other syntax token retain the palette. */
+.dark .token.comment .diff-word-del,
+.dark .token.comment .diff-word-add { color: #9aa3b2; }
 .dark .token.punctuation { color: #abb2bf; }
 .dark .token.keyword, .dark .token.atrule, .dark .token.rule, .dark .token.important { color: #c678dd; }
 .dark .token.operator, .dark .token.entity, .dark .token.url { color: #56b6c2; }
