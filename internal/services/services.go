@@ -578,7 +578,7 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 		"HYDRA_PROJECT_ROOT="+root,
 		"HYDRA_SERVICE_NAME="+sv.spec.Name,
 	)
-	env = append(env, sandbox.MiseTrustEnv(root, root)...)
+	env = append(env, sandbox.MiseEnv(root, root)...)
 
 	command := sv.spec.Script
 	if sv.spec.IsStrict() {

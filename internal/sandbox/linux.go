@@ -462,7 +462,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	return &Spec{
 		Path:       path,
 		Args:       finalArgs,
-		Env:        SharedCacheEnv(RuntimeEnv(opts.Env, opts.TmpDir), opts.CacheRoot, opts.Caches),
+		Env:        SharedCacheEnv(RuntimeEnv(opts.Env, opts.TmpDir, opts.InheritedEnv...), opts.CacheRoot, opts.Caches),
 		Dir:        opts.WorktreePath,
 		ExtraFiles: extraFiles,
 		Cleanup:    cleanup,

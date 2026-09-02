@@ -353,6 +353,11 @@ type Options struct {
 
 	// Env is the environment for the sandboxed process.
 	Env []string
+	// InheritedEnv names values explicitly copied from the daemon by trusted
+	// project config. Application-specific entries override RuntimeEnv's private
+	// defaults; Hydra-managed identity, temp-root, provider, and proxy variables
+	// are rejected by config validation before reaching this point.
+	InheritedEnv []string
 	// Argv is the command to run inside the sandbox (e.g. claude --resume).
 	Argv []string
 	// HydraBinPath is the executable path visible to this sandbox. Linux uses the
@@ -488,14 +493,19 @@ func HostPreSpawnEnvFile(tmpDir string) string {
 }
 
 // RuntimeEnv returns env with platform-visible private temporary, cache, and
-// state directories. These values are Hydra-owned defaults because pointing a
-// sandbox at a shared writable compiler cache or tool-manager state creates a
-// persistence channel into later heads and host builds. A trusted pre-spawn
-// script still runs after this setup and may deliberately override them.
-func RuntimeEnv(env []string, hostTmpDir string) []string {
+// state directories. These are private defaults because pointing a sandbox at
+// shared writable compiler caches or tool-manager state creates a persistence
+// channel into later heads and host builds. Trusted config may explicitly
+// inherit an application-specific value, sandbox.cache may replace one with a
+// project cache, and pre_spawn_script may deliberately override one afterward.
+func RuntimeEnv(env []string, hostTmpDir string, inherited ...string) []string {
 	tmpDir := SandboxTempDir(hostTmpDir)
 	if tmpDir == "" {
 		return env
+	}
+	inheritedSet := make(map[string]bool, len(inherited))
+	for _, name := range inherited {
+		inheritedSet[strings.ToUpper(name)] = true
 	}
 	private := []struct {
 		key   string
@@ -520,6 +530,9 @@ func RuntimeEnv(env []string, hostTmpDir string) []string {
 		{"MISE_STATE_DIR", filepath.Join(tmpDir, "state", "mise")},
 	}
 	for _, item := range private {
+		if inheritedSet[strings.ToUpper(item.key)] && hasEnvKey(env, item.key) {
+			continue
+		}
 		prefix := item.key + "="
 		filtered := make([]string, 0, len(env)+1)
 		for _, entry := range env {
@@ -529,19 +542,22 @@ func RuntimeEnv(env []string, hostTmpDir string) []string {
 		}
 		env = append(filtered, prefix+item.value)
 	}
-	// `go install` writes commands to GOBIN. Keep that private output useful by
-	// putting it first on PATH without inheriting a host GOBIN.
+	// `go install` writes commands to GOBIN. Keep the effective private or
+	// explicitly inherited output useful by putting it first on PATH.
 	goBin := filepath.Join(tmpDir, "go", "bin")
+	if inheritedSet["GOBIN"] && hasEnvKey(env, "GOBIN") {
+		goBin = lookupEnvValue(env, "GOBIN")
+	}
 	pathValue := lookupEnvValue(env, "PATH")
 	if pathValue == "" {
 		pathValue = goBin
-	} else if !slices.Contains(filepath.SplitList(pathValue), goBin) {
+	} else if goBin != "" && !slices.Contains(filepath.SplitList(pathValue), goBin) {
 		pathValue = goBin + string(os.PathListSeparator) + pathValue
 	}
 	env = setEnvValue(env, "PATH", pathValue)
 	// Tool installations remain private, but mise may resolve already-installed
 	// host tools through its supported read-only shared-install search path.
-	if home := lookupEnvValue(env, "HOME"); home != "" {
+	if home := lookupEnvValue(env, "HOME"); home != "" && !(inheritedSet["MISE_SHARED_INSTALL_DIRS"] && hasEnvKey(env, "MISE_SHARED_INSTALL_DIRS")) {
 		env = setEnvValue(env, "MISE_SHARED_INSTALL_DIRS", filepath.Join(home, ".local", "share", "mise", "installs"))
 	}
 	return env
@@ -632,6 +648,16 @@ func lookupEnvValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func hasEnvKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func setEnvValue(env []string, key, value string) []string {

@@ -29,9 +29,11 @@ func TestBuildAgentEnvUsesAllowList(t *testing.T) {
 		"ANTHROPIC_API_KEY=claude-key",
 		"OPENAI_API_KEY=openai-key",
 		"ANDROID_HOME=/opt/android",
+		"GOCACHE=/host/go-build",
+		"PLAYWRIGHT_BROWSERS_PATH=/host/playwright",
 	}
 	got := environmentMap(buildAgentEnv(source, sandbox.AgentTypeClaude,
-		[]string{"ANDROID_HOME", "HYDRA_STATE_DIR", "HOME"},
+		[]string{"ANDROID_HOME", "GOCACHE", "PLAYWRIGHT_BROWSERS_PATH", "HYDRA_STATE_DIR", "HOME"},
 		"/home/head", "head", "Agent", "agent@example.com"))
 
 	want := map[string]string{
@@ -40,6 +42,7 @@ func TestBuildAgentEnvUsesAllowList(t *testing.T) {
 		"LANG": "C.UTF-8", "TERM": "xterm-256color", "COLORTERM": "truecolor",
 		"TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp",
 		"ANTHROPIC_API_KEY": "claude-key", "ANDROID_HOME": "/opt/android",
+		"GOCACHE": "/host/go-build", "PLAYWRIGHT_BROWSERS_PATH": "/host/playwright",
 		"GIT_AUTHOR_NAME": "Agent", "GIT_COMMITTER_NAME": "Agent",
 		"GIT_AUTHOR_EMAIL": "agent@example.com", "GIT_COMMITTER_EMAIL": "agent@example.com",
 	}

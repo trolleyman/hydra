@@ -357,25 +357,51 @@ type SandboxConfig struct {
 	PreExitScript *string `toml:"pre_exit_script"`
 }
 
-// inheritedEnvReserved contains variables whose values Hydra constructs or
-// controls for each launch. Letting config copy the daemon's value first would
-// make their meaning depend on launch mode and could bypass the egress proxy.
-var inheritedEnvReserved = map[string]bool{
-	"HOME": true, "USER": true, "LOGNAME": true, "PATH": true, "SHELL": true,
-	"LANG": true, "LC_ALL": true, "TERM": true, "COLORTERM": true,
-	"TMPDIR": true, "TMP": true, "TEMP": true,
-	"XDG_CACHE_HOME": true, "XDG_STATE_HOME": true,
-	"GOCACHE": true, "GOMODCACHE": true, "GOPATH": true, "GOBIN": true,
-	"MAGEFILE_CACHE": true, "NPM_CONFIG_CACHE": true, "AUBE_CACHE_DIR": true, "AUBE_STORE_DIR": true,
-	"PLAYWRIGHT_BROWSERS_PATH": true, "MISE_CACHE_DIR": true, "MISE_DATA_DIR": true,
-	"MISE_STATE_DIR": true, "MISE_SHARED_INSTALL_DIRS": true,
-	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
-	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
-	"CLAUDE_CONFIG_DIR": true, "CODEX_HOME": true,
-	"GEMINI_SYSTEM_MD": true, "GEMINI_WRITE_SYSTEM_MD": true,
-	"CLAUDE_CODE_NO_FLICKER": true, "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": true,
-	"MISE_TRUSTED_CONFIG_PATHS": true,
-	"HTTP_PROXY":                true, "HTTPS_PROXY": true, "ALL_PROXY": true, "NO_PROXY": true,
+// hydraManagedEnv contains variables Hydra owns through one of its launch
+// stages. Some are security boundaries; others are redirected after inherited
+// values would be applied, so accepting them in inherit_env would advertise a
+// setting that has no effect. Deliberate cache sharing belongs in sandbox.cache,
+// and deliberate per-head overrides belong in pre_spawn_script.
+var hydraManagedEnv = map[string]bool{
+	// Identity, command resolution, locale, and private temporary storage.
+	"HOME":      true,
+	"USER":      true,
+	"LOGNAME":   true,
+	"PATH":      true,
+	"SHELL":     true,
+	"LANG":      true,
+	"LC_ALL":    true,
+	"TERM":      true,
+	"COLORTERM": true,
+	"TMPDIR":    true,
+	"TMP":       true,
+	"TEMP":      true,
+
+	// Generic state roots stay private. Application-specific cache and install
+	// variables have private defaults too, but a trusted project may explicitly
+	// inherit those and override the defaults.
+	"XDG_CACHE_HOME":    true,
+	"XDG_STATE_HOME":    true,
+	"MISE_INSTALL_PATH": true,
+
+	// Trusted identity and provider runtime configuration seeded by Hydra.
+	"GIT_AUTHOR_NAME":                      true,
+	"GIT_AUTHOR_EMAIL":                     true,
+	"GIT_COMMITTER_NAME":                   true,
+	"GIT_COMMITTER_EMAIL":                  true,
+	"CLAUDE_CONFIG_DIR":                    true,
+	"CODEX_HOME":                           true,
+	"GEMINI_SYSTEM_MD":                     true,
+	"GEMINI_WRITE_SYSTEM_MD":               true,
+	"CLAUDE_CODE_NO_FLICKER":               true,
+	"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": true,
+	"MISE_TRUSTED_CONFIG_PATHS":            true,
+
+	// Network routing is part of the sandbox's egress boundary.
+	"HTTP_PROXY":  true,
+	"HTTPS_PROXY": true,
+	"ALL_PROXY":   true,
+	"NO_PROXY":    true,
 }
 
 // ValidateInheritedEnvName checks one sandbox.inherit_env entry. It is exported
@@ -392,7 +418,7 @@ func ValidateInheritedEnvName(name string) error {
 		}
 	}
 	upperName := strings.ToUpper(name)
-	if strings.HasPrefix(upperName, "HYDRA_") || inheritedEnvReserved[upperName] {
+	if strings.HasPrefix(upperName, "HYDRA_") || hydraManagedEnv[upperName] {
 		return errtrace.Errorf("environment variable %q is managed by Hydra and cannot be inherited", name)
 	}
 	return nil
