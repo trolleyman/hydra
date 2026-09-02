@@ -5,6 +5,8 @@
 import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
+import type { ApplyReviewSuggestionsRequest } from '../models/ApplyReviewSuggestionsRequest';
+import type { ApplyReviewSuggestionsResponse } from '../models/ApplyReviewSuggestionsResponse';
 import type { ApprovalDecisionRequest } from '../models/ApprovalDecisionRequest';
 import type { ApprovalListResponse } from '../models/ApprovalListResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
@@ -850,6 +852,36 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request (unlinked head, empty body, or the forge rejected it)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Apply one or more review suggestions to a head's worktree
+     * Applies the suggested replacements carried by the numbered forge comments to the head's worktree. The whole batch is validated before any file is changed; stale, missing, and overlapping suggestions are rejected together.
+     *
+     * @param projectId
+     * @param agentId
+     * @param requestBody
+     * @returns ApplyReviewSuggestionsResponse Applied.
+     * @throws ApiError
+     */
+    public applyReviewSuggestions(
+        projectId: string,
+        agentId: string,
+        requestBody: ApplyReviewSuggestionsRequest,
+    ): CancelablePromise<ApplyReviewSuggestionsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply',
+            path: {
+                'project_id': projectId,
+                'agent_id': agentId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (invalid, stale, or overlapping suggestions)`,
                 404: `Not Found`,
             },
         });

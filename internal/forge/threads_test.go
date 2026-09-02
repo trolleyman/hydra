@@ -8,11 +8,11 @@ import (
 
 func TestGithubThreads(t *testing.T) {
 	const graphql = `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
-	  {"isResolved":false,"isOutdated":false,"path":"a.go","line":12,"originalLine":12,
+	  {"isResolved":false,"isOutdated":false,"path":"a.go","line":12,"startLine":10,"originalLine":12,"originalStartLine":10,
 	   "comments":{"nodes":[
-	     {"databaseId":101,"body":"rename this","url":"https://gh/pr/7#d101","createdAt":"2026-07-28T09:00:00Z","author":{"login":"alice"}},
+	     {"databaseId":101,"body":"rename this","diffHunk":"@@ -10,3 +10,3 @@\\n a\\n-b\\n+c","url":"https://gh/pr/7#d101","createdAt":"2026-07-28T09:00:00Z","author":{"login":"alice"}},
 	     {"databaseId":102,"body":"agreed","url":"https://gh/pr/7#d102","createdAt":"2026-07-28T09:05:00Z","author":{"login":"bob"}}]}},
-	  {"isResolved":true,"isOutdated":true,"path":"b.go","line":null,"originalLine":4,
+	  {"isResolved":true,"isOutdated":true,"path":"b.go","line":null,"startLine":null,"originalLine":4,"originalStartLine":3,
 	   "comments":{"nodes":[{"databaseId":103,"body":"done","url":"https://gh/pr/7#d103","createdAt":"2026-07-28T08:00:00Z","author":{"login":"alice"}}]}},
 	  {"isResolved":false,"path":"c.go","line":1,"comments":{"nodes":[]}}]}}}}}`
 	f := &fakeRunner{response: func(cmd string) (string, error) {
@@ -36,15 +36,18 @@ func TestGithubThreads(t *testing.T) {
 	if first.ID != "101" {
 		t.Errorf("thread id = %q, want the root comment id 101", first.ID)
 	}
-	if first.Path != "a.go" || first.Line != 12 || first.Resolved {
+	if first.Path != "a.go" || first.StartLine != 10 || first.Line != 12 || first.Resolved {
 		t.Errorf("thread anchor/resolution wrong: %+v", first)
 	}
 	if len(first.Notes) != 2 || first.Notes[1].Author != "bob" {
 		t.Errorf("notes wrong: %+v", first.Notes)
 	}
+	if first.Notes[0].DiffHunk == "" {
+		t.Error("GitHub suggestion source context was dropped")
+	}
 	// An outdated thread's `line` is null; originalLine still says where it was
 	// written, which is the only thing the diff viewer can match on.
-	if second := threads[1]; second.Line != 4 || !second.Outdated || !second.Resolved {
+	if second := threads[1]; second.StartLine != 3 || second.Line != 4 || !second.Outdated || !second.Resolved {
 		t.Errorf("outdated thread = %+v, want line 4, outdated, resolved", second)
 	}
 }
@@ -85,7 +88,7 @@ func TestGithubReplyAndCommentArgv(t *testing.T) {
 func TestGitlabThreads(t *testing.T) {
 	const discussions = `[
 	  {"id":"d1","notes":[
-	    {"id":1,"body":"drop this","system":false,"resolved":false,"created_at":"2026-07-28T09:00:00Z","author":{"username":"alice"},"position":{"new_path":"a.go","new_line":12}},
+	    {"id":1,"body":"drop this","system":false,"resolved":false,"created_at":"2026-07-28T09:00:00Z","author":{"username":"alice"},"position":{"new_path":"a.go","new_line":12},"suggestions":[{"id":9,"from_line":12,"to_line":12,"appliable":true,"applied":false,"from_content":"old","to_content":"new"}]},
 	    {"id":2,"body":"ok","system":false,"resolved":false,"created_at":"2026-07-28T09:02:00Z","author":{"username":"bob"}}]},
 	  {"id":"d2","notes":[{"id":3,"body":"added 1 commit","system":true,"author":{"username":"alice"}}]},
 	  {"id":"d3","notes":[{"id":4,"body":"fixed","system":false,"resolved":true,"created_at":"2026-07-28T08:00:00Z","author":{"username":"alice"},"position":{"new_path":"b.go","new_line":3}}]}]`
@@ -111,6 +114,9 @@ func TestGitlabThreads(t *testing.T) {
 	}
 	if len(threads[0].Notes) != 2 || threads[0].Notes[0].URL != "https://gl/mr/42#note_1" {
 		t.Errorf("notes/deep link wrong: %+v", threads[0].Notes)
+	}
+	if suggestion := threads[0].Notes[0].Suggestion; suggestion == nil || suggestion.FromContent != "old" || suggestion.ToContent != "new" {
+		t.Errorf("structured suggestion was dropped: %+v", suggestion)
 	}
 	// Resolution is per-note on GitLab but is really a thread property.
 	if !threads[1].Resolved {
