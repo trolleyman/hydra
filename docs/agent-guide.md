@@ -101,8 +101,9 @@ line. When the code-line-number preference hides the command gutter, output keep
 its own intrinsic width.
 
 Source-aware output groups each file beneath its shared, sans-serif file-path
-label. Every text, file, and directory header sticks to the top of the output
-scroller until the next header replaces it. A header has an inset rule
+label. Every text, file, and directory header wraps at the panel edge like an
+ordinary output line and sticks to the top of the output scroller until the next
+header replaces it. A header has an inset rule
 immediately above and below its padded label, with no outer vertical margin; file
 and directory labels use the shared path tooltip treatments. Search results are
 grouped by each path their output names. A nonconsecutive jump between matches in

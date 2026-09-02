@@ -182,8 +182,9 @@ and `web/src/DiffViewer.tsx`):
   searches group consecutive results under the sans-serif path each row names;
   a full-width rule across the gutter and source marks each nonconsecutive jump
   within that file. Every text,
-  file, and directory header sticks to the output scroller's top until the next
-  header replaces it. Adjacent
+  file, and directory header wraps at the panel edge like an ordinary output
+  line and sticks to the output scroller's top until the next header replaces
+  it. Adjacent
   bounded reads keep their requested starts when their exact range lengths
   account for all returned lines. Adjacent bounded ranges of the same file do
   not need headings between them. When an unbounded boundary cannot otherwise

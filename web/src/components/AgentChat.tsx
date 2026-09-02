@@ -3155,20 +3155,24 @@ function ScriptOutputHeader({ header, gutter }: {
 }) {
   const label = header.kind === 'file'
     ? (
-        <Tooltip content={<FilePathLabel path={header.label} nativeTitle={false} />} align="left">
-          <FilePathLabel path={header.label} nativeTitle={false} className="font-sans" />
+        <Tooltip
+          content={<FilePathLabel path={header.label} nativeTitle={false} />}
+          align="left"
+          className="min-w-0 flex-1"
+        >
+          <FilePathLabel path={header.label} nativeTitle={false} wrap className="min-w-0 flex-1 font-sans" />
         </Tooltip>
       )
     : header.kind === 'dir'
       ? (
-          <DirectoryTooltip path={header.label}>
-            <span className="inline-flex min-w-0 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
+          <DirectoryTooltip path={header.label} className="min-w-0 flex-1">
+            <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
               <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
-              <span className="truncate">{header.label}</span>
+              <span className="min-w-0 whitespace-pre-wrap break-words">{header.label}</span>
             </span>
           </DirectoryTooltip>
         )
-      : <span className="text-stone-600 dark:text-stone-300">{header.label}</span>
+      : <span className="min-w-0 whitespace-pre-wrap break-words text-stone-600 dark:text-stone-300">{header.label}</span>
   return (
     <div
       data-copy-skip
