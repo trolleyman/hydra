@@ -292,7 +292,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 
 	conversationID := reviewConversationID(projectRoot, id, worktreePath, home, agentType)
 	resuming := conversationID != ""
-	argv, err := sandbox.AgentArgv(agentType, resuming, reviewPrompt, "", "", true, conversationID, seed.MCPConfigPath, seed.ClaudeSettingSources)
+	argv, err := sandbox.AgentArgv(agentType, resuming, reviewPrompt, "", "", "", true, conversationID, seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -332,7 +332,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		return "", errtrace.Wrap(err)
 	}
 	if agentType == sandbox.AgentTypeCodex {
-		if err := startCodexChatController(reg, nil, projectRoot, id, worktreePath, "", conversationID, ""); err != nil {
+		if err := startCodexChatController(reg, nil, projectRoot, id, worktreePath, "", "", conversationID, ""); err != nil {
 			StopSessionAndWait(reg, id, 5*time.Second)
 			return "", errtrace.Wrap(err)
 		}

@@ -30,7 +30,7 @@ import { useToastStore } from '../stores/toastStore'
 import { PRPicker } from './PRPicker'
 import { Badge } from './Badge'
 import type { ReviewRef } from '../api/models/ReviewRef'
-import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
+import { type AgentTypeOption, readEffortMap, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
 import { AGENT_MODELS, type AgentModel } from '../lib/agentModels'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
@@ -66,6 +66,15 @@ const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
   { id: 'copilot', label: 'Copilot', color: AGENT_ACCENT.copilot },
 ]
 
+const THINKING_EFFORTS = [
+  { id: '', label: 'Default', desc: 'Use the provider and model default.' },
+  { id: 'low', label: 'Low', desc: 'Faster responses with less thinking.' },
+  { id: 'medium', label: 'Medium', desc: 'Balance response time and depth.' },
+  { id: 'high', label: 'High', desc: 'Spend more time on difficult tasks.' },
+  { id: 'xhigh', label: 'Extra high', desc: 'Use extended reasoning when supported.' },
+  { id: 'max', label: 'Maximum', desc: 'Use the model\'s highest reasoning budget.' },
+]
+
 // Short label for the currently-selected model, shown next to the brand icon on
 // the picker trigger. Empty when on the CLI default (keeps the trigger to just
 // the icon in the common case).
@@ -85,13 +94,17 @@ function modelLabel(agent: AgentTypeOption, model: string): string {
 const AgentModelPicker = memo(function AgentModelPicker({
   agent,
   model,
+  effort,
   onChange,
+  onEffortChange,
   size = 'md',
   agents = AGENT_TYPES,
 }: {
   agent: AgentTypeOption
   model: string
+  effort: string
   onChange: (agent: AgentTypeOption, model: string) => void
+  onEffortChange: (effort: string) => void
   size?: 'sm' | 'md'
   agents?: typeof AGENT_TYPES
 }) {
@@ -103,7 +116,14 @@ const AgentModelPicker = memo(function AgentModelPicker({
 
   const place = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect()
-    if (r) setCoords({ left: r.left, top: r.bottom + 4 })
+    if (r) {
+      const menuHeight = 384
+      const below = r.bottom + 4
+      const top = below + menuHeight <= window.innerHeight - 8
+        ? below
+        : Math.max(8, r.top - menuHeight - 4)
+      setCoords({ left: Math.max(8, Math.min(r.left, window.innerWidth - 232)), top })
+    }
   }, [])
 
   useEffect(() => {
@@ -126,6 +146,10 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const active = AGENT_TYPES.find((a) => a.id === agent) ?? AGENT_TYPES[0]
   const orderedAgents = orderModelProviders(agents, agent)
   const label = modelLabel(agent, model)
+  const supportsEffort = agent === 'claude' || agent === 'codex'
+  const effortOption = THINKING_EFFORTS.find((option) => option.id === effort) ?? THINKING_EFFORTS[0]
+  const showEffort = supportsEffort && !!effort
+  const hasTriggerText = !!label || showEffort
   // Both sizes are h-7: the trigger sits in a row of h-7 controls either way, and
   // `sm` differs in the icon and the pill's width, not in how tall it is.
   const trigger = 'h-7'
@@ -151,15 +175,15 @@ const AgentModelPicker = memo(function AgentModelPicker({
     // `flex` so the Tooltip's inline-flex wrapper is a flex item here and can't
     // add baseline/descender space under the trigger.
     <div ref={ref} className={`relative flex ${size === 'sm' ? 'min-w-0' : 'shrink-0'}`}>
-      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className={size === 'sm' ? 'min-w-0' : 'shrink-0'}>
+      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}${showEffort ? ` · ${effortOption.label} thinking` : ''}`} className={size === 'sm' ? 'min-w-0' : 'shrink-0'}>
         <button
           ref={btnRef}
           type="button"
-          aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}`}
+          aria-label={`Agent and model: ${active.label}${label ? `, ${label}` : ''}${showEffort ? `, ${effortOption.label} thinking effort` : ''}`}
           // Measure the trigger before opening so the fixed-position menu lands in
           // the right spot on its first paint; scroll/resize keep it pinned after.
           onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-          className={`flex min-w-0 max-w-full items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : 'w-7 justify-center'} ${trigger} ${
+          className={`flex min-w-0 max-w-full items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${hasTriggerText ? 'pr-1.5' : 'w-7 justify-center'} ${trigger} ${
             open
               ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
               : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -169,6 +193,11 @@ const AgentModelPicker = memo(function AgentModelPicker({
             <AgentTypeIcon name={active.id} className={iconCls} />
           </span>
           {label && <span className="compact-spawn-model-label min-w-[2.5rem] max-w-[5rem] flex-1 truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
+          {showEffort && (
+            <span className="compact-spawn-model-label shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
+              {effortOption.label}
+            </span>
+          )}
         </button>
       </Tooltip>
       {open && coords && createPortal(
@@ -177,7 +206,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           data-portal-menu
           style={{ position: 'fixed', left: coords.left, top: coords.top }}
           onWheel={(e) => e.stopPropagation()}
-          className="z-[100] w-44 max-h-80 overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1"
+          className="z-[100] w-56 max-h-96 overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1"
         >
           {orderedAgents.map((a, i) => (
             <div key={a.id}>
@@ -188,6 +217,30 @@ const AgentModelPicker = memo(function AgentModelPicker({
               </div>
               <Row a={a.id} m={{ id: '', label: 'Default' }} />
               {AGENT_MODELS[a.id].map((m) => <Row key={m.id} a={a.id} m={m} />)}
+              {a.id === agent && supportsEffort && (
+                <div className="mx-2 mt-1 border-t border-gray-100 px-1 pb-1.5 pt-2 dark:border-gray-700">
+                  <div className="mb-1.5 text-2xs font-semibold text-gray-500 dark:text-gray-400">Thinking effort</div>
+                  <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="Thinking effort">
+                    {THINKING_EFFORTS.map((option) => (
+                      <button
+                        key={option.id || 'default'}
+                        type="button"
+                        role="radio"
+                        aria-checked={effort === option.id}
+                        onClick={() => { onEffortChange(option.id); setOpen(false) }}
+                        className={`rounded-md border px-1.5 py-1 text-3xs font-medium transition-colors cursor-pointer ${
+                          effort === option.id
+                            ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-200'
+                            : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-700/60'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-3xs leading-snug text-gray-400 dark:text-gray-500">{effortOption.desc}</p>
+                </div>
+              )}
             </div>
           ))}
         </div>,
@@ -239,6 +292,7 @@ export const SpawnForm = memo(function SpawnForm({
   // from the remembered map for the initial agent type; the picker sets agent +
   // model together, and the effect below persists the pick per agent type.
   const [model, setModel] = useState<string>(() => readModelMap()[agentType] ?? '')
+  const [effort, setEffort] = useState<string>(() => readEffortMap()[agentType] ?? '')
   // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model;
   // defaults ON when the user has never touched the toggle (only 'false' opts out).
@@ -344,6 +398,7 @@ export const SpawnForm = memo(function SpawnForm({
     if (projectDirectoryOnly && agentType !== 'claude' && agentType !== 'codex') {
       setAgentType('claude')
       setModel(readModelMap().claude ?? '')
+      setEffort(readEffortMap().claude ?? '')
     } else if (projectDirectory && agentType !== 'claude' && agentType !== 'codex') {
       setProjectDirectory(false)
     }
@@ -354,6 +409,12 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     writeLocal(StorageKeys.defaultModel, JSON.stringify({ ...readModelMap(), [agentType]: model }))
   }, [agentType, model])
+
+  useEffect(() => {
+    if (agentType === 'claude' || agentType === 'codex') {
+      writeLocal(StorageKeys.defaultEffort, JSON.stringify({ ...readEffortMap(), [agentType]: effort }))
+    }
+  }, [agentType, effort])
 
   // Load the project's branches for the base-branch selector. `defaultSelection`
   // also resets the chosen base to the repository default - done on the initial load
@@ -402,6 +463,7 @@ export const SpawnForm = memo(function SpawnForm({
     recordModelProviderUse(a)
     setAgentType(a)
     setModel(m)
+    setEffort(readEffortMap()[a] ?? '')
     onAgentTypeChange?.(a)
   }, [onAgentTypeChange])
   const handleBranchOpen = useCallback(() => {
@@ -866,6 +928,9 @@ export const SpawnForm = memo(function SpawnForm({
         // No id: the server derives one from the prompt and uniquifies it, so a
         // repeated prompt can never collide with an existing head.
         ...(model ? { model } : {}),
+        ...((agentType === 'claude' || agentType === 'codex') && effort
+          ? { effort: effort as NonNullable<SpawnAgentRequest['effort']> }
+          : {}),
         // Structured chat is available for Claude and Codex; send the choice
         // explicitly so turning the toggle off wins over the server-side
         // default-on, and a remembered value never leaks into another agent type.
@@ -1227,7 +1292,7 @@ export const SpawnForm = memo(function SpawnForm({
                     <Paperclip className="w-3 h-3" />
                   </button>
                 </Tooltip>
-                <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" agents={projectDirectoryOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
+                <AgentModelPicker agent={agentType} model={model} effort={effort} onChange={handleAgentModelChange} onEffortChange={setEffort} size="sm" agents={projectDirectoryOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
               </div>
               {renderSpawnSettings()}
               <button
@@ -1304,7 +1369,7 @@ export const SpawnForm = memo(function SpawnForm({
                     </button>
                   </Tooltip>
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
-                  <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} agents={projectDirectoryOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
+                  <AgentModelPicker agent={agentType} model={model} effort={effort} onChange={handleAgentModelChange} onEffortChange={setEffort} agents={projectDirectoryOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
                   {renderSpawnSettings()}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">

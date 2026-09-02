@@ -62,6 +62,9 @@ export const StorageKeys = {
   // spawn form seeds the next spawn of that same agent type. '' / absent = the
   // CLI's own default.
   defaultModel: 'hydra-default-model',
+  // Remembered thinking effort per supported agent type. Empty/absent leaves
+  // the choice to the provider and selected model.
+  defaultEffort: 'hydra-default-effort',
   // Most-recently selected agent providers (JSON array, most recent first).
   // The model picker keeps the active provider first, then uses this history to
   // place the providers the user returns to most often near the top.

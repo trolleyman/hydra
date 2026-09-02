@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SpawnForm } from './SpawnForm'
 import { uploadFile } from '../api/uploads'
@@ -23,6 +23,7 @@ vi.mock('../lib/branchCache', () => ({
 describe('SpawnForm desktop attachments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     URL.createObjectURL = vi.fn(() => 'blob:spawn-image')
   })
 
@@ -93,5 +94,19 @@ describe('SpawnForm desktop attachments', () => {
 
     expect(uploadFile).not.toHaveBeenCalled()
     expect(screen.queryByLabelText('Remove image1.png')).not.toBeInTheDocument()
+  })
+
+  it('selects thinking effort from the agent and model picker', async () => {
+    render(<SpawnForm projectId="proj" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Agent and model: Claude' }))
+    const effortChoices = await screen.findByRole('radiogroup', { name: 'Thinking effort' })
+    expect(effortChoices).toContainElement(screen.getByRole('radio', { name: 'Default' }))
+
+    fireEvent.click(screen.getByRole('radio', { name: 'High' }))
+
+    expect(await screen.findByRole('button', { name: 'Agent and model: Claude, High thinking effort' })).toBeInTheDocument()
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('hydra-default-effort') ?? '{}')).toEqual({ claude: 'high' }))
+    expect(screen.queryByRole('radiogroup', { name: 'Thinking effort' })).not.toBeInTheDocument()
   })
 })

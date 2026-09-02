@@ -4189,6 +4189,13 @@ components:
             spawn only; on resume it is omitted so the agent restores the model
             its transcript was saved with (and honours any in-session /model
             change). Empty/omitted inherits the CLI's own default.
+        effort:
+          type: string
+          enum: [low, medium, high, xhigh, max]
+          description: >-
+            Thinking/reasoning effort for Claude or Codex. Passed through the
+            provider's native launch or structured-chat protocol on a fresh
+            session; empty/omitted inherits the provider and model default.
         base_branch:
           type: string
           description: Base branch to create the worktree from (defaults to the repository's stable default branch)
