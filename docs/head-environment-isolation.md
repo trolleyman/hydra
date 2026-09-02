@@ -70,6 +70,12 @@ agent's environment. The explicitly unsandboxed "Regular shell" keeps the host
 environment. Test, artifact, preview, and service runners are separate because
 their config trust and credential requirements differ from a head session.
 
+On Linux, the outer `systemd-run --user` scope wrapper receives the daemon's
+`XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` so it can contact the user
+manager. Hydra restores the exact allow-listed workload environment with
+`env -i` before starting the sandbox, so those host control variables do not
+cross the head boundary.
+
 ## Implementation
 
 - `SandboxConfig.InheritEnv` merges additively across trusted config layers and

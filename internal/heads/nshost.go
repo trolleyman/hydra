@@ -192,10 +192,15 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 			sandbox.StopScope(scopeUnit) // reap the cgroup; killing systemd-run alone may not
 		}
 		spec.Cleanup()
+		launchErr := err
 		if tail := strings.TrimSpace(errTail.String()); tail != "" {
-			return nil, errtrace.Wrap(fmt.Errorf("%w; supervisor output: %s", err, tail))
+			launchErr = fmt.Errorf("%w; supervisor output: %s", err, tail)
 		}
-		return nil, errtrace.Wrap(err)
+		// Log the same composed failure returned to attach callers. The supervisor's
+		// stderr is also streamed above, but that line alone lacks the socket path
+		// and the launch context that the browser receives.
+		log.Printf("heads: namespace host launch for %s failed: %v", id, launchErr)
+		return nil, errtrace.Wrap(launchErr)
 	}
 
 	unit := ""
