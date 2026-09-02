@@ -102,6 +102,44 @@ describe('buildOutputSpans', () => {
     ])
   })
 
+  it('reads a Vitest failure report and highlights its TSX excerpt', () => {
+    const lines = [
+      '\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af',
+      ' FAIL  web/src/components/ConfigForm.test.tsx > settings > inserts a row',
+      'ReferenceError: document is not defined',
+      ' \u276f web/src/components/ConfigForm.test.tsx:8:5',
+      "      6|   it('inserts a row', () => {",
+      '      7|     render(<PathListEditor paths={[\'github.com\']} />)',
+      '       |     ^',
+      '      8|   })',
+      '\u23af\u23af\u23af\u23af[1/1]\u23af',
+    ]
+    const out = buildOutputSpans(lines)
+
+    expect(out).not.toBeNull()
+    expect(out?.map((row) => row.map((span) => span.text).join(''))).toEqual(lines)
+    expect(out?.[0].map((span) => tag(span.cls))).toEqual(['dim', 'fail', 'dim'])
+    expect(out?.[1].map((span) => [span.text, tag(span.cls)])).toEqual([
+      [' ', ''], ['FAIL', 'fail'], ['  ', ''],
+      ['web/src/components/ConfigForm.test.tsx', 'dim'], [' > ', 'dim'],
+      ['settings', ''], [' > ', 'dim'], ['inserts a row', ''],
+    ])
+    expect(out?.[2].map((span) => [span.text, tag(span.cls)])).toEqual([
+      ['ReferenceError', 'fail'], [':', 'dim'], [' document is not defined', ''],
+    ])
+    expect(out?.[5].some((span) => span.cls.includes('token tag'))).toBe(true)
+    expect(out?.[5].some((span) => span.cls.includes('token string'))).toBe(true)
+    expect(out?.[6].map((span) => tag(span.cls))).toEqual(['dim', 'fail'])
+    expect(out?.[8].map((span) => tag(span.cls))).toEqual(['dim', 'loc', 'dim'])
+  })
+
+  it('does not treat source-shaped prose as a failure excerpt by itself', () => {
+    expect(buildOutputSpans([
+      'ReferenceError: this is a heading in a document',
+      '      7| this is quoted prose',
+    ])).toBeNull()
+  })
+
   it('colours the command and verdict in a shell execution failure', () => {
     expect(spans('/usr/bin/bash: line 1: codex: command not found')).toEqual([
       [

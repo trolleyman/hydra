@@ -110,8 +110,10 @@ import { useApprovalStore } from '../stores/approvalStore'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
 import { claimOrphanResult, newToolResultLink, stashOrphanCwd, stashOrphanResult } from '../lib/toolResultLink'
 import type { ToolResultLink } from '../lib/toolResultLink'
-import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
-import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
+import { buildEditRows, hasLineNumbers, numberRows, parseEditPatch, type EditHunk, type EditRow } from '../lib/editDiff'
+import { WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
+import { diffCodeHtml } from '../lib/diffCode'
+import { CODE_LEADING, CODE_TEXT, UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS } from '../lib/diffMetrics'
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
@@ -2610,9 +2612,9 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const diff = typeof change.diff === 'string' ? change.diff : ''
         const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
         return (
-          <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
+          <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
             {showFileHeaders && (
-              <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-50 px-2.5 py-1.5 dark:border-gray-700 dark:bg-gray-800">
                 <FilePathLabel path={path} className="flex-1 font-medium" />
                 <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
               </div>
@@ -2625,48 +2627,85 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
   )
 }
 
-function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
-  const rows = useMemo(() => {
-    // Codex uses the same field for two distinct representations: updates are
-    // unified diffs, while add/delete items contain the complete file text.
-    // Only unified-diff mode has a structural prefix to remove. Inferring that
-    // from each line corrupts full files whose content begins with space/+/-.
-    const unified = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(diff)
-    // Plain loop (not flatMap with captured counters): the react-hooks
-    // immutability rule flags reassigning closure-captured `let`s during render.
-    let oldLine = kind === 'delete' ? 1 : 0
-    let newLine = kind === 'add' ? 1 : 0
-    const out: { text: string; added: boolean; removed: boolean; oldNo: string; newNo: string }[] = []
-    for (const line of diff.replace(/\n$/, '').split('\n')) {
-      const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
-      if (hunk) {
-        oldLine = Number(hunk[1])
-        newLine = Number(hunk[2])
-        continue
-      }
-      const hasAddedMarker = unified && line.startsWith('+') && !line.startsWith('+++')
-      const hasRemovedMarker = unified && line.startsWith('-') && !line.startsWith('---')
-      const added = kind === 'add' || hasAddedMarker
-      const removed = kind === 'delete' || hasRemovedMarker
-      const oldNo = added ? '' : String(oldLine++)
-      const newNo = removed ? '' : String(newLine++)
-      out.push({ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo })
+// fileChangeRows normalizes Codex's two `changes[].diff` representations into
+// the EditRow model shared by every compact Edit preview.
+// eslint-disable-next-line react-refresh/only-export-components -- exported for the focused parser test
+export function fileChangeRows(diff: string, kind: string): EditRow[] {
+  // Codex uses the same field for two distinct representations: updates are
+  // unified diffs, while add/delete items contain the complete file text.
+  const body = diff.replace(/\n$/, '')
+  if (kind === 'add') return numberRows(buildEditRows('', body))
+  if (kind === 'delete') return numberRows(buildEditRows(body, ''))
+
+  const hunks: EditHunk[] = []
+  let current: EditHunk | null = null
+  for (const line of body.split('\n')) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+    if (hunk) {
+      current = { oldStart: Number(hunk[1]), newStart: Number(hunk[2]), lines: [] }
+      hunks.push(current)
+      continue
     }
-    return out
-  }, [diff, kind])
+    if (current && /^[ +\-\\]/.test(line)) current.lines.push(line)
+  }
+  return hunks.length ? buildEditRows('', '', hunks) : buildEditRows(body, body)
+}
+
+function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
+  // Parse into the model ordinary Edit tools use. This gives Codex previews the
+  // repository diff's word pairing rather than a second approximation of it.
+  const rows = useMemo(() => fileChangeRows(diff, kind), [diff, kind])
+  return <DiffPreview rows={rows} lang={lang} />
+}
+
+// DiffPreview is the compact, non-interactive form of the repository's unified
+// diff rows. Codex multi-file edits and ordinary Edit tools both end here; the
+// repository diff shares its syntax/word/whitespace composition and metrics.
+function DiffPreview({ rows, lang, framed = false }: { rows: EditRow[]; lang: string; framed?: boolean }) {
+  const numbered = useMemo(() => hasLineNumbers(rows), [rows])
   const ws = useWhitespaceMarks()
-  const highlighted = useMemo(
-    () => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext').map((l) => markWhitespace(l, ws)),
-    [rows, lang, ws],
-  )
+  const html = useMemo(() => {
+    const oldSrc: string[] = []
+    const newSrc: string[] = []
+    const pick = rows.map((row) => {
+      if (row.type !== 'add' && row.type !== 'gap') oldSrc.push(row.content)
+      if (row.type !== 'del' && row.type !== 'gap') newSrc.push(row.content)
+      return row.type === 'del' ? oldSrc.length - 1 : newSrc.length - 1
+    })
+    const oldLines = highlightLines(oldSrc.join('\n'), lang || 'plaintext')
+    const newLines = highlightLines(newSrc.join('\n'), lang || 'plaintext')
+    return rows.map((row, i) => row.type === 'gap'
+      ? ''
+      : (row.type === 'del' ? oldLines[pick[i]] : newLines[pick[i]]) ?? '')
+  }, [rows, lang])
+
   return (
-    <div className="bg-white dark:bg-[#20201e] font-mono text-2xs leading-4">
+    <div className={`max-h-64 overflow-auto bg-white py-1.5 dark:bg-gray-900 ${framed ? 'rounded-md border border-gray-200 dark:border-gray-700' : ''}`} data-copy-code>
       {rows.map((row, i) => (
-        <div key={i} className={`grid ${kind === 'add' || kind === 'delete' ? 'grid-cols-[2.25rem_1fr]' : 'grid-cols-[2.25rem_2.25rem_1fr]'} ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
-          {kind !== 'add' && <span data-copy-skip className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>}
-          {kind !== 'delete' && <span data-copy-skip className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>}
-          <span className={`min-w-0 whitespace-pre-wrap break-words px-2 ${row.added ? 'text-emerald-900 dark:text-emerald-200' : row.removed ? 'text-red-900 dark:text-red-200' : 'text-stone-700 dark:text-stone-300'}`} dangerouslySetInnerHTML={{ __html: highlighted[i] ?? '' }} />
-        </div>
+        row.type === 'gap' ? (
+          <div key={i} className={`select-none border-y border-gray-200 px-2 font-mono text-gray-400 dark:border-gray-700 dark:text-gray-600 ${CODE_TEXT} ${CODE_LEADING}`}>...</div>
+        ) : (() => {
+          const isAdd = row.type === 'add'
+          const isDel = row.type === 'del'
+          const bg = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
+          const marker = isAdd ? '+' : isDel ? '-' : ' '
+          const markerCls = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
+          const code = diffCodeHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS, ws)
+          return (
+            <div key={i} data-copy-line className={`${UNIFIED_ROW} ${bg}`}>
+              {numbered && (
+                <div data-copy-skip className={UNIFIED_GUTTER}>
+                  <span className={UNIFIED_LINE_NUM_CLASS}>{row.oldNum ?? ''}</span>
+                  <span className={UNIFIED_LINE_NUM_CLASS}>{row.newNum ?? ''}</span>
+                </div>
+              )}
+              <span className={`${UNIFIED_MARKER} ${markerCls}`}>{marker}</span>
+              {code != null
+                ? <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: code }} />
+                : <span className={UNIFIED_CODE_CLASS}>{row.content}</span>}
+            </div>
+          )
+        })()
       ))}
     </div>
   )
@@ -3207,78 +3246,14 @@ function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
 // where in the file it sits, and 1..N numbers would be a lie. See lib/editDiff.
 //
 // A "replace all" chip surfaces the replace_all flag.
-const EDIT_NUM_CLASS = 'min-h-4 select-none text-right pr-1.5 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]'
 function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean; hunks?: EditHunk[] | null }) {
   const rows = useMemo(() => buildEditRows(oldStr, newStr, hunks), [oldStr, newStr, hunks])
-  const numbered = useMemo(() => hasLineNumbers(rows), [rows])
-  const ws = useWhitespaceMarks()
-  // Each side is highlighted as ONE run of code, not line by line, so a
-  // multi-line construct (a block comment, a template string) colourises
-  // correctly - and each side is reassembled whole (context lines belong to
-  // both) so neither is highlighted as if the other side's lines were missing.
-  const html = useMemo(() => {
-    const oldSrc: string[] = []
-    const newSrc: string[] = []
-    const pick = rows.map((r) => {
-      if (r.type !== 'add') oldSrc.push(r.content)
-      if (r.type !== 'del') newSrc.push(r.content)
-      return r.type === 'del' ? oldSrc.length - 1 : newSrc.length - 1
-    })
-    const oldLines = highlightLines(oldSrc.join('\n'), lang || 'plaintext')
-    const newLines = highlightLines(newSrc.join('\n'), lang || 'plaintext')
-    return rows.map((r, i) => (r.type === 'del' ? oldLines[pick[i]] : newLines[pick[i]]) ?? '')
-  }, [rows, lang])
   return (
     <div className="space-y-1">
       {replaceAll && (
         <div className="text-3xs font-medium text-amber-600 dark:text-amber-400/90 select-none">replace all</div>
       )}
-      <div className={`${PANEL_CLASS} max-h-64 overflow-auto py-1.5`}>
-        {/* data-copy-code / data-copy-line: grid cells are not block elements,
-            so without them a copy hands over every line run together (see
-            lib/copyMarkdown). The -/+ marker sits INSIDE the copied cell and
-            the line numbers outside it, so what you copy is a diff you can
-            paste, not a column of numbers. */}
-        <div data-copy-code className={`grid ${numbered ? 'grid-cols-[auto_auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}>
-          {rows.map((row, i) => {
-            if (row.type === 'gap') {
-              return (
-                <span key={i} className="col-span-full select-none px-2 text-stone-400 dark:text-stone-600 border-y border-stone-200/70 dark:border-white/[0.06] my-0.5">
-                  ...
-                </span>
-              )
-            }
-            const isAdd = row.type === 'add'
-            const isDel = row.type === 'del'
-            const bg = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
-            const marker = isAdd ? '+' : isDel ? '-' : ' '
-            const markerCls = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-stone-300 dark:text-stone-700'
-            // Whitespace marks last, over the word diff as well as the highlighting.
-            const code = markWhitespace(row.ranges?.length
-              ? renderWordDiffHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
-              : html[i], ws)
-            return (
-              <Fragment key={i}>
-                {numbered && (
-                  <>
-                    {/* Each number column carries its own right-hand rule, so
-                        the old and new sides are separated the same way the
-                        diff viewer's unified gutter separates them (see
-                        UNIFIED_LINE_NUM_CLASS). min-h keeps a blank line one
-                        row tall. */}
-                    <span data-copy-skip className={`${EDIT_NUM_CLASS} pl-2 ${bg}`}>{row.oldNum ?? ''}</span>
-                    <span data-copy-skip className={`${EDIT_NUM_CLASS} pl-1.5 ${bg}`}>{row.newNum ?? ''}</span>
-                  </>
-                )}
-                <span data-copy-line className={`min-w-0 whitespace-pre-wrap break-words pl-1.5 pr-2 text-stone-800 dark:text-stone-200 ${bg}`}>
-                  <span className={`select-none mr-1 ${markerCls}`}>{marker}</span>
-                  <span dangerouslySetInnerHTML={{ __html: code }} />
-                </span>
-              </Fragment>
-            )
-          })}
-        </div>
-      </div>
+      <DiffPreview rows={rows} lang={lang} framed />
     </div>
   )
 }
