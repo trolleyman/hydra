@@ -17,6 +17,14 @@ are renamed out of their live paths atomically; recursive disk reclamation then
 runs in the background. This keeps crash recovery from delaying the HTTP
 listener when a dependency-heavy checkout contains many thousands of files.
 
+`test_concurrency` limits the number of runner commands Hydra starts at once. It
+does not limit parallel workers created inside one command, so resource-heavy
+runners should cap both layers. On a development laptop, a practical low-load
+configuration is `test_concurrency = 1`, `go test -p 2`, and `vitest
+--maxWorkers=2`. Set `test_prefetch = false` to generate verdicts only when the
+tests UI or merge flow requests them; use `auto_run = "never"` for a runner that
+should run only after an explicit Refresh.
+
 The primary Merge action preflights the per-runner endpoint before opening its
 normal confirmation. This catches a missing, stale, or newly-running verdict
 before the authoritative merge gate can reject a previously confirmed action;

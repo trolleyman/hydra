@@ -103,6 +103,9 @@ const claudeShellCwdPrompt = "## The Bash shell's working directory\n" +
 const codexBashDescriptionPrompt = "## Bash tool descriptions\n" +
 	"- Start each non-trivial shell command with a concise comment describing its purpose, on its own first line: `# Inspect the usage handlers`. Hydra shows that comment as the Bash tool card description.\n"
 
+const codexSandboxCleanupPrompt = "## Recursive cleanup inside Hydra\n" +
+	"- Codex may reject raw `rm -rf` before it reaches Hydra's outer OS sandbox. To recursively remove generated scratch data, use `$HYDRA_BIN sandbox-remove -- \"$HYDRA_WORKTREE/<path>\"` or a path beneath `$TMPDIR`. The helper accepts only absolute descendants of this head's worktree or private temporary directory; it refuses either root itself and every outside path.\n"
+
 const shellSectionPrompt = "## Bash output sections\n" +
 	"- Hydra renders a constant `printf '%s\\n' '--- <text> ---'`, `printf '%s\\n' '--- [file] <path> ---'`, or `printf '%s\\n' '--- [dir] <path> ---'` as a compact ruled heading. A constant `echo` with the same marker is accepted, but `printf` is the predictable spelling across shells.\n" +
 	"- Use markers only when the commands and output cannot otherwise prove a boundary. For multiple unbounded file or directory sections, put the appropriate marker immediately before every command that produces a section, including the first. It introduces the following output; do not append it to the previous command. Keep reads bounded where possible so a provider cannot truncate away the boundary evidence.\n" +
@@ -1345,7 +1348,7 @@ func LoadInternalDefaults() Config {
 func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	parts := []string{DefaultPrePrompt, shellSectionPrompt}
 	if agentType == string(sandbox.AgentTypeCodex) {
-		parts = append(parts, codexBashDescriptionPrompt)
+		parts = append(parts, codexBashDescriptionPrompt, codexSandboxCleanupPrompt)
 	}
 	if agentType == string(sandbox.AgentTypeClaude) {
 		parts = append(parts, claudeShellCwdPrompt)

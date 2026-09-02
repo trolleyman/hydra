@@ -38,7 +38,9 @@ overriding earlier ones:
 
    These lists are additive across config layers. Missing host variables remain
    absent. Values do not appear in config or logs.
-4. Hydra adds the per-head `HYDRA_*` context and internal control variables.
+4. Hydra adds the per-head `HYDRA_*` context and internal control variables,
+   including `HYDRA_BIN`, the immutable Hydra runtime path visible inside that
+   head's sandbox.
 5. The existing `pre_spawn_script` may append deliberate `KEY=value` entries to
    `$HYDRA_ENV`; those values continue to override the baseline on spawn and
    resume.
