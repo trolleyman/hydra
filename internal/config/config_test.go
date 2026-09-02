@@ -29,6 +29,11 @@ func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
 			t.Errorf("final pre-prompt does not document %q", command)
 		}
 	}
+	for _, guidance := range []string{"immediately before every command", "including the first", "Keep file reads bounded"} {
+		if !strings.Contains(prompt, guidance) {
+			t.Errorf("final pre-prompt does not document output-section guidance %q", guidance)
+		}
+	}
 }
 
 func TestDefaultPrePromptAllowsGuardedHeadCollaboration(t *testing.T) {
