@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, fileChangeRows, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, fileChangeCounts, fileChangeRows, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
@@ -183,6 +183,12 @@ describe('Codex file-change previews', () => {
       [null, 1], [null, 2], [null, 3],
     ])
   })
+
+  it('counts the additions and deletions rendered for each change kind', () => {
+    expect(fileChangeCounts('@@ -8,2 +8,3 @@\n-old\n+new\n+extra\n context', 'update')).toEqual({ additions: 2, deletions: 1 })
+    expect(fileChangeCounts('first\nsecond\n', 'add')).toEqual({ additions: 2, deletions: 0 })
+    expect(fileChangeCounts('removed\n', 'delete')).toEqual({ additions: 0, deletions: 1 })
+  })
 })
 
 describe('sectioned search output', () => {
@@ -209,6 +215,8 @@ describe('sectioned search output', () => {
       lines: ['9:first', '10:last'],
     }])
     const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    expect(container.querySelector('[data-copy-code]')?.className).toContain('--app-font-code-step')
 
     const gutters = container.querySelectorAll('[data-copy-skip].min-h-4')
     expect(gutters).toHaveLength(2)
