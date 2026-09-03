@@ -1851,6 +1851,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{agent_id}/diff/viewed:
+    post:
+      summary: Get changes made after files were marked viewed
+      operationId: getAgentViewedDiff
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ViewedDiffRequest'
+      responses:
+        '200':
+          description: Changes after each available viewed baseline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewedDiffResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{agent_id}/diff-files:
     get:
       summary: Get the list of changed files for an agent's branch
@@ -4702,6 +4744,45 @@ components:
           type: array
           items:
             type: integer
+
+    ViewedDiffRequest:
+      type: object
+      required: [viewed_blobs]
+      properties:
+        viewed_blobs:
+          type: object
+          additionalProperties:
+            type: string
+          description: File path to the blob SHA recorded when that file was marked viewed.
+        ignore_whitespace:
+          type: boolean
+        include_uncommitted:
+          type: boolean
+        context:
+          type: integer
+          default: 3
+        full_context:
+          type: boolean
+        max_full_changes:
+          type: integer
+          default: 1000
+        max_full_lines:
+          type: integer
+          default: 6000
+
+    ViewedDiffResponse:
+      type: object
+      required: [files, failed_paths]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiffFile'
+        failed_paths:
+          type: array
+          items:
+            type: string
+          description: Paths whose saved blob is unavailable or whose delta could not be produced.
 
     ReviewCommentsResponse:
       type: object

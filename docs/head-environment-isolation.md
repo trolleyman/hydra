@@ -148,8 +148,9 @@ One shared environment builder supplies:
 - sandboxed chat `!commands`;
 - head `pre_spawn_script` and `pre_exit_script` processes.
 
-Sandboxed chat `!commands` also receive the environment persisted by the head's
-`pre_spawn_script`. MCP servers and child processes naturally inherit the
+Sandboxed chat `!commands` use the head's agent-type sandbox configuration,
+shared caches, persisted `pre_spawn_script` environment, filesystem mode, and
+Git-isolation mode. MCP servers and child processes naturally inherit the
 agent's environment. The explicitly unsandboxed "Regular shell" keeps the host
 environment. Test, artifact, preview, and service runners are separate because
 their config trust and credential requirements differ from a head session.

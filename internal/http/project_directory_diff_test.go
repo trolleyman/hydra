@@ -149,4 +149,26 @@ func TestProjectDirectoryHeadDiffUsesStartingCommitAndProjectDirectory(t *testin
 	if delta.Files[0].Additions != 1 || delta.Files[0].Deletions != 0 {
 		t.Fatalf("viewed delta = +%d -%d, want +1 -0", delta.Files[0].Additions, delta.Files[0].Deletions)
 	}
+
+	bulkResponse, err := server.GetAgentViewedDiff(context.Background(), api.GetAgentViewedDiffRequestObject{
+		ProjectId: project.ID,
+		AgentId:   "project-directory",
+		Body: &api.ViewedDiffRequest{
+			IncludeUncommitted: &includeUncommitted,
+			ViewedBlobs: map[string]string{
+				"tracked.txt": viewedBlobSHA,
+				"missing.txt": "not-a-blob",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bulk, ok := bulkResponse.(api.GetAgentViewedDiff200JSONResponse)
+	if !ok || len(bulk.Files) != 1 || bulk.Files[0].Path != "tracked.txt" {
+		t.Fatalf("bulk viewed delta response = %#v, want tracked.txt", bulkResponse)
+	}
+	if len(bulk.FailedPaths) != 1 || bulk.FailedPaths[0] != "missing.txt" {
+		t.Fatalf("bulk failed paths = %v, want missing.txt", bulk.FailedPaths)
+	}
 }

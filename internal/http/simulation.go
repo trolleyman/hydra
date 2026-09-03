@@ -3111,6 +3111,10 @@ func synthContextLine(ext string, oldN, newN int) api.DiffLine {
 	}
 }
 
+func (s *SimulationServer) GetAgentViewedDiff(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, api.ViewedDiffResponse{Files: []api.DiffFile{}, FailedPaths: []string{}})
+}
+
 func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
 	if id == "agent-1" {
 		resp := api.DiffResponse{

@@ -19,6 +19,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -492,6 +493,14 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	if useReview {
 		worktree = paths.GetReviewCheckoutDirFromProjectRoot(projectRoot, head.ID)
 	}
+	shellPolicy := heads.ShellCommandPolicy{
+		WorkingDirReadOnly: head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+		GitIsolation:       head.GitIsolation,
+	}
+	if useReview {
+		shellPolicy.WorkingDirReadOnly = true
+		shellPolicy.GitIsolation = string(sandbox.GitIsolationReadonly)
+	}
 
 	// WebSocket → session stdin (and resize control messages)
 	go func() {
@@ -528,7 +537,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				}
 			case websocket.TextMessage:
 				if chatMode {
-					s.handleChatClientMessage(conn, projectRoot, worktree, sessionID, data)
+					s.handleChatClientMessage(conn, projectRoot, worktree, sessionID, shellPolicy, data)
 					continue
 				}
 				var msg termResizeMsg

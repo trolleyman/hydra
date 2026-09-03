@@ -236,6 +236,8 @@ export type { UploadResponse } from './models/UploadResponse';
 export { UsageUpdatedEvent } from './models/UsageUpdatedEvent';
 export { UserMessageEchoedEvent } from './models/UserMessageEchoedEvent';
 export { UserMessageEvent } from './models/UserMessageEvent';
+export type { ViewedDiffRequest } from './models/ViewedDiffRequest';
+export type { ViewedDiffResponse } from './models/ViewedDiffResponse';
 export { WorkspaceKind } from './models/WorkspaceKind';
 
 export { DefaultService } from './services/DefaultService';

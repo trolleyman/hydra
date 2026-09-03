@@ -150,9 +150,11 @@ components would bust their memos on every parent render.
 - **Suggestions verify their source.** GitHub's `diffHunk` and GitLab's structured
   `from_content` carry the original lines. Hydra compares those lines with the
   head's current worktree before writing, rejects stale ranges, rejects overlaps
-  in a batch, and never follows a suggestion path outside the worktree. Applied
-  state is Hydra-local because the change is left uncommitted for the head to
-  inspect and commit.
+  in a batch, and anchors file access to the worktree so symlink changes cannot
+  redirect a write outside it. A batch stages every replacement and rollback
+  copy before its first rename, and restores earlier files if a later rename
+  fails. Applied state is Hydra-local because the change is left uncommitted for
+  the head to inspect and commit.
 - **`local_only`, not `local`.** The origin enum value is spelled that way
   because an oapi-codegen enum value colliding with another enum's (the config
   scopes) silently re-prefixes BOTH enums' Go constants.

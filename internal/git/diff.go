@@ -425,9 +425,15 @@ func HeadBlobSHAs(projectRoot, ref string, paths []string) map[string]string {
 	// viewed version available later as the left side of a blob-to-blob diff,
 	// even after the agent edits the working file again. `git hash-object` prints
 	// one sha per input path, in order, so line i maps back to paths[i].
-	for i := 0; i < len(paths); i += chunk {
-		end := min(i+chunk, len(paths))
-		args := append([]string{"hash-object", "-w", "--"}, paths[i:end]...)
+	existing := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if info, err := os.Stat(filepath.Join(projectRoot, path)); err == nil && info.Mode().IsRegular() {
+			existing = append(existing, path)
+		}
+	}
+	for i := 0; i < len(existing); i += chunk {
+		end := min(i+chunk, len(existing))
+		args := append([]string{"hash-object", "-w", "--"}, existing[i:end]...)
 		res, err := gitOutput(projectRoot, args...)
 		if err != nil {
 			continue
@@ -438,7 +444,7 @@ func HeadBlobSHAs(projectRoot, ref string, paths []string) map[string]string {
 		}
 		for j, sha := range lines {
 			if sha != "" {
-				out[paths[i+j]] = sha
+				out[existing[i+j]] = sha
 			}
 		}
 	}

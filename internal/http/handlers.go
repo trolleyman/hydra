@@ -3344,6 +3344,107 @@ func apiDiffFiles(diffFiles []git.DiffFile) []api.DiffFile {
 	return apiFiles
 }
 
+func viewedBlobDiff(diffRoot, baseline, current, path string, ignoreWhitespace bool, contextLines int, fullContext bool, maxFullChanges, maxFullLines int) ([]git.DiffFile, error) {
+	diffContext := contextLines
+	if fullContext {
+		diffContext = fullFileContext
+	}
+	diffFiles, err := git.GetBlobDiff(diffRoot, baseline, current, path, ignoreWhitespace, diffContext)
+	if err != nil || !fullContext || len(diffFiles) != 1 {
+		return diffFiles, errtrace.Wrap(err)
+	}
+	lines := 0
+	for _, hunk := range diffFiles[0].Hunks {
+		lines += len(hunk.Lines)
+	}
+	if diffFiles[0].Additions+diffFiles[0].Deletions <= maxFullChanges && lines <= maxFullLines {
+		diffFiles[0].Expanded = true
+		diffFiles[0].TotalLines = diffFiles[0].LastLineNum()
+		return diffFiles, nil
+	}
+	return errtrace.Wrap2(git.GetBlobDiff(diffRoot, baseline, current, path, ignoreWhitespace, contextLines))
+}
+
+func (s *Server) GetAgentViewedDiff(ctx context.Context, request api.GetAgentViewedDiffRequestObject) (api.GetAgentViewedDiffResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.GetAgentViewedDiff404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
+	}
+	if request.Body == nil {
+		return nil, errtrace.Errorf("viewed diff request body is required")
+	}
+
+	headRef := "HEAD"
+	if !head.UsesProjectDirectory() {
+		if head.Branch == nil {
+			return api.GetAgentViewedDiff200JSONResponse{Files: []api.DiffFile{}, FailedPaths: []string{}}, nil
+		}
+		headRef = *head.Branch
+		if resolved, ok := resolveDefaultAgentHead(projectRoot, head.Worktree, headRef); ok {
+			headRef = resolved
+		} else {
+			return api.GetAgentViewedDiff200JSONResponse{Files: []api.DiffFile{}, FailedPaths: []string{}}, nil
+		}
+	}
+	diffRoot := projectRoot
+	includeUncommitted := request.Body.IncludeUncommitted != nil && *request.Body.IncludeUncommitted
+	if includeUncommitted && head.WorkingDir() != "" {
+		diffRoot = head.WorkingDir()
+		headRef = ""
+	}
+
+	paths := make([]string, 0, len(request.Body.ViewedBlobs))
+	failed := make([]string, 0)
+	for path := range request.Body.ViewedBlobs {
+		clean := filepath.Clean(path)
+		if path == "" || filepath.IsAbs(path) || clean != path || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			failed = append(failed, path)
+			continue
+		}
+		paths = append(paths, clean)
+	}
+	sort.Strings(paths)
+	sort.Strings(failed)
+	currentBlobs := git.HeadBlobSHAs(diffRoot, headRef, paths)
+	contextLines := pointerValue(request.Body.Context, 3)
+	maxFullChanges := pointerValue(request.Body.MaxFullChanges, 1000)
+	maxFullLines := pointerValue(request.Body.MaxFullLines, 6000)
+	ignoreWhitespace := request.Body.IgnoreWhitespace != nil && *request.Body.IgnoreWhitespace
+	fullContext := request.Body.FullContext != nil && *request.Body.FullContext
+	files := make([]git.DiffFile, 0, len(paths))
+	for _, path := range paths {
+		baseline, current := request.Body.ViewedBlobs[path], currentBlobs[path]
+		if baseline == "" || current == "" {
+			failed = append(failed, path)
+			continue
+		}
+		if baseline == current {
+			continue
+		}
+		delta, err := viewedBlobDiff(diffRoot, baseline, current, path, ignoreWhitespace, contextLines, fullContext, maxFullChanges, maxFullLines)
+		if err != nil {
+			failed = append(failed, path)
+			continue
+		}
+		files = append(files, delta...)
+	}
+	return api.GetAgentViewedDiff200JSONResponse{Files: apiDiffFiles(files), FailedPaths: failed}, nil
+}
+
+func pointerValue(value *int, fallback int) int {
+	if value != nil {
+		return *value
+	}
+	return fallback
+}
+
 func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffRequestObject) (api.GetAgentDiffResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -3470,23 +3571,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 		currentBlobSHA := git.HeadBlobSHAs(diffRoot, headRef, []string{path})[path]
 		if currentBlobSHA != "" && currentBlobSHA != viewedBlobSHA {
-			diffContext := contextLines
-			if fullContext {
-				diffContext = fullFileContext
-			}
-			diffFiles, err = git.GetBlobDiff(diffRoot, viewedBlobSHA, currentBlobSHA, path, ignoreWhitespace, diffContext)
-			if err == nil && fullContext && len(diffFiles) == 1 {
-				lines := 0
-				for _, h := range diffFiles[0].Hunks {
-					lines += len(h.Lines)
-				}
-				if diffFiles[0].Additions+diffFiles[0].Deletions <= maxFullChanges && lines <= maxFullLines {
-					diffFiles[0].Expanded = true
-					diffFiles[0].TotalLines = diffFiles[0].LastLineNum()
-				} else {
-					diffFiles, err = git.GetBlobDiff(diffRoot, viewedBlobSHA, currentBlobSHA, path, ignoreWhitespace, contextLines)
-				}
-			}
+			diffFiles, err = viewedBlobDiff(diffRoot, viewedBlobSHA, currentBlobSHA, path, ignoreWhitespace, contextLines, fullContext, maxFullChanges, maxFullLines)
 		}
 	} else if fullContext {
 		// full_context expands every eligible file in one response (no per-file

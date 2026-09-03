@@ -3859,8 +3859,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // Replace only files that changed after being marked viewed with a diff from
   // their saved blob to the latest blob. The first response remains the source
-  // of truth for which files belong to the overall review; these scoped
-  // follow-ups only replace the bodies and stats of affected file cards.
+  // of truth for which files belong to the overall review; the scoped bulk
+  // response only replaces the bodies and stats of affected file cards.
   // Historical commit ranges deliberately keep their literal selected diff.
   const applyViewedDeltas = useCallback(async (d: DiffResponse, params: DiffParams): Promise<DiffResponse> => {
     const liveRange = leftSel.type === 'base' && !leftSel.sha && rightSel.type !== 'commit'
@@ -3873,21 +3873,27 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (candidates.length === 0) return d
 
     const replacements = new Map<string, DiffFile>()
-    await Promise.all(candidates.map(async (file) => {
-      try {
-        const delta = await api.default.getAgentDiff(
-          projectId ?? '', agent.id,
-          params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted,
-          file.path, viewed[file.path], contextLines, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES,
-        )
-        const updated = indexDiffFiles(delta.files).get(file.path)
-        if (updated) replacements.set(file.path, { ...updated, viewed_delta: true } as ViewedDeltaDiffFile)
-      } catch (error) {
-        // A stale/pruned blob should not hide the file. Fall back to the complete
-        // base-to-head response and leave it unviewed.
-        console.warn(`Could not load changes since ${file.path} was viewed`, error)
+    try {
+      const delta = await api.default.getAgentViewedDiff(projectId ?? '', agent.id, {
+        viewed_blobs: Object.fromEntries(candidates.map((file) => [file.path, viewed[file.path]])),
+        ignore_whitespace: params.ignoreWhitespace,
+        include_uncommitted: params.includeUncommitted,
+        context: contextLines,
+        full_context: true,
+        max_full_changes: HIDDEN_FILE_THRESHOLD,
+        max_full_lines: FULL_MAX_LINES,
+      })
+      for (const updated of delta.files) {
+        replacements.set(updated.path, { ...updated, viewed_delta: true } as ViewedDeltaDiffFile)
       }
-    }))
+      if (delta.failed_paths.length > 0) {
+        console.warn(`Could not load changes since these files were viewed: ${delta.failed_paths.join(', ')}`)
+      }
+    } catch (error) {
+      // A stale/pruned blob should not hide the file. Fall back to the complete
+      // base-to-head response and leave it unviewed.
+      console.warn('Could not load changes since files were viewed', error)
+    }
     if (replacements.size === 0) return d
     return { ...d, files: d.files.map((file) => replacements.get(file.path) ?? file) }
   }, [agent.id, contextLines, leftSel, projectId, rightSel])
