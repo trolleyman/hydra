@@ -147,6 +147,40 @@ func TestBuildSpecLinux(t *testing.T) {
 	}
 }
 
+func TestBuildSpecLinuxOnlyExposesSelectedProviderState(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	for _, dir := range []string{work, filepath.Join(home, ".claude"), filepath.Join(home, ".gemini"), filepath.Join(home, ".copilot"), filepath.Join(home, ".codex")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec, err := BuildSpec(Options{
+		AgentType:     AgentTypeCodex,
+		WorktreePath:  work,
+		Home:          home,
+		WritablePaths: append(Defaults().WritablePaths, ProviderWritablePaths(AgentTypeCodex)...),
+		ReadablePaths: Defaults().ReadablePaths,
+		Env:           []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+		Argv:          []string{"/usr/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	if codex := filepath.Join(home, ".codex"); !hasPair(spec.Args, "--bind", codex, codex) {
+		t.Fatalf("selected Codex state is not writable: %v", spec.Args)
+	}
+	for _, name := range []string{".claude", ".gemini", ".copilot"} {
+		path := filepath.Join(home, name)
+		if hasPair(spec.Args, "--bind", path, path) || hasPair(spec.Args, "--ro-bind", path, path) {
+			t.Errorf("unselected provider state %s is exposed: %v", path, spec.Args)
+		}
+	}
+}
+
 func TestBuildSpecNetworkEnabled(t *testing.T) {
 	home := t.TempDir()
 	opts := Options{Home: home, WorktreePath: home, Network: NetworkPolicy{Enabled: true}, Argv: []string{"true"}}

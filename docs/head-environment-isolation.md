@@ -14,6 +14,12 @@ the built-in or configured `readable_paths`. Linux constructs that view from an
 empty bubblewrap namespace. macOS denies file reads in Seatbelt and appends the
 same categories as explicit grants. Writable paths are inherently readable.
 
+Provider state is selected by agent type. A Codex head can use `~/.codex`, a
+Claude head can use `~/.claude` and `~/.claude.json`, and so on; it does not
+receive the other providers' credential, configuration, or session directories.
+Generic sandboxed runners receive no provider state. A sandboxed shell attached
+to a head receives that head's provider state so its environment remains useful.
+
 `masked_paths` remains a defense-in-depth deny list for known credential and
 secret locations. Masks apply after every read and write grant, so allowing a
 parent such as `~` does not expose a masked child. Project-relative masks and
@@ -100,7 +106,10 @@ rejects symlinked parent directories, and never replaces a file, directory, or
 non-Hydra symlink at the target. If a cache key changes while retaining the same
 path, Hydra updates the existing Hydra cache link. Read-only project-directory
 workspaces do not materialize path caches. Cache keys merge across config layers,
-with a later entry replacing the same key.
+with a later entry replacing the same key. Effective cache targets must be
+unique: two keys cannot redirect the same environment variable, and path targets
+cannot be equal or nested. Hydra rejects target conflicts before creating any
+backing directory or worktree link.
 
 These directories are writable shared state. They are suitable for reproducible,
 disposable caches, but not credentials, source-of-truth files, mutable executable

@@ -18,7 +18,7 @@ func TestGetRemoteStatusAndPush(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	bare("init", "-q", "--bare")
+	bare("init", "-q", "--bare", "--initial-branch=main")
 
 	dir := gitInit(t)
 	run := func(args ...string) {
@@ -173,7 +173,7 @@ func TestGetRemoteStatusAndPush(t *testing.T) {
 // end up ahead (the merge) without losing the remote's work.
 func TestPullMergesDivergedBranches(t *testing.T) {
 	remote := t.TempDir()
-	if out, err := exec.Command("git", "-C", remote, "init", "-q", "--bare").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", remote, "init", "-q", "--bare", "--initial-branch=main").CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}
 

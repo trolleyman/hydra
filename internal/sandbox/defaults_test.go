@@ -7,10 +7,38 @@ import (
 
 func TestDefaultsKeepSharedCachesAndToolchainsReadOnly(t *testing.T) {
 	writable := Defaults().WritablePaths
-	for _, path := range []string{"~/.cache", "~/.local/share/mise"} {
+	for _, path := range []string{"~/.cache", "~/.local/share/mise", "~/.claude", "~/.claude.json", "~/.gemini", "~/.copilot", "~/.codex"} {
 		if slices.Contains(writable, path) {
-			t.Errorf("shared persistence path %q is writable by default", path)
+			t.Errorf("shared or provider-specific persistence path %q is writable by default", path)
 		}
+	}
+}
+
+func TestProviderWritablePathsOnlyExposeSelectedProvider(t *testing.T) {
+	all := []string{"~/.claude", "~/.claude.json", "~/.gemini", "~/.copilot", "~/.codex"}
+	tests := []struct {
+		agent AgentType
+		want  []string
+	}{
+		{AgentTypeClaude, []string{"~/.claude", "~/.claude.json"}},
+		{AgentTypeGemini, []string{"~/.gemini"}},
+		{AgentTypeCopilot, []string{"~/.copilot"}},
+		{AgentTypeCodex, []string{"~/.codex"}},
+		{AgentTypeBash, nil},
+		{"", nil},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.agent), func(t *testing.T) {
+			got := ProviderWritablePaths(tt.agent)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("ProviderWritablePaths(%q) = %v, want %v", tt.agent, got, tt.want)
+			}
+			for _, path := range all {
+				if slices.Contains(got, path) != slices.Contains(tt.want, path) {
+					t.Errorf("provider path %q exposure does not match selected provider", path)
+				}
+			}
+		})
 	}
 }
 

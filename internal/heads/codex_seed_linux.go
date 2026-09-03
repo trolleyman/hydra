@@ -7,6 +7,7 @@ import "github.com/trolleyman/hydra/internal/sandbox"
 func prepareCodexSeedLayout(_ string, cacheDir, id, home string, res *seedResult) (codexSeedLayout, error) {
 	hostHome := configuredCodexHome(home)
 	res.Env = append(res.Env, "CODEX_HOME="+hostHome)
+	res.WritablePaths = append(res.WritablePaths, hostHome)
 	return codexSeedLayout{
 		hostHome:    hostHome,
 		runtimeHome: hostHome,

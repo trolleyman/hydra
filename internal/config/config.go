@@ -508,17 +508,65 @@ func (c Config) validateSharedCaches() error {
 				return errtrace.Wrap(fmt.Errorf("%s.sandbox.cache: %w", scope, err))
 			}
 		}
-		return nil
+		return errtrace.Wrap(validateSharedCacheTargets(scope, a.Sandbox.Cache))
 	}
 	if err := validate("defaults", c.Defaults); err != nil {
 		return errtrace.Wrap(err)
 	}
-	for name, agent := range c.Agents {
-		if err := validate(name, agent); err != nil {
+	names := make([]string, 0, len(c.Agents))
+	for name := range c.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := validate(name, c.Agents[name]); err != nil {
 			return errtrace.Wrap(err)
+		}
+		resolved := c.GetResolvedConfig(name)
+		if resolved.Sandbox != nil {
+			if err := validateSharedCacheTargets(name, resolved.Sandbox.Cache); err != nil {
+				return errtrace.Wrap(err)
+			}
 		}
 	}
 	return nil
+}
+
+func validateSharedCacheTargets(scope string, caches map[string]sandbox.SharedCache) error {
+	envs := make(map[string]string)
+	paths := make(map[string]string)
+	keys := make([]string, 0, len(caches))
+	for key := range caches {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		entry := caches[key]
+		if entry.Env != "" {
+			env := strings.ToUpper(entry.Env)
+			if previous, exists := envs[env]; exists {
+				return errtrace.Errorf("%s.sandbox.cache: caches %q and %q redirect the same environment variable %q", scope, previous, key, entry.Env)
+			}
+			envs[env] = key
+			continue
+		}
+		clean := filepath.Clean(entry.Path)
+		for previousPath, previousKey := range paths {
+			if sharedCachePathsOverlap(clean, previousPath) {
+				return errtrace.Errorf("%s.sandbox.cache: caches %q and %q use overlapping worktree paths %q and %q", scope, previousKey, key, previousPath, entry.Path)
+			}
+		}
+		paths[clean] = key
+	}
+	return nil
+}
+
+func sharedCachePathsOverlap(a, b string) bool {
+	if a == b {
+		return true
+	}
+	separator := string(filepath.Separator)
+	return strings.HasPrefix(a, b+separator) || strings.HasPrefix(b, a+separator)
 }
 
 // ServiceScript describes a per-project long-running command Hydra supervises
@@ -2262,6 +2310,9 @@ func Load(projectRoot string) (Config, error) {
 			cfg.Merge(*localCfg)
 		}
 	}
+	if err := cfg.validateSharedCaches(); err != nil {
+		return Config{}, errtrace.Wrap(err)
+	}
 
 	return cfg, nil
 }
@@ -2354,6 +2405,7 @@ func (c Config) GetResolvedConfig(agentType string) AgentConfig {
 func (c Config) ResolveSandboxOptions(agentType string) (writable, readable, masked, cow []string, net sandbox.NetworkPolicy, preSpawn string) {
 	def := sandbox.Defaults()
 	writable = append([]string{}, def.WritablePaths...)
+	writable = append(writable, sandbox.ProviderWritablePaths(sandbox.AgentType(agentType))...)
 	readable = append([]string{}, def.ReadablePaths...)
 	masked = append([]string{}, def.MaskedPaths...)
 	resolved := c.GetResolvedConfig(agentType)
@@ -4650,6 +4702,7 @@ func emitSharedCaches(out *[]string, table, header string, caches map[string]san
 			docPrefix+" Each key owns <project-state>/cache/sandbox/<key>. Set exactly one of:",
 			docPrefix+"   env  - redirect that tool's cache variable to the shared directory.",
 			docPrefix+"   path - link a worktree-relative, gitignored path to the shared directory.",
+			docPrefix+" Environment targets must be unique; path targets must not overlap or nest.",
 			docPrefix+" Cache contents are mutable shared state: use them only for disposable/rebuildable data,",
 			docPrefix+" never credentials, source-of-truth state, GOPATH/GOBIN, or per-head package installs.",
 		)

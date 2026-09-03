@@ -9,6 +9,7 @@ func prepareClaudeSeedLayout(_ string, _ string, home, _ string, res *seedResult
 	if os.Getenv("CLAUDE_CONFIG_DIR") != "" {
 		res.Env = append(res.Env, "CLAUDE_CONFIG_DIR="+configDir)
 	}
+	res.WritablePaths = append(res.WritablePaths, configDir, configuredClaudeConfigPath(home, configDir))
 	return claudeSeedLayout{
 		hostConfigDir:    configDir,
 		hostConfigPath:   configuredClaudeConfigPath(home, configDir),

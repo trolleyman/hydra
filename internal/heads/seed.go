@@ -82,12 +82,12 @@ type seedResult struct {
 // status files) into the project cache and returns the sandbox inputs to expose
 // them.
 //
-// The agent runs as the host user with the real HOME, so credentials and
-// conversation history (~/.claude, ~/.gemini, ...) come from the host (made
-// writable by the sandbox defaults). The status files stay at their real host
-// paths (made writable + pointed at via HYDRA_STATUS_PATH) so reporting works on
-// both Linux and macOS. Hooks invoke the Hydra binary through an explicit
-// read-only sandbox input.
+// The agent runs as the host user with the real HOME. Its selected provider's
+// credentials and conversation history come from provider-specific writable
+// paths; other provider directories are not exposed. The status files stay at
+// their real host paths (made writable + pointed at via HYDRA_STATUS_PATH) so
+// reporting works on both Linux and macOS. Hooks invoke the Hydra binary through
+// an explicit read-only sandbox input.
 //
 // prePrompt holds the standing Hydra instructions delivered as a system prompt.
 // Claude receives them via --append-system-prompt (see sandbox.AgentArgv), but

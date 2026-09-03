@@ -593,26 +593,46 @@ func PrepareSharedCaches(opts *Options) error {
 	defer sharedCacheMu.Unlock()
 
 	keys := make([]string, 0, len(opts.Caches))
-	cachePaths := make(map[string]string)
 	for key := range opts.Caches {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	cacheEnvs := make(map[string]string)
+	cachePaths := make(map[string]string)
 	for _, key := range keys {
 		entry := opts.Caches[key]
 		if key == "" || key == "." || key == ".." || filepath.Base(key) != key || strings.ContainsAny(key, `/\\`) {
 			return errtrace.Errorf("invalid shared cache key %q", key)
+		}
+		if (entry.Env == "") == (entry.Path == "") {
+			return errtrace.Errorf("shared cache %q must set exactly one of env or path", key)
+		}
+		if entry.Env != "" {
+			env := strings.ToUpper(entry.Env)
+			if previous, exists := cacheEnvs[env]; exists {
+				return errtrace.Errorf("shared caches %q and %q redirect the same environment variable %q", previous, key, entry.Env)
+			}
+			cacheEnvs[env] = key
 		}
 		if entry.Path != "" {
 			clean := filepath.Clean(entry.Path)
 			if filepath.IsAbs(entry.Path) || strings.Contains(entry.Path, `\`) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 				return errtrace.Errorf("shared cache %q path must stay inside the worktree", key)
 			}
-			if previous, exists := cachePaths[clean]; exists {
-				return errtrace.Errorf("shared caches %q and %q use the same worktree path %q", previous, key, entry.Path)
+			for previousPath, previousKey := range cachePaths {
+				if cachePathsOverlap(clean, previousPath) {
+					return errtrace.Errorf("shared caches %q and %q use overlapping worktree paths %q and %q", previousKey, key, previousPath, entry.Path)
+				}
 			}
 			cachePaths[clean] = key
 		}
+	}
+
+	// Validate the complete map before creating any backing directory or link.
+	// This keeps a bad multi-cache configuration from partially changing the
+	// worktree before its conflict is discovered.
+	for _, key := range keys {
+		entry := opts.Caches[key]
 		backing := filepath.Join(opts.CacheRoot, key)
 		if err := os.MkdirAll(backing, 0o755); err != nil {
 			return errtrace.Wrap(fmt.Errorf("create shared cache %q: %w", key, err))
@@ -627,6 +647,14 @@ func PrepareSharedCaches(opts *Options) error {
 		}
 	}
 	return nil
+}
+
+func cachePathsOverlap(a, b string) bool {
+	if a == b {
+		return true
+	}
+	separator := string(filepath.Separator)
+	return strings.HasPrefix(a, b+separator) || strings.HasPrefix(b, a+separator)
 }
 
 // SharedCacheEnv applies env-backed cache entries after RuntimeEnv, so explicit

@@ -26,6 +26,13 @@ the linked subsystem documents, and completed work belongs in Git history.
   to the Project settings cache list without putting directory scans on the
   normal config-read path.
 
+- [ ] **Isolate selected provider state per head on Linux.** Split Claude and
+  Codex state into copied refreshable authentication, private writable session
+  data, and read-only shared extensions, matching the macOS provider-state
+  layout without cloning large session databases or breaking resume. Provider
+  directories are already selected by agent type, so other providers remain
+  absent while this deeper same-provider isolation is designed.
+
 ## Agent and review UX
 
 - [ ] **Track session ownership explicitly.** Record the owning head on each

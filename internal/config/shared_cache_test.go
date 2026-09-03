@@ -50,3 +50,53 @@ func TestSharedCacheValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedCacheValidationRejectsConflictingEffectiveTargets(t *testing.T) {
+	for name, content := range map[string]string{
+		"duplicate env": `[sandbox.cache]
+first = { env = "GOCACHE" }
+second = { env = "GOCACHE" }
+`,
+		"nested paths": `[sandbox.cache]
+parent = { path = "build/cache" }
+child = { path = "build/cache/data" }
+`,
+		"merged duplicate env": `[sandbox.cache]
+first = { env = "GOCACHE" }
+
+[codex.sandbox.cache]
+second = { env = "GOCACHE" }
+`,
+		"merged nested paths": `[sandbox.cache]
+parent = { path = "build/cache" }
+
+[codex.sandbox.cache]
+child = { path = "build/cache/data" }
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeConfig([]byte(content)); err == nil {
+				t.Fatal("decodeConfig() unexpectedly accepted conflicting cache targets")
+			}
+		})
+	}
+}
+
+func TestSharedCacheValidationRejectsConflictsAcrossConfigLayers(t *testing.T) {
+	base, err := decodeConfig([]byte(`[sandbox.cache]
+first = { env = "GOCACHE" }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := decodeConfig([]byte(`[sandbox.cache]
+second = { env = "GOCACHE" }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.Merge(later)
+	if err := base.validateSharedCaches(); err == nil {
+		t.Fatal("merged config unexpectedly accepted conflicting cache targets")
+	}
+}

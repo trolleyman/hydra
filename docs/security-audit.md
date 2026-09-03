@@ -56,12 +56,11 @@ watch; (2) add an MCP allow-list the user controls; (3) get real egress control
   "writes nothing to stdout, so the permission flow proceeds unchanged"
   (line 278). It always exits 0. **No hook can currently deny, ask, or rewrite a
   tool call.**
-- **Credentials:** masked = ssh, aws, azure, gnupg, docker, kube, pass, netrc,
-  git-credentials, npmrc, pypirc, shell history, `~/.config`
-  (`internal/sandbox/defaults.go`). But the **agent provider dirs are writable**
-  (`~/.claude`, `~/.claude.json`, `~/.gemini`, `~/.copilot`, `~/.codex`) because
-  the agent authenticates from them, and `~/.config/gh` is **restored read-only**
-  (GitHub OAuth token).
+- **Credentials:** at audit time all agent-provider directories were writable
+  because each agent authenticated from one of them. *(Now fixed: only the
+  selected provider's state is exposed; other providers' credential,
+  configuration, and session directories are absent. Other known credential
+  locations remain masked.)*
 - **Network:** defaults to **enabled** (`ResolveSandboxOptions`,
   `config.go:587`). `AllowedHosts` was parsed from config but **never enforced** at
   audit time — `sandbox.go:36` called it "reserved for a future proxy-based host

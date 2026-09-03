@@ -1191,6 +1191,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// exec'd, closing the terminal instantly. Its resolved env vars are still
 		// shared with the shell though (preSpawnEnv, below), just not by re-running it.
 		writable, readable, masked, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
+		writable = append(writable, sandbox.ProviderWritablePaths(head.AgentType)...)
 		// Bash is an interactive shell, not an agent - no system prompt to inject,
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
 		// The bash shell shares the head's worktree, so it inherits the head's

@@ -23,11 +23,6 @@ func Defaults() DefaultConfig {
 		// the generated config.
 		WritablePaths: []string{
 			"~/.local/share/hydra/logs", // hydra's own log file (trigger-hook writes here)
-			"~/.claude",                 // claude config + conversation logs
-			"~/.claude.json",            // claude top-level config
-			"~/.gemini",                 // gemini config + creds
-			"~/.copilot",                // copilot config + creds
-			"~/.codex",                  // codex config + creds + session history
 			// NB: /tmp is deliberately NOT here. Options.TmpDir provides per-head
 			// temporary storage on both Linux and macOS; adding /tmp here would
 			// expose the host's shared scratch directory.
@@ -94,6 +89,25 @@ func Defaults() DefaultConfig {
 			"~/Library/Messages",                 // macOS user data
 			"/Volumes",                           // removable/network volumes on macOS
 		},
+	}
+}
+
+// ProviderWritablePaths returns the credential, configuration, and session
+// state needed by one selected agent runtime. Keeping these paths out of the
+// common defaults prevents a head from reading or modifying another provider's
+// authentication state.
+func ProviderWritablePaths(agentType AgentType) []string {
+	switch agentType {
+	case AgentTypeClaude:
+		return []string{"~/.claude", "~/.claude.json"}
+	case AgentTypeGemini:
+		return []string{"~/.gemini"}
+	case AgentTypeCopilot:
+		return []string{"~/.copilot"}
+	case AgentTypeCodex:
+		return []string{"~/.codex"}
+	default:
+		return nil
 	}
 }
 

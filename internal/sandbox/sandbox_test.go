@@ -292,6 +292,39 @@ func TestPrepareSharedCachesPreservesUnownedSymlink(t *testing.T) {
 	}
 }
 
+func TestPrepareSharedCachesRejectsConflictsBeforeMutation(t *testing.T) {
+	for name, caches := range map[string]map[string]SharedCache{
+		"duplicate env": {
+			"first":  {Env: "GOCACHE"},
+			"second": {Env: "GOCACHE"},
+		},
+		"nested paths": {
+			"parent": {Path: "build/cache"},
+			"child":  {Path: "build/cache/data"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cacheRoot := filepath.Join(t.TempDir(), "cache")
+			worktree := cacheTestWorktree(t, "build/cache\n")
+			opts := Options{
+				WorktreePath:          worktree,
+				CacheRoot:             cacheRoot,
+				Caches:                caches,
+				MaterializeCachePaths: true,
+			}
+			if err := PrepareSharedCaches(&opts); err == nil {
+				t.Fatal("PrepareSharedCaches() unexpectedly accepted conflicting cache targets")
+			}
+			if _, err := os.Stat(cacheRoot); !os.IsNotExist(err) {
+				t.Fatalf("cache root was mutated before conflict rejection: %v", err)
+			}
+			if _, err := os.Lstat(filepath.Join(worktree, "build")); !os.IsNotExist(err) {
+				t.Fatalf("worktree was mutated before conflict rejection: %v", err)
+			}
+		})
+	}
+}
+
 func cacheTestWorktree(t *testing.T, ignore string) string {
 	t.Helper()
 	worktree := filepath.Join(t.TempDir(), "worktree")
