@@ -636,6 +636,7 @@ type statePayload struct {
 	Prompt        string          `json:"prompt,omitempty"`
 	Activity      string          `json:"activity,omitempty"`
 	Model         string          `json:"model,omitempty"`
+	ApiKeySource  string          `json:"api_key_source,omitempty"`
 	Head          string          `json:"head,omitempty"`
 	Plan          json.RawMessage `json:"plan,omitempty"`
 	Interaction   json.RawMessage `json:"interaction,omitempty"`
@@ -699,6 +700,9 @@ func apply(p *Projection, ev Event) {
 	case "conversation_started":
 		if v.Model != "" {
 			p.Model = v.Model
+		}
+		if v.ApiKeySource != "" {
+			p.ApiKeySource = v.ApiKeySource
 		}
 		if len(v.SlashCommands) > 0 {
 			p.SlashCommands = append([]string(nil), v.SlashCommands...)

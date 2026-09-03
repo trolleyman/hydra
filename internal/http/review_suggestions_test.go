@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/forge"
 )
 
@@ -123,5 +124,34 @@ func TestApplySuggestionEditsRejectsEscapingSymlink(t *testing.T) {
 	err := applySuggestionEdits(dir, []suggestionEdit{{Number: 1, Path: "link.txt", Suggestion: parsedSuggestion{Start: 1, End: 1, Replacement: "unsafe"}}})
 	if err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("error = %v, want escaping path", err)
+	}
+}
+
+func TestApplySuggestionEditsRollsBackFailedBatch(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("old\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	renamed := 0
+	err := applySuggestionEditsWithRename(dir, []suggestionEdit{
+		{Number: 1, Path: "a.txt", Suggestion: parsedSuggestion{Start: 1, End: 1, Replacement: "new a"}},
+		{Number: 2, Path: "b.txt", Suggestion: parsedSuggestion{Start: 1, End: 1, Replacement: "new b"}},
+	}, func(root *os.Root, oldName, newName string) error {
+		renamed++
+		if renamed == 2 {
+			return errtrace.Wrap(os.ErrPermission)
+		}
+		return errtrace.Wrap(root.Rename(oldName, newName))
+	})
+	if err == nil {
+		t.Fatal("batch succeeded despite injected second rename failure")
+	}
+	for _, name := range []string{"a.txt", "b.txt"} {
+		data, readErr := os.ReadFile(filepath.Join(dir, name))
+		if readErr != nil || string(data) != "old\n" {
+			t.Fatalf("%s changed after rollback: %q, %v", name, data, readErr)
+		}
 	}
 }

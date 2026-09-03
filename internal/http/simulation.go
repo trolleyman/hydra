@@ -3111,6 +3111,10 @@ func synthContextLine(ext string, oldN, newN int) api.DiffLine {
 	}
 }
 
+func (s *SimulationServer) GetAgentViewedDiff(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, api.ViewedDiffResponse{Files: []api.DiffFile{}, FailedPaths: []string{}})
+}
+
 func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
 	if id == "agent-1" {
 		resp := api.DiffResponse{
@@ -5615,7 +5619,12 @@ var simHistoryTables = []struct {
 func simHistoryEvents() []simNorm {
 	var out []simNorm
 	add := func(events ...simNorm) { out = append(out, events...) }
-	add(simConversationStarted("claude-opus-4-8", nil).set("conversation_id", "sim-history"))
+	// This fixture represents API-key auth so its finished turns exercise the
+	// billable cost footer; the other Claude simulations stay on subscription
+	// auth and keep hiding the client-side estimate.
+	add(simConversationStarted("claude-opus-4-8", nil).
+		set("conversation_id", "sim-history").
+		set("api_key_source", "ANTHROPIC_API_KEY"))
 	add(simUser("sim-history-prompt", simAgentHistoryPrompt))
 
 	for i, t := range simHistoryTables {

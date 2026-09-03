@@ -49,6 +49,8 @@ import type { TestsResponse } from '../models/TestsResponse';
 import type { TrackRemoteResponse } from '../models/TrackRemoteResponse';
 import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
 import type { UpdateReviewCommentBody } from '../models/UpdateReviewCommentBody';
+import type { ViewedDiffRequest } from '../models/ViewedDiffRequest';
+import type { ViewedDiffResponse } from '../models/ViewedDiffResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
 export class DefaultService {
@@ -1250,6 +1252,34 @@ export class DefaultService {
                 'max_full_changes': maxFullChanges,
                 'max_full_lines': maxFullLines,
             },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get changes made after files were marked viewed
+     * @param projectId Project ID
+     * @param agentId
+     * @param requestBody
+     * @returns ViewedDiffResponse Changes after each available viewed baseline
+     * @throws ApiError
+     */
+    public getAgentViewedDiff(
+        projectId: string,
+        agentId: string,
+        requestBody: ViewedDiffRequest,
+    ): CancelablePromise<ViewedDiffResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{agent_id}/diff/viewed',
+            path: {
+                'project_id': projectId,
+                'agent_id': agentId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 404: `Not Found`,
                 500: `Internal Server Error`,

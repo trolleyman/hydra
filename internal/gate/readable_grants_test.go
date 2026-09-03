@@ -31,3 +31,24 @@ func TestGrantedReadablePathsRoundTripAndDeduplicate(t *testing.T) {
 		t.Fatalf("grant store mode = %o, want 600", info.Mode().Perm())
 	}
 }
+
+func TestGrantedReadablePathsRejectsSymlinkStore(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.json")
+	if err := os.WriteFile(outside, []byte("outside\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, GrantedReadablePathsPath(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureGrantedReadablePathsFile(dir); err == nil {
+		t.Fatal("EnsureGrantedReadablePathsFile accepted a symlink store")
+	}
+	if err := AddGrantedReadablePath(dir, "/opt/sdk"); err == nil {
+		t.Fatal("AddGrantedReadablePath accepted a symlink store")
+	}
+	data, err := os.ReadFile(outside)
+	if err != nil || string(data) != "outside\n" {
+		t.Fatalf("outside file changed: %q, %v", data, err)
+	}
+}

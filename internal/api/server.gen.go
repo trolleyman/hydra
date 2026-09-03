@@ -460,6 +460,15 @@ const (
 	ShellCwd ShellCwdEventType = "shell_cwd"
 )
 
+// Defines values for SpawnAgentRequestEffort.
+const (
+	High   SpawnAgentRequestEffort = "high"
+	Low    SpawnAgentRequestEffort = "low"
+	Max    SpawnAgentRequestEffort = "max"
+	Medium SpawnAgentRequestEffort = "medium"
+	Xhigh  SpawnAgentRequestEffort = "xhigh"
+)
+
 // Defines values for StatusResponseBackendLifetime.
 const (
 	CommandOwned StatusResponseBackendLifetime = "command-owned"
@@ -1432,6 +1441,9 @@ type ChatPlanUpdatedPayload struct {
 
 // ChatProjection Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
 type ChatProjection struct {
+	// ApiKeySource Claude's authentication source from system:init. "none" means subscription auth, so turn footers hide the client-estimated API cost. Persisted because system:init can scroll outside the newest history page.
+	ApiKeySource string `json:"api_key_source,omitempty"`
+
 	// Head The Git HEAD the commit reconciler last observed.
 	Head        string                     `json:"head,omitempty"`
 	Imports     map[string]int64           `json:"imports,omitempty"`
@@ -3755,6 +3767,9 @@ type SpawnAgentRequest struct {
 	// Cols Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
 	Cols *int `json:"cols,omitempty"`
 
+	// Effort Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+	Effort *SpawnAgentRequestEffort `json:"effort,omitempty"`
+
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
@@ -3782,6 +3797,9 @@ type SpawnAgentRequest struct {
 	// WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
 	WorkspaceKind *WorkspaceKind `json:"workspace_kind,omitempty"`
 }
+
+// SpawnAgentRequestEffort Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+type SpawnAgentRequestEffort string
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
@@ -4708,6 +4726,26 @@ type UserMessageEvent struct {
 // UserMessageEventType defines model for UserMessageEvent.Type.
 type UserMessageEventType string
 
+// ViewedDiffRequest defines model for ViewedDiffRequest.
+type ViewedDiffRequest struct {
+	Context            *int  `json:"context,omitempty"`
+	FullContext        *bool `json:"full_context,omitempty"`
+	IgnoreWhitespace   *bool `json:"ignore_whitespace,omitempty"`
+	IncludeUncommitted *bool `json:"include_uncommitted,omitempty"`
+	MaxFullChanges     *int  `json:"max_full_changes,omitempty"`
+	MaxFullLines       *int  `json:"max_full_lines,omitempty"`
+
+	// ViewedBlobs File path to the blob SHA recorded when that file was marked viewed.
+	ViewedBlobs map[string]string `json:"viewed_blobs"`
+}
+
+// ViewedDiffResponse defines model for ViewedDiffResponse.
+type ViewedDiffResponse struct {
+	// FailedPaths Paths whose saved blob is unavailable or whose delta could not be produced.
+	FailedPaths []string   `json:"failed_paths"`
+	Files       []DiffFile `json:"files"`
+}
+
 // WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
 type WorkspaceKind string
 
@@ -4997,6 +5035,9 @@ type UpdateAgentJSONRequestBody = UpdateAgentRequest
 
 // DecideAgentApprovalJSONRequestBody defines body for DecideAgentApproval for application/json ContentType.
 type DecideAgentApprovalJSONRequestBody = ApprovalDecisionRequest
+
+// GetAgentViewedDiffJSONRequestBody defines body for GetAgentViewedDiff for application/json ContentType.
+type GetAgentViewedDiffJSONRequestBody = ViewedDiffRequest
 
 // SetDownstreamBranchJSONRequestBody defines body for SetDownstreamBranch for application/json ContentType.
 type SetDownstreamBranchJSONRequestBody SetDownstreamBranchJSONBody
@@ -7371,6 +7412,9 @@ type ServerInterface interface {
 	// Get the list of changed files for an agent's branch
 	// (GET /api/projects/{project_id}/agents/{agent_id}/diff-files)
 	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentDiffFilesParams)
+	// Get changes made after files were marked viewed
+	// (POST /api/projects/{project_id}/agents/{agent_id}/diff/viewed)
+	GetAgentViewedDiff(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{agent_id}/downstream-branch)
 	SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -8244,6 +8288,40 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgentDiffFiles(w, r, projectId, agentId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentViewedDiff operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentViewedDiff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentViewedDiff(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10625,6 +10703,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff-files", wrapper.GetAgentDiffFiles)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff/viewed", wrapper.GetAgentViewedDiff)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/downstream-branch", wrapper.SetDownstreamBranch)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/generate-title", wrapper.GenerateAgentTitle)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/input", wrapper.SendAgentInput)
@@ -11358,6 +11437,43 @@ func (response GetAgentDiffFiles404JSONResponse) VisitGetAgentDiffFilesResponse(
 type GetAgentDiffFiles500JSONResponse ErrorResponse
 
 func (response GetAgentDiffFiles500JSONResponse) VisitGetAgentDiffFilesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentViewedDiffRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+	Body      *GetAgentViewedDiffJSONRequestBody
+}
+
+type GetAgentViewedDiffResponseObject interface {
+	VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error
+}
+
+type GetAgentViewedDiff200JSONResponse ViewedDiffResponse
+
+func (response GetAgentViewedDiff200JSONResponse) VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentViewedDiff404JSONResponse ErrorResponse
+
+func (response GetAgentViewedDiff404JSONResponse) VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentViewedDiff500JSONResponse ErrorResponse
+
+func (response GetAgentViewedDiff500JSONResponse) VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -13732,6 +13848,9 @@ type StrictServerInterface interface {
 	// Get the list of changed files for an agent's branch
 	// (GET /api/projects/{project_id}/agents/{agent_id}/diff-files)
 	GetAgentDiffFiles(ctx context.Context, request GetAgentDiffFilesRequestObject) (GetAgentDiffFilesResponseObject, error)
+	// Get changes made after files were marked viewed
+	// (POST /api/projects/{project_id}/agents/{agent_id}/diff/viewed)
+	GetAgentViewedDiff(ctx context.Context, request GetAgentViewedDiffRequestObject) (GetAgentViewedDiffResponseObject, error)
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{agent_id}/downstream-branch)
 	SetDownstreamBranch(ctx context.Context, request SetDownstreamBranchRequestObject) (SetDownstreamBranchResponseObject, error)
@@ -14458,6 +14577,40 @@ func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetAgentDiffFilesResponseObject); ok {
 		if err := validResponse.VisitGetAgentDiffFilesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentViewedDiff operation middleware
+func (sh *strictHandler) GetAgentViewedDiff(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request GetAgentViewedDiffRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	var body GetAgentViewedDiffJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentViewedDiff(ctx, request.(GetAgentViewedDiffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentViewedDiff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentViewedDiffResponseObject); ok {
+		if err := validResponse.VisitGetAgentViewedDiffResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -21,6 +21,10 @@ export type ChatProjection = {
     interaction?: Record<string, any>;
     model?: string;
     /**
+     * Claude's authentication source from system:init. "none" means subscription auth, so turn footers hide the client-estimated API cost. Persisted because system:init can scroll outside the newest history page.
+     */
+    api_key_source?: string;
+    /**
      * The "/" autocomplete list the provider advertised on init. Persisted so it survives a resume - the list is only emitted on the live init line, never in the transcript.
      */
     slash_commands?: Array<string>;

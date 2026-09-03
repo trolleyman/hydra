@@ -421,6 +421,7 @@ type SpawnHeadOptions struct {
 	Prompt     string            // prompt
 	AgentType  sandbox.AgentType // empty = "claude"
 	Model      string            // model alias for the CLI's --model flag; empty = CLI default
+	Effort     string            // thinking/reasoning effort; empty = provider/model default
 	BaseBranch string            // empty = repository default branch
 	// Adopt, when set, spawns this head ON an existing PR/MR instead of branching
 	// from BaseBranch: the worktree is created from the already-fetched PR head
@@ -760,7 +761,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "", seed.MCPConfigPath, seed.ClaudeSettingSources)
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.Effort, opts.ChatMode, "", seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
@@ -818,7 +819,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// conversation the chat view reconstructs. The pipe buffers it while the
 	// CLI boots.
 	if opts.ChatMode && opts.AgentType == sandbox.AgentTypeCodex {
-		if err := startCodexChatController(reg, store, projectRoot, opts.ID, worktreePath, opts.Model, "", opts.Prompt); err != nil {
+		if err := startCodexChatController(reg, store, projectRoot, opts.ID, worktreePath, opts.Model, opts.Effort, "", opts.Prompt); err != nil {
 			spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start Codex chat controller: %w", err))
 			return nil, errtrace.Wrap(err)
 		}
@@ -1431,7 +1432,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	case sandbox.AgentTypeCodex:
 		resumeSession = head.ConversationID
 	}
-	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession, seed.MCPConfigPath, seed.ClaudeSettingSources)
+	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", "", head.ChatMode, resumeSession, seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -1487,7 +1488,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		return errtrace.Wrap(err)
 	}
 	if head.ChatMode && head.AgentType == sandbox.AgentTypeCodex {
-		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, head.Model, head.ConversationID, ""); err != nil {
+		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, head.Model, "", head.ConversationID, ""); err != nil {
 			// startAgentSession has already registered the provider process. Do not
 			// leave a driverless chat session looking live: a later attach would
 			// succeed but could neither replay nor accept messages.

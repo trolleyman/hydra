@@ -589,6 +589,55 @@ describe('running turn elapsed time', () => {
     expect(await screen.findByText('(42s)')).toBeInTheDocument()
     dateNow.mockRestore()
   })
+
+  it('shows a completed turn cost from projected API-key auth', async () => {
+    renderChat()
+    await connectedComposer()
+
+    act(() => {
+      sockets[0].emit({
+        type: 'state_snapshot',
+        state: { version: 1, through: 40, api_key_source: 'ANTHROPIC_API_KEY' },
+      })
+      sockets[0].emit({
+        type: 'chat_event',
+        event: {
+          seq: 41,
+          type: 'turn_completed',
+          timestamp: '2026-08-30T12:00:00Z',
+          payload: { status: 'completed', cost_usd: 0.2145, usage: { output_tokens: 845 } },
+        },
+      })
+      sockets[0].emit({ type: 'replay_done' })
+    })
+
+    expect(await screen.findByText('$0.21')).toBeInTheDocument()
+  })
+
+  it('hides the client-estimated cost for subscription auth', async () => {
+    renderChat()
+    await connectedComposer()
+
+    act(() => {
+      sockets[0].emit({
+        type: 'state_snapshot',
+        state: { version: 1, through: 40, api_key_source: 'none' },
+      })
+      sockets[0].emit({
+        type: 'chat_event',
+        event: {
+          seq: 41,
+          type: 'turn_completed',
+          timestamp: '2026-08-30T12:00:00Z',
+          payload: { status: 'completed', cost_usd: 0.2145, usage: { output_tokens: 845 } },
+        },
+      })
+      sockets[0].emit({ type: 'replay_done' })
+    })
+
+    await screen.findByText(/845 tokens/)
+    expect(screen.queryByText('$0.21')).not.toBeInTheDocument()
+  })
 })
 
 describe('question answer status', () => {

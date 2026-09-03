@@ -197,7 +197,7 @@ export { SessionResumedEvent } from './models/SessionResumedEvent';
 export type { SetProjectHiddenRequest } from './models/SetProjectHiddenRequest';
 export type { SetProjectIconRequest } from './models/SetProjectIconRequest';
 export { ShellCwdEvent } from './models/ShellCwdEvent';
-export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
+export { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export { StatusResponse } from './models/StatusResponse';
 export { SubagentCompletedEvent } from './models/SubagentCompletedEvent';
 export { SubagentStartedEvent } from './models/SubagentStartedEvent';
@@ -236,6 +236,8 @@ export type { UploadResponse } from './models/UploadResponse';
 export { UsageUpdatedEvent } from './models/UsageUpdatedEvent';
 export { UserMessageEchoedEvent } from './models/UserMessageEchoedEvent';
 export { UserMessageEvent } from './models/UserMessageEvent';
+export type { ViewedDiffRequest } from './models/ViewedDiffRequest';
+export type { ViewedDiffResponse } from './models/ViewedDiffResponse';
 export { WorkspaceKind } from './models/WorkspaceKind';
 
 export { DefaultService } from './services/DefaultService';

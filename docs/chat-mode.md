@@ -144,7 +144,10 @@ is what makes reconnect, recovery and multi-attach safe.
 ```
 
 It holds plan entries, the sub-agent graph, the active turn, any outstanding
-interaction, model, usage totals, queued messages and the observed Git head.
+interaction, model, authentication source, usage totals, queued messages and
+the observed Git head. The authentication source keeps Claude API-key cost
+footers accurate when the original `system:init` event is older than the newest
+history page.
 Complete messages, tool output, reasoning and sub-agent transcripts stay in the
 paged log: a snapshot may reference their item ids but does not grow with the
 conversation. The checkpoint is replaced atomically (temp file plus rename) at
@@ -186,6 +189,13 @@ to `conversation_started`, assistant content blocks to `assistant_message` /
 to `interaction_requested`, partial `stream_event` lines to
 `assistant_delta`/`reasoning_delta` and `usage_updated`.
 
+Claude's final `result` line carries `total_cost_usd`, a client-side estimate
+for the whole user turn. Hydra shows it in the turn footer when `system:init`
+reports API-key authentication. Subscription auth reports `apiKeySource` as
+`none`; the same estimate is not an amount billed for that turn, so Hydra hides
+it. Both values are normalized and persisted in the projection so reconnecting
+does not depend on the initial event remaining in the latest history window.
+
 Some lines produce nothing on purpose. The CLI's internal placeholders - the
 resume nudge and its synthetic reply, the note it logs when it downscales an
 image - are dropped by `claudestream.IsHiddenChatMessage` before normalization,
@@ -209,6 +219,13 @@ so a head that ran unwatched - or predates the event log - still backfills.
 Claude keeps its stream-json `set_model` control request, issued through the
 same registry operation Codex's model selection uses.
 
+The agent and model picker's **Thinking effort** choice is shared by Claude and Codex
+and remembered separately for each provider. `Default` omits the API field so
+the selected provider and model keep their own default. A fresh Claude session
+receives `--effort`; a fresh terminal-mode Codex session receives
+`model_reasoning_effort` through its config override. Resume does not reapply
+either launch override, so the saved conversation remains authoritative.
+
 ## The Codex driver
 
 For a fresh head the controller launches `codex app-server --listen stdio://`
@@ -228,6 +245,9 @@ explicitly selected the selector reads `Default`: an omitted app-server model
 deliberately uses the user's own Codex configuration, and the thread lifecycle
 never echoes a concrete replacement id. A model change is held by the controller
 and applied to the next `turn/start`; an active turn is not mutated.
+An explicitly selected thinking effort is also applied to every new
+`turn/start`. Codex owns it as a subsequent-turn override, so it remains in
+effect after the initial spawn turn without being resent on `thread/resume`.
 
 Resume repeats initialization, calls `thread/resume` with the persisted thread
 id, reads back through `thread/read`, translates the returned items with the

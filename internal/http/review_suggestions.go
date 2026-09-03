@@ -1,8 +1,12 @@
 package http
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -227,64 +231,166 @@ func (s *Server) ApplyReviewSuggestions(ctx context.Context, request api.ApplyRe
 }
 
 type pendingFileWrite struct {
-	path string
-	mode os.FileMode
-	data []byte
+	path        string
+	name        string
+	mode        os.FileMode
+	original    []byte
+	data        []byte
+	dir         *os.Root
+	replacement string
+	backup      string
 }
 
 func applySuggestionEdits(worktree string, edits []suggestionEdit) error {
+	return errtrace.Wrap(applySuggestionEditsWithRename(worktree, edits, func(root *os.Root, oldName, newName string) error {
+		return errtrace.Wrap(root.Rename(oldName, newName))
+	}))
+}
+
+func applySuggestionEditsWithRename(worktree string, edits []suggestionEdit, rename func(*os.Root, string, string) error) error {
 	byPath := map[string][]suggestionEdit{}
 	for _, edit := range edits {
 		byPath[edit.Path] = append(byPath[edit.Path], edit)
 	}
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	root, err := os.OpenRoot(worktree)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
 	writes := make([]pendingFileWrite, 0, len(byPath))
-	for path, fileEdits := range byPath {
-		full, err := safeWorktreeFile(worktree, path)
+	defer func() {
+		for i := range writes {
+			if writes[i].replacement != "" {
+				_ = writes[i].dir.Remove(writes[i].replacement)
+			}
+			if writes[i].backup != "" {
+				_ = writes[i].dir.Remove(writes[i].backup)
+			}
+			_ = writes[i].dir.Close()
+		}
+	}()
+	for _, path := range paths {
+		clean, err := cleanSuggestionPath(path)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		info, err := os.Stat(full)
+		dir, err := root.OpenRoot(filepath.Dir(clean))
 		if err != nil {
+			return errtrace.Wrap(fmt.Errorf("suggestion path escapes the head worktree: %q: %w", path, err))
+		}
+		name := filepath.Base(clean)
+		info, err := dir.Lstat(name)
+		if err != nil {
+			dir.Close()
 			return errtrace.Wrap(fmt.Errorf("cannot apply suggestion to %s: %w", path, err))
 		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			dir.Close()
+			return errtrace.Wrap(fmt.Errorf("suggestion path escapes the head worktree: %q", path))
+		}
 		if !info.Mode().IsRegular() {
+			dir.Close()
 			return errtrace.Wrap(fmt.Errorf("cannot apply suggestion to non-file %s", path))
 		}
-		data, err := os.ReadFile(full)
+		data, err := dir.ReadFile(name)
+		if err != nil {
+			dir.Close()
+			return errtrace.Wrap(err)
+		}
+		updated, err := applyEditsToContent(path, data, byPath[path])
+		if err != nil {
+			dir.Close()
+			return errtrace.Wrap(err)
+		}
+		write := pendingFileWrite{path: path, name: name, mode: info.Mode().Perm(), original: data, data: updated, dir: dir}
+		write.replacement, err = stageSuggestionFile(dir, ".hydra-suggestion-*", updated, write.mode)
+		if err == nil {
+			write.backup, err = stageSuggestionFile(dir, ".hydra-suggestion-backup-*", data, write.mode)
+		}
+		writes = append(writes, write)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
-		updated, err := applyEditsToContent(path, data, fileEdits)
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-		writes = append(writes, pendingFileWrite{path: full, mode: info.Mode().Perm(), data: updated})
 	}
+	// Re-read every target only after every replacement and rollback copy is
+	// staged. A concurrent edit aborts the whole batch before its first rename.
 	for _, write := range writes {
-		if err := os.WriteFile(write.path, write.data, write.mode); err != nil {
-			return errtrace.Wrap(err)
+		current, err := write.dir.ReadFile(write.name)
+		if err != nil || !bytes.Equal(current, write.original) {
+			return errtrace.Errorf("cannot apply suggestion to %s: file changed while suggestions were prepared", write.path)
 		}
+	}
+	for i := range writes {
+		write := &writes[i]
+		if err := rename(write.dir, write.replacement, write.name); err != nil {
+			var rollbackErr error
+			for j := i - 1; j >= 0; j-- {
+				if restoreErr := writes[j].dir.Rename(writes[j].backup, writes[j].name); restoreErr != nil {
+					rollbackErr = errors.Join(rollbackErr, restoreErr)
+				} else {
+					writes[j].backup = ""
+				}
+			}
+			return errtrace.Wrap(errors.Join(err, rollbackErr))
+		}
+		write.replacement = ""
 	}
 	return nil
 }
 
-func safeWorktreeFile(worktree, path string) (string, error) {
+func cleanSuggestionPath(path string) (string, error) {
 	if path == "" || filepath.IsAbs(path) {
 		return "", errtrace.Wrap(fmt.Errorf("invalid suggestion path %q", path))
 	}
-	root, err := filepath.EvalSymlinks(worktree)
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	full, err := filepath.EvalSymlinks(filepath.Join(root, filepath.Clean(path)))
-	if err != nil {
-		return "", errtrace.Wrap(err)
-	}
-	rel, err := filepath.Rel(root, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	clean := filepath.Clean(path)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", errtrace.Wrap(fmt.Errorf("suggestion path escapes the head worktree: %q", path))
 	}
-	return full, nil
+	return clean, nil
+}
+
+func stageSuggestionFile(root *os.Root, pattern string, data []byte, mode os.FileMode) (string, error) {
+	file, name, err := createSuggestionTemp(root, strings.TrimSuffix(pattern, "*"))
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if err := file.Chmod(mode); err == nil {
+		_, err = file.Write(data)
+	}
+	if err == nil {
+		err = file.Sync()
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = root.Remove(name)
+		return "", errtrace.Wrap(err)
+	}
+	return name, nil
+}
+
+func createSuggestionTemp(root *os.Root, prefix string) (*os.File, string, error) {
+	for range 100 {
+		var random [8]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, "", errtrace.Wrap(err)
+		}
+		name := prefix + hex.EncodeToString(random[:])
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
+			return file, name, nil
+		}
+		if !os.IsExist(err) {
+			return nil, "", errtrace.Wrap(err)
+		}
+	}
+	return nil, "", errtrace.Errorf("could not allocate temporary suggestion file")
 }
 
 func applyEditsToContent(path string, data []byte, edits []suggestionEdit) ([]byte, error) {

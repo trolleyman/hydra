@@ -15,7 +15,9 @@ list but renders the file card from the stored blob to its current blob. The
 card therefore contains only work added since the user clicked Viewed, rather
 than resurfacing changes they already reviewed. Working-tree blobs are written
 to Git's object store when hashed so an uncommitted review baseline remains
-available after later edits.
+available after later edits. The client submits all changed viewed baselines in
+one bulk request; the server resolves current blob IDs together and computes the
+individual deltas sequentially, bounding request and Git-process fanout.
 
 ## Problem
 

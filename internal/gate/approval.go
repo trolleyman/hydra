@@ -1,14 +1,19 @@
 package gate
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"braces.dev/errtrace"
 )
+
+var readableGrantsMu sync.Mutex
 
 // The "ask" round-trip uses a per-head approval directory that is the agent's
 // real host path made writable inside the sandbox (the same mechanism as
@@ -104,40 +109,122 @@ func GrantedReadablePathsPath(dir string) string {
 // EnsureGrantedReadablePathsFile creates the host-only grant store before the
 // sandbox is built, allowing the sandbox policy to mask a concrete file.
 func EnsureGrantedReadablePathsFile(dir string) error {
+	readableGrantsMu.Lock()
+	defer readableGrantsMu.Unlock()
+	return errtrace.Wrap(ensureGrantedReadablePathsFile(dir))
+}
+
+func ensureGrantedReadablePathsFile(dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return errtrace.Wrap(err)
 	}
-	path := GrantedReadablePathsPath(dir)
-	if _, err := os.Stat(path); err == nil {
-		return errtrace.Wrap(os.Chmod(path, 0600))
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
+	if info, err := root.Lstat(grantedReadablePathsFile); err == nil {
+		if !info.Mode().IsRegular() {
+			return errtrace.Errorf("readable grant store is not a regular file")
+		}
+		file, err := root.OpenFile(grantedReadablePathsFile, os.O_RDWR, 0)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		defer file.Close()
+		return errtrace.Wrap(file.Chmod(0600))
 	} else if !os.IsNotExist(err) {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(os.WriteFile(path, []byte("[]\n"), 0600))
+	file, err := root.OpenFile(grantedReadablePathsFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if _, err := file.Write([]byte("[]\n")); err != nil {
+		_ = file.Close()
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(file.Close())
 }
 
 // AddGrantedReadablePath appends a canonical host path to the current head's
 // live grant overlay, deduplicating with the host platform's path spelling.
 func AddGrantedReadablePath(dir, path string) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	readableGrantsMu.Lock()
+	defer readableGrantsMu.Unlock()
+	if err := ensureGrantedReadablePathsFile(dir); err != nil {
 		return errtrace.Wrap(err)
 	}
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "." || path == "" {
 		return nil
 	}
-	paths := LoadGrantedReadablePaths(dir)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
+	data, err := root.ReadFile(grantedReadablePathsFile)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	var paths []string
+	if err := json.Unmarshal(data, &paths); err != nil {
+		return errtrace.Wrap(err)
+	}
 	for _, existing := range paths {
 		if filepath.Clean(existing) == path {
 			return nil
 		}
 	}
 	paths = append(paths, path)
-	data, err := json.MarshalIndent(paths, "", "  ")
+	data, err = json.MarshalIndent(paths, "", "  ")
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(os.WriteFile(GrantedReadablePathsPath(dir), data, 0600))
+	data = append(data, '\n')
+	tmp, tmpName, err := createRootTemp(root, ".readable-grants-")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Remove(tmpName)
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return errtrace.Wrap(err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return errtrace.Wrap(err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return errtrace.Wrap(err)
+	}
+	if err := tmp.Close(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if info, err := root.Lstat(grantedReadablePathsFile); err != nil || !info.Mode().IsRegular() {
+		return errtrace.Errorf("readable grant store is not a regular file")
+	}
+	return errtrace.Wrap(root.Rename(tmpName, grantedReadablePathsFile))
+}
+
+func createRootTemp(root *os.Root, prefix string) (*os.File, string, error) {
+	for range 100 {
+		var random [8]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, "", errtrace.Wrap(err)
+		}
+		name := prefix + hex.EncodeToString(random[:])
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
+			return file, name, nil
+		}
+		if !os.IsExist(err) {
+			return nil, "", errtrace.Wrap(err)
+		}
+	}
+	return nil, "", errtrace.Errorf("could not allocate temporary grant file")
 }
 
 // Request is one pending approval the gate parked. It is surfaced in the web UI
