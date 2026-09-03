@@ -7123,6 +7123,14 @@ components:
         model:
           type: string
           x-go-type-skip-optional-pointer: true
+        api_key_source:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Claude's authentication source from system:init. "none" means
+            subscription auth, so turn footers hide the client-estimated API
+            cost. Persisted because system:init can scroll outside the newest
+            history page.
         slash_commands:
           type: array
           items:
