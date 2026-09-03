@@ -144,7 +144,10 @@ is what makes reconnect, recovery and multi-attach safe.
 ```
 
 It holds plan entries, the sub-agent graph, the active turn, any outstanding
-interaction, model, usage totals, queued messages and the observed Git head.
+interaction, model, authentication source, usage totals, queued messages and
+the observed Git head. The authentication source keeps Claude API-key cost
+footers accurate when the original `system:init` event is older than the newest
+history page.
 Complete messages, tool output, reasoning and sub-agent transcripts stay in the
 paged log: a snapshot may reference their item ids but does not grow with the
 conversation. The checkpoint is replaced atomically (temp file plus rename) at
@@ -185,6 +188,13 @@ to `conversation_started`, assistant content blocks to `assistant_message` /
 `tool_completed`, `result` to `turn_completed`/`turn_failed`, `control_request`
 to `interaction_requested`, partial `stream_event` lines to
 `assistant_delta`/`reasoning_delta` and `usage_updated`.
+
+Claude's final `result` line carries `total_cost_usd`, a client-side estimate
+for the whole user turn. Hydra shows it in the turn footer when `system:init`
+reports API-key authentication. Subscription auth reports `apiKeySource` as
+`none`; the same estimate is not an amount billed for that turn, so Hydra hides
+it. Both values are normalized and persisted in the projection so reconnecting
+does not depend on the initial event remaining in the latest history window.
 
 Some lines produce nothing on purpose. The CLI's internal placeholders - the
 resume nudge and its synthetic reply, the note it logs when it downscales an

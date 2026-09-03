@@ -7410,6 +7410,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems([])
     setChatError(null)
+    setApiKeyReal(false)
     itemTsRef.current = new Map()
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
@@ -9035,6 +9036,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'state_snapshot': {
+          // Billing auth is session state, not conversation history. The init
+          // event that announced it may be older than the newest replay page,
+          // so seed cost visibility from the durable projection.
+          if (typeof msg.state?.api_key_source === 'string') {
+            setApiKeyReal(msg.state.api_key_source !== 'none')
+          }
           // Persisted "/" autocomplete list, so old heads whose system:init has
           // scrolled past the replayed history window still populate the popup.
           if (Array.isArray(msg.state?.slash_commands) && msg.state.slash_commands.length) {

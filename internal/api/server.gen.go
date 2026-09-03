@@ -1441,6 +1441,9 @@ type ChatPlanUpdatedPayload struct {
 
 // ChatProjection Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
 type ChatProjection struct {
+	// ApiKeySource Claude's authentication source from system:init. "none" means subscription auth, so turn footers hide the client-estimated API cost. Persisted because system:init can scroll outside the newest history page.
+	ApiKeySource string `json:"api_key_source,omitempty"`
+
 	// Head The Git HEAD the commit reconciler last observed.
 	Head        string                     `json:"head,omitempty"`
 	Imports     map[string]int64           `json:"imports,omitempty"`
