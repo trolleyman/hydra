@@ -417,6 +417,8 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	webkit_user_script_unref(browser_storage);
 	g_free(browser_storage_script);
 	char *capability_prefix = g_strdup_printf(
+		"(()=>{const mark=()=>document.documentElement.classList.add('hydra-native-webkit');"
+		"if(document.documentElement)mark();else document.addEventListener('DOMContentLoaded',mark,{once:true})})();"
 		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true,compactChatWindow:%s};",
 		compact_chat ? "true" : "false");
 	char *capability_script = g_strconcat(capability_prefix,

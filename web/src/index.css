@@ -863,6 +863,29 @@ body {
   animation: work-spark-pulse 1.32s ease-in-out infinite;
 }
 
+/* WebKitGTK repaints the full native window for every frame of even a tiny CSS
+   animation instead of keeping these status marks on isolated compositor
+   layers. Idle and running-chat timeline captures measured 706 full-window
+   paints in 11.4s and 1,468 in 26.4s respectively. Keep the same status shapes
+   and text, but hold all persistent motion still in the Linux native shell.
+   Short interaction/entrance transitions remain enabled. */
+.hydra-native-webkit .animate-gradient,
+.hydra-native-webkit .animate-shimmer::after,
+.hydra-native-webkit .animate-status-pulse,
+.hydra-native-webkit .animate-barber-pole,
+.hydra-native-webkit .animate-spin,
+.hydra-native-webkit .animate-pulse,
+.hydra-native-webkit .animate-ping,
+.hydra-native-webkit .chat-text-shimmer,
+.hydra-native-webkit .work-spark,
+.hydra-native-webkit .work-spark-spoke {
+  animation: none;
+}
+.hydra-native-webkit .chat-text-shimmer {
+  background-image: none;
+  color: inherit;
+}
+
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */
 @keyframes chat-sheet-up {
   from { transform: translateY(100%); }
