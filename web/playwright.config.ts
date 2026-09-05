@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { platform } from 'node:os'
 import { proxyLaunchOptions } from './scripts/lib/browserProxy'
 
 // Smoke-test config. The webServer boots a real hydra binary in --simulation
@@ -24,9 +25,29 @@ export default defineConfig({
     // the specs render with the real webfonts inside a head, instead of silently
     // falling back (see scripts/lib/browserProxy.ts); the loopback bypass it
     // carries keeps the simulation server reachable directly.
-    launchOptions: { args: ['--no-sandbox', '--disable-dev-shm-usage'], ...proxyLaunchOptions() },
+    launchOptions: proxyLaunchOptions(),
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: { args: ['--no-sandbox', '--disable-dev-shm-usage'], ...proxyLaunchOptions() },
+      },
+    },
+    // The Linux desktop shell embeds WebKitGTK. Playwright's Linux WebKit build
+    // is not the packaged shell, but it gives the composer a second WebKit
+    // layout/editing engine in normal CI without adding a project on macOS or
+    // Windows. Keep it focused on the engine-sensitive editor regressions; the
+    // broader application flow suite remains Chromium's job.
+    ...(platform() === 'linux'
+      ? [{
+          name: 'linux-webkit',
+          testMatch: '**/composer-editing.spec.ts',
+          use: { ...devices['Desktop Safari'] },
+        }]
+      : []),
+  ],
   webServer: {
     command: 'node e2e/serve.ts',
     url: baseURL,

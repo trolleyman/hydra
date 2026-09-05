@@ -35,11 +35,19 @@ func useProductionEnvironmentByDefault() {
 // launching another desktop window.
 func isBackendCommand(arg string) bool {
 	switch arg {
-	case "__daemon", "__sandbox-init", "__desktop-connect", "__desktop-active", "mcp", "gate", "trigger-hook", "host-run":
+	case "__daemon", "__sandbox-init", "__desktop-connect", "__desktop-active", "mcp", "gate", "trigger-hook", "host-run", "sandbox-remove":
 		return true
 	default:
 		return false
 	}
+}
+
+func isHeadEnvironment() bool {
+	return os.Getenv("HYDRA_HEAD_ID") != ""
+}
+
+func isAutomationLaunch(args []string) bool {
+	return len(args) > 0 && (args[0] == "--automation" || args[0] == "--automation=true")
 }
 
 func main() {
@@ -49,6 +57,14 @@ func main() {
 	if len(os.Args) > 1 && isBackendCommand(os.Args[1]) {
 		cli.Run()
 		return
+	}
+	// The desktop executable is also injected into head sandboxes as HYDRA_BIN.
+	// Only its backend command surface belongs there. Fail closed on a bare or
+	// misspelled invocation instead of trying to open GTK or start a daemon from
+	// inside the head.
+	if isHeadEnvironment() && !isAutomationLaunch(os.Args[1:]) {
+		fmt.Fprintln(os.Stderr, "hydra-desktop: a backend command is required inside a head sandbox")
+		os.Exit(2)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "__stop-daemon" {
 		config := desktop.CurrentLaunchConfig()
@@ -73,6 +89,7 @@ func main() {
 
 	url := flag.String("url", "", "local Hydra server URL")
 	project := flag.String("project", "", "project root to select after opening Hydra")
+	automation := flag.Bool("automation", false, "allow WebDriver to control the Linux desktop webview")
 	diagnostics := flag.Bool("diagnostics", false, "print desktop capability diagnostics as JSON")
 	developerTools := flag.Bool("devtools", os.Getenv("HYDRA_DESKTOP_DEVTOOLS") == "1", "enable the WebKit Web Inspector (Ctrl+Shift+I)")
 	compositingIndicators := flag.Bool("compositing-indicators", os.Getenv("HYDRA_DESKTOP_COMPOSITING_INDICATORS") == "1", "draw WebKit compositing borders and repaint counters")
@@ -108,6 +125,7 @@ func main() {
 	}
 	if err == nil {
 		err = desktop.Run(serverURL, desktop.RunOptions{
+			Automation:                  *automation,
 			DeveloperTools:              *developerTools,
 			CompositingIndicators:       *compositingIndicators,
 			DisablePersistentAnimations: *disablePersistentAnimations,

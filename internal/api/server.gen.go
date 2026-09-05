@@ -1806,19 +1806,19 @@ type CodexUsageResponse struct {
 	// Error Why usage is unavailable (CLI missing, unsupported authentication, parse failure, ...).
 	Error *string `json:"error"`
 
-	// SessionPercentUsed Percent of the primary Codex rate-limit window used (0-100).
+	// SessionPercentUsed Percent used (0-100) for the shortest Codex rate-limit window shorter than one week, when available across the account's limit groups.
 	SessionPercentUsed *float32 `json:"session_percent_used"`
 
-	// SessionResetText Display label for the primary Codex rate-limit window.
+	// SessionResetText Display label for the selected short Codex rate-limit window.
 	SessionResetText *string `json:"session_reset_text"`
 
-	// SessionResetsAt When the primary Codex rate-limit window resets.
+	// SessionResetsAt When the selected short Codex rate-limit window resets.
 	SessionResetsAt *time.Time `json:"session_resets_at"`
 
-	// WeeklyPercentUsed Percent of the secondary Codex rate-limit window used (0-100), when available.
+	// WeeklyPercentUsed Percent used (0-100) for the shortest week-or-longer Codex window, choosing the most constrained matching limit group.
 	WeeklyPercentUsed *float32 `json:"weekly_percent_used"`
 
-	// WeeklyResetText Display label for the secondary Codex rate-limit window.
+	// WeeklyResetText Display label for the selected week-or-longer Codex rate-limit window.
 	WeeklyResetText *string `json:"weekly_reset_text"`
 }
 

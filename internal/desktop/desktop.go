@@ -43,9 +43,11 @@ func ParseHardwareAccelerationPolicy(value string) (HardwareAccelerationPolicy, 
 	}
 }
 
-// RunOptions controls opt-in native webview diagnostics. These settings are
-// intentionally per-process so profiling does not change normal desktop runs.
+// RunOptions controls opt-in native webview diagnostics and automation. These
+// settings are intentionally per-process so tests and profiling do not change
+// normal desktop runs.
 type RunOptions struct {
+	Automation                  bool
 	DeveloperTools              bool
 	CompositingIndicators       bool
 	DisablePersistentAnimations bool

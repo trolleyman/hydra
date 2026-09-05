@@ -47,6 +47,7 @@ func TestIsBackendCommand(t *testing.T) {
 		"gate",
 		"trigger-hook",
 		"host-run",
+		"sandbox-remove",
 	} {
 		if !isBackendCommand(command) {
 			t.Errorf("isBackendCommand(%q) = false", command)
@@ -55,6 +56,30 @@ func TestIsBackendCommand(t *testing.T) {
 	for _, command := range []string{"", "--url", "--project", "--diagnostics", "--devtools", "--compositing-indicators", "--disable-persistent-animations", "--hardware-acceleration", "hydra://settings"} {
 		if isBackendCommand(command) {
 			t.Errorf("isBackendCommand(%q) = true", command)
+		}
+	}
+}
+
+func TestIsHeadEnvironment(t *testing.T) {
+	t.Setenv("HYDRA_HEAD_ID", "")
+	if isHeadEnvironment() {
+		t.Fatal("ordinary desktop launch detected as a head environment")
+	}
+	t.Setenv("HYDRA_HEAD_ID", "head-1")
+	if !isHeadEnvironment() {
+		t.Fatal("HYDRA_HEAD_ID did not identify the head environment")
+	}
+}
+
+func TestIsAutomationLaunch(t *testing.T) {
+	for _, args := range [][]string{{"--automation"}, {"--automation=true", "--url", "http://127.0.0.1:1234"}} {
+		if !isAutomationLaunch(args) {
+			t.Errorf("isAutomationLaunch(%q) = false", args)
+		}
+	}
+	for _, args := range [][]string{nil, {"--url", "http://127.0.0.1:1234", "--automation"}, {"--automation=false"}} {
+		if isAutomationLaunch(args) {
+			t.Errorf("isAutomationLaunch(%q) = true", args)
 		}
 	}
 }

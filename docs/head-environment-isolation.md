@@ -9,10 +9,13 @@ heads.
 
 The filesystem follows the same default-deny model. Heads see their worktree,
 private temporary and provider state, generated immutable inputs, Git metadata,
-the system runtime/toolchain inventory, directories on their trusted `PATH`, and
-the built-in or configured `readable_paths`. Linux constructs that view from an
-empty bubblewrap namespace. macOS denies file reads in Seatbelt and appends the
-same categories as explicit grants. Writable paths are inherently readable.
+their project's read-only uploads directory, the system runtime/toolchain
+inventory, directories on their trusted `PATH`, and the built-in or configured
+`readable_paths`. The uploads directory is created before launch so files pasted
+into a running conversation appear through the existing sandbox mount. Linux
+constructs that view from an empty bubblewrap namespace. macOS denies file reads
+in Seatbelt and appends the same categories as explicit grants. Writable paths
+are inherently readable.
 
 Provider state is selected by agent type. A Codex head can use `~/.codex`, a
 Claude head can use `~/.claude` and `~/.claude.json`, and so on; it does not
@@ -76,7 +79,10 @@ overriding earlier ones:
    absent. Values do not appear in config or logs.
 4. Hydra adds the per-head `HYDRA_*` context and internal control variables,
    including `HYDRA_BIN`, the immutable Hydra runtime path visible inside that
-   head's sandbox.
+   head's sandbox. Desktop builds route its backend helpers through the same
+   executable. In a head environment, a bare or unknown `$HYDRA_BIN` invocation
+   fails instead of starting the desktop UI or a daemon. The explicit
+   `--automation` launch is reserved for the Linux native test runner.
 5. The existing `pre_spawn_script` may append deliberate `KEY=value` entries to
    `$HYDRA_ENV`; those values continue to override the baseline on spawn and
    resume.

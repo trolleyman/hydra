@@ -79,6 +79,20 @@ func TestHeadContextEnv(t *testing.T) {
 	}
 }
 
+func TestHeadReadablePathsIncludesProjectUploads(t *testing.T) {
+	projectRoot := t.TempDir()
+	configured := []string{"/configured/input"}
+	got := headReadablePaths(projectRoot, configured)
+
+	wantUpload := paths.GetUploadsDirFromProjectRoot(projectRoot)
+	if len(got) != 2 || got[0] != configured[0] || got[1] != wantUpload {
+		t.Fatalf("headReadablePaths() = %v, want configured path plus %q", got, wantUpload)
+	}
+	if len(configured) != 1 {
+		t.Fatalf("headReadablePaths mutated configured paths: %v", configured)
+	}
+}
+
 func TestReadPreSpawnEnv(t *testing.T) {
 	// Empty path (no persisted file / no TmpDir): nil, no read.
 	if got := readPreSpawnEnv(""); got != nil {

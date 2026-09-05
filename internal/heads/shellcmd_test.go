@@ -35,4 +35,8 @@ func TestBuildShellCommandSpecUsesHeadPolicy(t *testing.T) {
 	if !strings.Contains(args, "--ro-bind\x00"+gitDir+"\x00"+gitDir) {
 		t.Fatalf("sandbox args do not preserve git isolation: %q", args)
 	}
+	uploads := filepath.Join(root, ".hydra", "local", "uploads")
+	if !strings.Contains(args, "--ro-bind\x00"+uploads+"\x00"+uploads) {
+		t.Fatalf("sandbox args do not expose project uploads read-only: %q", args)
+	}
 }

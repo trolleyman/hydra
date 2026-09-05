@@ -483,7 +483,7 @@ polls / web via the events Hub" pattern already used for `status.json`:
   approval card: *"Head X wants to use MCP server Y / fetch Z / git push"* with
   **Allow / Deny / Always allow** → calls the new endpoint.
 - Spec-first: add the endpoint + payload to `api/openapi.yaml`, then
-  `mage generate:go` (server stub) and regen the TS client (per CLAUDE.md /
+  `mage generateGo` (server stub) and regen the TS client (per CLAUDE.md /
   memory regen flow).
 
 ### Step 6 — Make the gate tamper-proof (F4)

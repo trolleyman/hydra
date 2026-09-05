@@ -26,10 +26,12 @@
 // A real build costs around nine minutes, nearly all of it CPU spent subsetting,
 // and a fresh worktree has no output and no stamp - so with a worktree per head
 // that cost would be paid repeatedly for identical bytes. The built faces are therefore also
-// kept in ~/.cache/hydra/fonts/<signature>/: the first build anywhere fills it
-// and every worktree after that copies (~14MB, ~0.1s) without touching the
-// network or a subsetter. Only a version bump or an edit to the subsets below
-// changes the signature and pays the real cost again.
+// kept in FONT_BUILD_CACHE_DIR/<signature>/ when that variable is set, or in
+// ~/.cache/hydra/fonts/<signature>/ otherwise. The project config redirects the
+// variable to Hydra's project-scoped cache, so the first head or test runner to
+// build fills it and every later checkout copies (~14MB, ~0.1s) without touching
+// the network or a subsetter. Only a version bump or an edit to the subsets
+// below changes the signature and pays the real cost again.
 //
 //     cd web && npm run build-fonts          # or: node scripts/build-fonts.ts
 //     cd web && npm run build-fonts -- --force
@@ -365,9 +367,10 @@ const signature = createHash('sha256')
 // So the built faces are also kept outside the checkout, keyed by that
 // signature. The first build anywhere fills the cache; every worktree after it
 // copies (~14MB, milliseconds) and touches neither the network nor a subsetter.
-// ~/.cache is bound writable inside a Hydra sandbox, so heads both read and
-// populate it.
-const CACHE_ROOT = join(
+// Hydra's sandbox cache supplies FONT_BUILD_CACHE_DIR to heads and sandboxed
+// runners. Keep a conventional XDG fallback so the script also stays fast when
+// it is run in an ordinary checkout without Hydra.
+const CACHE_ROOT = process.env.FONT_BUILD_CACHE_DIR || join(
   process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
   'hydra',
   'fonts',
