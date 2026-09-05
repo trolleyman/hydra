@@ -25,8 +25,9 @@ var desktopLinkID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 // RunOptions controls opt-in native webview diagnostics. These settings are
 // intentionally per-process so profiling does not change normal desktop runs.
 type RunOptions struct {
-	DeveloperTools        bool
-	CompositingIndicators bool
+	DeveloperTools              bool
+	CompositingIndicators       bool
+	DisablePersistentAnimations bool
 }
 
 // Run opens a native Hydra window connected to rawURL.

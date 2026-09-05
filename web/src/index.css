@@ -863,25 +863,24 @@ body {
   animation: work-spark-pulse 1.32s ease-in-out infinite;
 }
 
-/* WebKitGTK repaints the full native window for every frame of even a tiny CSS
-   animation instead of keeping these status marks on isolated compositor
-   layers. Idle and running-chat timeline captures measured 706 full-window
-   paints in 11.4s and 1,468 in 26.4s respectively. Keep the same status shapes
-   and text, but hold all persistent motion still in the Linux native shell.
-   Short interaction/entrance transitions remain enabled. */
-.hydra-native-webkit .animate-gradient,
-.hydra-native-webkit .animate-shimmer::after,
-.hydra-native-webkit .animate-status-pulse,
-.hydra-native-webkit .animate-barber-pole,
-.hydra-native-webkit .animate-spin,
-.hydra-native-webkit .animate-pulse,
-.hydra-native-webkit .animate-ping,
-.hydra-native-webkit .chat-text-shimmer,
-.hydra-native-webkit .work-spark,
-.hydra-native-webkit .work-spark-spoke {
+/* WebKitGTK can repaint the full native window for every frame of even a tiny
+   CSS animation instead of keeping these status marks on isolated compositor
+   layers. The desktop's opt-in static mode keeps the same status shapes and
+   text while holding persistent motion still. Short interaction and entrance
+   transitions remain enabled. */
+.hydra-disable-persistent-animations .animate-gradient,
+.hydra-disable-persistent-animations .animate-shimmer::after,
+.hydra-disable-persistent-animations .animate-status-pulse,
+.hydra-disable-persistent-animations .animate-barber-pole,
+.hydra-disable-persistent-animations .animate-spin,
+.hydra-disable-persistent-animations .animate-pulse,
+.hydra-disable-persistent-animations .animate-ping,
+.hydra-disable-persistent-animations .chat-text-shimmer,
+.hydra-disable-persistent-animations .work-spark,
+.hydra-disable-persistent-animations .work-spark-spoke {
   animation: none;
 }
-.hydra-native-webkit .chat-text-shimmer {
+.hydra-disable-persistent-animations .chat-text-shimmer {
   background-image: none;
   color: inherit;
 }

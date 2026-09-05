@@ -134,14 +134,14 @@ and `web/src/DiffViewer.tsx`):
   changing/scrolling diff at a much higher cost than Chromium; even a small
   visible file can otherwise make the desktop inspector scroll at roughly half
   frame rate. Browsers and the Chromium desktop bridge retain the shadows.
-- The Linux WebKit shell marks the root as `.hydra-native-webkit`. Persistent
-  decorative/status animations are held still under that root because WebKitGTK
-  repaints the full native window for every animation frame, even when only a
-  small status dot or SVG spoke changes. Status shapes, colours, and text remain;
-  short interaction and entrance transitions still run. The chat bottom-follow
-  loop also treats a one-pixel remainder as complete and exits when assigning a
-  new scroll position makes no progress, covering WebKitGTK's fractional
-  `scrollTop` clamp without changing the visible easing.
+- The Linux WebKit shell marks the root as `.hydra-native-webkit`. Its optional
+  static-animation profiling mode adds `.hydra-disable-persistent-animations`.
+  That class holds looping decorative/status animations still while preserving
+  their shapes, colours, and text; short interaction and entrance transitions
+  still run. The chat bottom-follow loop also treats a one-pixel remainder as
+  complete and exits when assigning a new scroll position makes no progress,
+  covering WebKitGTK's fractional `scrollTop` clamp without changing the visible
+  easing.
 - **When a prediction is wrong anyway, the correction must not be visible.** The
   prediction is exact for a plain file body but not for everything in one -
   `bodyShape` does not model inline review-comment rows, so a file carrying a
