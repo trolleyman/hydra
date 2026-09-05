@@ -9,10 +9,13 @@ heads.
 
 The filesystem follows the same default-deny model. Heads see their worktree,
 private temporary and provider state, generated immutable inputs, Git metadata,
-the system runtime/toolchain inventory, directories on their trusted `PATH`, and
-the built-in or configured `readable_paths`. Linux constructs that view from an
-empty bubblewrap namespace. macOS denies file reads in Seatbelt and appends the
-same categories as explicit grants. Writable paths are inherently readable.
+their project's read-only uploads directory, the system runtime/toolchain
+inventory, directories on their trusted `PATH`, and the built-in or configured
+`readable_paths`. The uploads directory is created before launch so files pasted
+into a running conversation appear through the existing sandbox mount. Linux
+constructs that view from an empty bubblewrap namespace. macOS denies file reads
+in Seatbelt and appends the same categories as explicit grants. Writable paths
+are inherently readable.
 
 Provider state is selected by agent type. A Codex head can use `~/.codex`, a
 Claude head can use `~/.claude` and `~/.claude.json`, and so on; it does not

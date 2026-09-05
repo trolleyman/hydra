@@ -96,6 +96,13 @@ type seedResult struct {
 // ~/.copilot/copilot-instructions.md, ~/.codex/AGENTS.md), merged on top of any
 // the host user already has.
 func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string, policy gate.Policy, gitIso sandbox.GitIsolationMode) (*seedResult, error) {
+	// Uploads are a built-in read-only input to every head. Create the directory
+	// before the sandbox mount namespace is assembled: Linux skips missing
+	// readable paths, so creating it only when a later chat paste arrives would
+	// leave that running head unable to see the new file.
+	if err := paths.EnsureHydraLocalIgnored(paths.GetUploadsDirFromProjectRoot(projectRoot)); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("prepare uploads: %w", err))
+	}
 	cacheDir := paths.GetCacheDirFromProjectRoot(projectRoot)
 	if err := paths.EnsureHydraLocalIgnored(cacheDir); err != nil {
 		return nil, errtrace.Wrap(err)
