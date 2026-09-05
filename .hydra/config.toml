@@ -450,6 +450,10 @@ script = '''
 # the whole machine. Each JSON event becomes a ::hydra:test:*:: marker; Hydra
 # uses the previous run's total as its progress denominator.
 echo "::hydra:progress:: Running Go tests"
+# Git-operation tests create temporary repositories and must not depend on the
+# daemon user's host Git configuration being visible inside the test sandbox.
+export GIT_AUTHOR_NAME=Hydra-Test GIT_AUTHOR_EMAIL=hydra-test@example.invalid
+export GIT_COMMITTER_NAME=Hydra-Test GIT_COMMITTER_EMAIL=hydra-test@example.invalid
 GOMAXPROCS=2 go test -p 2 -timeout=3m -json ./... | go run ./scripts/gotest-markers
 
 # Informational only - warn markers for what `mage tidy` would still change.
@@ -584,32 +588,14 @@ export E2E_PORT
 # CI=1 turns off playwright's reuseExistingServer, so a stale or concurrent
 # server on that port can never be adopted (it also enables one retry).
 echo "::hydra:progress:: Running browser tests"
-CI=1 $PX playwright test --reporter=./e2e/hydra-reporter.ts
-'''
-timeout_sec = 900
-auto_run = "never"
-type = "stdout"
+HYDRA_E2E_EXTRA_CASES=5 CI=1 $PX playwright test --reporter=./e2e/hydra-reporter.ts
 
-[tests.desktop_linux]
-# Native editor regressions against the actual GTK shell and the Linux
-# distribution's WebKitGTK runtime. The script reports skips on non-Linux hosts
-# or when WebKitWebDriver/Xvfb/xdotool/xclip are unavailable. On Ubuntu those
-# tools come from webkit2gtk-driver, xvfb, xdotool, and xclip.
-script = '''
-cd web
-
-if command -v aube >/dev/null 2>&1; then
-  PM=aube
-else
-  PM=npm
-fi
-
-echo "::hydra:progress:: Installing native e2e dependencies"
-$PM install
-echo "::hydra:progress:: Building native e2e app"
-$PM run build
-echo "::hydra:progress:: Running Linux desktop WebKitGTK tests"
-node e2e/linux-desktop-webkit.ts
+# The same runner continues into the native desktop phase. It emits five more
+# streamed cases but leaves the combined total declared by the Playwright
+# reporter alone. Non-Linux hosts and Linux hosts without the native tools emit
+# explicit skips, so the e2e runner has one stable cross-platform case count.
+echo "::hydra:progress:: Running native desktop tests"
+HYDRA_E2E_OMIT_TOTAL=1 node e2e/linux-desktop-webkit.ts
 '''
 timeout_sec = 900
 auto_run = "never"

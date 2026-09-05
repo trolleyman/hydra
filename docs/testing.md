@@ -130,12 +130,13 @@ contracts that are sensitive to the Linux desktop shell's WebKit engine family.
 It does not replace packaged-app validation against the distribution's
 WebKitGTK runtime; the rest of the browser flow suite stays on Chromium.
 
-The separate `desktop_linux` runner executes the same editor behaviors through
-the real `hydra-desktop` GTK shell and the host's WebKitGTK runtime. It attaches
-with `WebKitWebDriver` and uses X11 input tools on an isolated Xvfb display
-because this WebKitGTK embedding does not implement WebDriver's synthetic input
+The E2E runner then executes the same editor behaviors through the real
+`hydra-desktop` GTK shell and the host's WebKitGTK runtime. It attaches with
+`WebKitWebDriver` and uses X11 input tools on an isolated Xvfb display because
+this WebKitGTK embedding does not implement WebDriver's synthetic input
 operations. Ubuntu hosts need the `webkit2gtk-driver`, `xvfb`, `xdotool`, and
-`xclip` packages; other platforms and Linux hosts without them report skips.
+`xclip` packages; other platforms and Linux hosts without them report skips in
+the same combined E2E result.
 
 Two more emit findings that are not tests at all, onto the same verdict:
 `web/scripts/eslint-report.ts` (lint) and `web/scripts/tsc-report.ts` (type errors).

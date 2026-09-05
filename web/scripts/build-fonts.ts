@@ -445,27 +445,33 @@ function writeStamp(sizes: Record<string, number>): void {
   )
 }
 
-function upToDate(): boolean {
-  if (FORCE || !existsSync(STAMP)) return false
+function currentBuildSizes(): Record<string, number> | null {
+  if (FORCE || !existsSync(STAMP)) return null
   try {
     const stamp = JSON.parse(readFileSync(STAMP, 'utf8')) as { signature?: string; sizes?: Record<string, number> }
-    if (stamp.signature !== signature) return false
+    if (stamp.signature !== signature) return null
     // Check every file the last build recorded, not just `outputs`: the Google
     // faces are named by Google's own hashes, so they are only knowable from the
     // stamp.
     const recorded = Object.entries(stamp.sizes ?? {})
-    if (recorded.length < outputs.length) return false
-    return outputs.every((name) => stamp.sizes?.[name] !== undefined) &&
+    if (recorded.length < outputs.length) return null
+    const complete = outputs.every((name) => stamp.sizes?.[name] !== undefined) &&
       recorded.every(([name, size]) => {
         const path = join(OUT_DIR, name)
         return existsSync(path) && statSync(path).size === size
       })
+    return complete ? stamp.sizes ?? null : null
   } catch {
-    return false
+    return null
   }
 }
 
-if (upToDate()) {
+const currentSizes = currentBuildSizes()
+if (currentSizes) {
+  // A project may add FONT_BUILD_CACHE_DIR after this checkout has already
+  // produced valid fonts. Seed that new shared cache from the receipt instead
+  // of waiting for another head to repeat the expensive subset build.
+  if (!existsSync(CACHE_DIR)) saveToCache(currentSizes)
   console.log(`fonts: already built (${outputs.length} faces) - nothing to do`)
   process.exit(0)
 }

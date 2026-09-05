@@ -53,7 +53,7 @@ async function main(): Promise<void> {
     'paste preserves the composer scroll position',
     'undo preserves the composer scroll position',
   ]
-  console.log(`::hydra:test:total:: ${cases.length}`)
+  if (process.env.HYDRA_E2E_OMIT_TOTAL !== '1') console.log(`::hydra:test:total:: ${cases.length}`)
   if (process.platform !== 'linux') {
     for (const name of cases) console.log(`::hydra:test:skip:: ${source} > ${name}`)
     console.log('linux desktop e2e: skipped outside Linux')

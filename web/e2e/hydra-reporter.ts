@@ -50,22 +50,23 @@ function verbFor(test: TestCase, result: TestResult): string | undefined {
 
 class HydraPlaywrightReporter implements Reporter {
   private finished = 0
+  private readonly extraCases = Number.parseInt(process.env.HYDRA_E2E_EXTRA_CASES ?? '0', 10) || 0
 
   // The full spec count is known up front (unlike vitest's rolling collection),
   // so the progress denominator can be declared before anything runs.
   onBegin(_config: unknown, suite: Suite): void {
-    const total = suite.allTests().length
+    const total = suite.allTests().length + this.extraCases
     if (total > 0) console.log(`::hydra:test:total:: ${total}`)
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
     // onTestEnd fires per ATTEMPT, and the runner sets CI=1 which turns on a
-    // retry - so a failing spec arrived twice, double-counting the total and
-    // showing the same case in the panel twice. Only a genuine failure is
-    // retried, so only that is provisional; a skipped test is final on its first
-    // and only attempt (guarding on "not passed" instead silently dropped every
-    // skip).
-    const retryable = result.status === 'failed' || result.status === 'timedOut'
+    // retry - so an unexpected failing spec would otherwise arrive twice and
+    // double-count the total. An expected failure has the same raw "failed"
+    // result but Playwright does not retry it, so it is final immediately.
+    // Skips are likewise final on their first and only attempt.
+    const retryable = (result.status === 'failed' || result.status === 'timedOut') &&
+      result.status !== test.expectedStatus
     if (retryable && result.retry < test.retries) return
     const verb = verbFor(test, result)
     if (!verb) return
@@ -95,7 +96,7 @@ class HydraPlaywrightReporter implements Reporter {
   }
 
   onEnd(result: FullResult): void {
-    console.log(`::hydra:test:total:: ${this.finished}`)
+    console.log(`::hydra:test:total:: ${this.finished + this.extraCases}`)
     console.log(`e2e: ${this.finished} spec(s), status ${result.status}`)
   }
 }
