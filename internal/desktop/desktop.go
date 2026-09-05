@@ -22,13 +22,20 @@ import (
 
 var desktopLinkID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
+// RunOptions controls opt-in native webview diagnostics. These settings are
+// intentionally per-process so profiling does not change normal desktop runs.
+type RunOptions struct {
+	DeveloperTools        bool
+	CompositingIndicators bool
+}
+
 // Run opens a native Hydra window connected to rawURL.
-func Run(rawURL string) error {
+func Run(rawURL string, options RunOptions) error {
 	appURL, err := localServerURL(rawURL)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(run(appURL.String()))
+	return errtrace.Wrap(run(appURL.String(), options))
 }
 
 // ApplyDeepLink maps the public hydra:// grammar onto a trusted server URL.

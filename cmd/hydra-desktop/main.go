@@ -74,6 +74,8 @@ func main() {
 	url := flag.String("url", "", "local Hydra server URL")
 	project := flag.String("project", "", "project root to select after opening Hydra")
 	diagnostics := flag.Bool("diagnostics", false, "print desktop capability diagnostics as JSON")
+	developerTools := flag.Bool("devtools", os.Getenv("HYDRA_DESKTOP_DEVTOOLS") == "1", "enable the WebKit Web Inspector (Ctrl+Shift+I)")
+	compositingIndicators := flag.Bool("compositing-indicators", os.Getenv("HYDRA_DESKTOP_COMPOSITING_INDICATORS") == "1", "draw WebKit compositing borders and repaint counters")
 	flag.Parse()
 	if *diagnostics {
 		if err := json.NewEncoder(os.Stdout).Encode(desktop.Diagnostics()); err != nil {
@@ -94,7 +96,10 @@ func main() {
 		}
 	}
 	if err == nil {
-		err = desktop.Run(serverURL)
+		err = desktop.Run(serverURL, desktop.RunOptions{
+			DeveloperTools:        *developerTools,
+			CompositingIndicators: *compositingIndicators,
+		})
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hydra-desktop: %v\n", err)

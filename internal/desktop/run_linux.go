@@ -36,6 +36,8 @@ struct HydraDesktop {
 	char *browser_storage_path;
 	guint browser_storage_flush;
 	gboolean keep_running;
+	gboolean developer_tools;
+	gboolean compositing_indicators;
 };
 
 typedef struct {
@@ -432,6 +434,9 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	WebKitWebView *web_view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
 		"network-session", desktop->network_session, "user-content-manager", manager, NULL));
 	g_object_unref(manager);
+	WebKitSettings *settings = webkit_web_view_get_settings(web_view);
+	webkit_settings_set_enable_developer_extras(settings, desktop->developer_tools);
+	webkit_settings_set_draw_compositing_indicators(settings, desktop->compositing_indicators);
 
 	HydraWindow *state = g_new0(HydraWindow, 1);
 	state->desktop = desktop;
@@ -480,6 +485,15 @@ static void hydra_settings(GSimpleAction *action, GVariant *parameter, gpointer 
 	char *uri = hydra_origin_url(desktop, "/settings");
 	hydra_open_window_at(desktop, uri, FALSE);
 	g_free(uri);
+}
+
+static void hydra_web_inspector(GSimpleAction *action, GVariant *parameter, gpointer data) {
+	HydraDesktop *desktop = data;
+	GtkWindow *active = gtk_application_get_active_window(desktop->app);
+	if (active == NULL) return;
+	HydraWindow *window = g_object_get_data(G_OBJECT(active), "hydra-window");
+	if (window == NULL) return;
+	webkit_web_inspector_show(webkit_web_view_get_inspector(window->web_view));
 }
 
 static void hydra_quit_choice(GObject *source, GAsyncResult *result, gpointer data) {
@@ -543,6 +557,7 @@ static void hydra_startup(GApplication *application, gpointer data) {
 		{ "new-window", hydra_new_window, NULL, NULL, NULL },
 		{ "new-chat", hydra_new_chat, NULL, NULL, NULL },
 		{ "settings", hydra_settings, NULL, NULL, NULL },
+		{ "web-inspector", hydra_web_inspector, NULL, NULL, NULL },
 		{ "open-uri", hydra_notification_open, "s", NULL, NULL },
 		{ "quit", hydra_quit, NULL, NULL, NULL },
 	};
@@ -550,22 +565,33 @@ static void hydra_startup(GApplication *application, gpointer data) {
 	const char *new_window[] = { "<Primary>n", NULL };
 	const char *new_chat[] = { "<Primary><Shift>n", NULL };
 	const char *settings[] = { "<Primary>comma", NULL };
+	const char *web_inspector[] = { "<Primary><Shift>i", NULL };
 	const char *quit[] = { "<Primary>q", NULL };
 	gtk_application_set_accels_for_action(desktop->app, "app.new-window", new_window);
 	gtk_application_set_accels_for_action(desktop->app, "app.new-chat", new_chat);
 	gtk_application_set_accels_for_action(desktop->app, "app.settings", settings);
+	if (desktop->developer_tools)
+		gtk_application_set_accels_for_action(desktop->app, "app.web-inspector", web_inspector);
 	gtk_application_set_accels_for_action(desktop->app, "app.quit", quit);
 	GMenu *menu = g_menu_new();
 	g_menu_append(menu, "New window", "app.new-window");
 	g_menu_append(menu, "New chat", "app.new-chat");
 	g_menu_append(menu, "Settings", "app.settings");
+	if (desktop->developer_tools) g_menu_append(menu, "Web inspector", "app.web-inspector");
 	g_menu_append(menu, "Quit", "app.quit");
 	gtk_application_set_menubar(desktop->app, G_MENU_MODEL(menu));
 	g_object_unref(menu);
 }
 
-static int hydra_desktop_run(const char *application_id, const char *uri, const char *profile_directory) {
-	HydraDesktop desktop = { .uri = uri, .origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL), .keep_running = TRUE };
+static int hydra_desktop_run(const char *application_id, const char *uri, const char *profile_directory,
+	gboolean developer_tools, gboolean compositing_indicators) {
+	HydraDesktop desktop = {
+		.uri = uri,
+		.origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL),
+		.keep_running = TRUE,
+		.developer_tools = developer_tools,
+		.compositing_indicators = compositing_indicators,
+	};
 	if (desktop.origin == NULL) return 2;
 	desktop.browser_storage = g_key_file_new();
 	desktop.browser_storage_path = g_build_filename(profile_directory, "browser-storage.ini", NULL);
@@ -618,7 +644,7 @@ import (
 	"github.com/trolleyman/hydra/internal/daemon"
 )
 
-func run(rawURL string) error {
+func run(rawURL string, options RunOptions) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	applicationID := C.CString(LinuxApplicationID())
@@ -634,7 +660,15 @@ func run(rawURL string) error {
 	}
 	profilePath := C.CString(profileDirectory)
 	defer C.free(unsafe.Pointer(profilePath))
-	if status := C.hydra_desktop_run(applicationID, uri, profilePath); status != 0 {
+	developerTools := C.gboolean(0)
+	if options.DeveloperTools {
+		developerTools = 1
+	}
+	compositingIndicators := C.gboolean(0)
+	if options.CompositingIndicators {
+		compositingIndicators = 1
+	}
+	if status := C.hydra_desktop_run(applicationID, uri, profilePath, developerTools, compositingIndicators); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
 	}
 	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {
