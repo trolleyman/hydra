@@ -288,6 +288,12 @@ exposes opt-in diagnostics:
   WebKitGTK 6 policy. Treat `never` as a profiling comparison rather than an
   assumed optimization: depending on the graphics stack and page, it can reduce
   full-surface compositing work or make rendering slower.
+- `hydra-desktop --low-paint` enables a deliberately plain diagnostic rendering
+  mode. It disables CSS animations, transitions, gradients, rounded clipping,
+  shadows, filters, masks, explicit layer hints, and sticky positioning. The
+  mode keeps controls usable for typing and scrolling, but it is not a product
+  theme and should only be used to distinguish page styling cost from
+  WebKitGTK's final-surface paint cost.
 
 For a checkout-local profiling run, use the environment form so Mage can keep
 its normal development state and daemon setup:
@@ -321,6 +327,18 @@ mage runDesktopLocal
 invalid value stops the launch with an error. It can be combined with
 `HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS=1` for the fourth case in a full
 rendering-path/animation A/B comparison.
+
+For the maximal low-paint comparison, use the default accelerated renderer and
+change only the page styling mode:
+
+```bash
+HYDRA_DESKTOP_DEVTOOLS=1 \
+HYDRA_DESKTOP_LOW_PAINT=1 \
+mage runDesktopLocal
+```
+
+`HYDRA_DESKTOP_LOW_PAINT=1` already disables every CSS animation, so it does not
+need `HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS=1`.
 
 The flags and environment variables apply to every webview opened by that
 desktop process and are not persisted in Hydra settings.

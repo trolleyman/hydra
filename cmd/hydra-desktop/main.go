@@ -94,6 +94,7 @@ func main() {
 	developerTools := flag.Bool("devtools", os.Getenv("HYDRA_DESKTOP_DEVTOOLS") == "1", "enable the WebKit Web Inspector (Ctrl+Shift+I)")
 	compositingIndicators := flag.Bool("compositing-indicators", os.Getenv("HYDRA_DESKTOP_COMPOSITING_INDICATORS") == "1", "draw WebKit compositing borders and repaint counters")
 	disablePersistentAnimations := flag.Bool("disable-persistent-animations", os.Getenv("HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS") == "1", "hold looping web animations still to avoid WebKitGTK repaint churn")
+	lowPaint := flag.Bool("low-paint", os.Getenv("HYDRA_DESKTOP_LOW_PAINT") == "1", "disable costly CSS effects and sticky positioning for WebKitGTK profiling")
 	hardwareAccelerationDefault := os.Getenv("HYDRA_DESKTOP_HARDWARE_ACCELERATION")
 	if hardwareAccelerationDefault == "" {
 		hardwareAccelerationDefault = "always"
@@ -130,6 +131,7 @@ func main() {
 			CompositingIndicators:       *compositingIndicators,
 			DisablePersistentAnimations: *disablePersistentAnimations,
 			HardwareAcceleration:        hardwareAccelerationPolicy,
+			LowPaint:                    *lowPaint,
 		})
 	}
 	if err != nil {

@@ -41,6 +41,7 @@ struct HydraDesktop {
 	gboolean compositing_indicators;
 	gboolean disable_persistent_animations;
 	gboolean disable_hardware_acceleration;
+	gboolean low_paint;
 };
 
 typedef struct {
@@ -444,10 +445,11 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	webkit_user_script_unref(browser_storage);
 	g_free(browser_storage_script);
 	char *capability_prefix = g_strdup_printf(
-		"(()=>{const mark=()=>document.documentElement.classList.add('hydra-native-webkit'%s);"
+		"(()=>{const mark=()=>document.documentElement.classList.add('hydra-native-webkit'%s%s);"
 		"if(document.documentElement)mark();else document.addEventListener('DOMContentLoaded',mark,{once:true})})();"
 		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true,compactChatWindow:%s};",
 		desktop->disable_persistent_animations ? ",'hydra-disable-persistent-animations'" : "",
+		desktop->low_paint ? ",'hydra-low-paint'" : "",
 		compact_chat ? "true" : "false");
 	char *capability_script = g_strconcat(capability_prefix,
 		"document.addEventListener('focusin',event=>window.webkit.messageHandlers.hydra.postMessage({type:'image-paste-target',enabled:!!event.target?.hasAttribute?.('data-desktop-image-paste')}),true);"
@@ -625,7 +627,7 @@ static void hydra_startup(GApplication *application, gpointer data) {
 
 static int hydra_desktop_run(const char *application_id, const char *uri, const char *profile_directory,
 	gboolean automation, gboolean developer_tools, gboolean compositing_indicators,
-	gboolean disable_persistent_animations, gboolean disable_hardware_acceleration) {
+	gboolean disable_persistent_animations, gboolean disable_hardware_acceleration, gboolean low_paint) {
 	HydraDesktop desktop = {
 		.uri = uri,
 		.origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL),
@@ -635,6 +637,7 @@ static int hydra_desktop_run(const char *application_id, const char *uri, const 
 		.compositing_indicators = compositing_indicators,
 		.disable_persistent_animations = disable_persistent_animations,
 		.disable_hardware_acceleration = disable_hardware_acceleration,
+		.low_paint = low_paint,
 	};
 	if (desktop.origin == NULL) return 2;
 	desktop.browser_storage = g_key_file_new();
@@ -726,7 +729,8 @@ func run(rawURL string, options RunOptions) error {
 	if options.HardwareAcceleration == HardwareAccelerationNever {
 		disableHardwareAcceleration = 1
 	}
-	if status := C.hydra_desktop_run(applicationID, uri, profilePath, automation, developerTools, compositingIndicators, disablePersistentAnimations, disableHardwareAcceleration); status != 0 {
+	lowPaint := C.gboolean(boolToInt(options.LowPaint))
+	if status := C.hydra_desktop_run(applicationID, uri, profilePath, automation, developerTools, compositingIndicators, disablePersistentAnimations, disableHardwareAcceleration, lowPaint); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
 	}
 	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {

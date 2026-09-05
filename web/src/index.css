@@ -885,6 +885,30 @@ body {
   color: inherit;
 }
 
+/* This deliberately severe desktop profiling mode separates page styling cost
+   from WebKitGTK's final-surface paint cost. It is not a product theme. Keep the
+   page usable for scrolling and typing while removing common paint, clipping,
+   and compositing triggers. */
+.hydra-low-paint *,
+.hydra-low-paint *::before,
+.hydra-low-paint *::after {
+  animation: none !important;
+  transition: none !important;
+  background-image: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  clip-path: none !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  will-change: auto !important;
+}
+.hydra-low-paint .sticky {
+  position: static !important;
+}
+
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */
 @keyframes chat-sheet-up {
   from { transform: translateY(100%); }

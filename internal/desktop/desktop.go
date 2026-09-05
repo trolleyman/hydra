@@ -52,6 +52,7 @@ type RunOptions struct {
 	CompositingIndicators       bool
 	DisablePersistentAnimations bool
 	HardwareAcceleration        HardwareAccelerationPolicy
+	LowPaint                    bool
 }
 
 // Run opens a native Hydra window connected to rawURL.
