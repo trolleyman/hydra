@@ -38,7 +38,7 @@ Use `mage` for development tasks.
       their postinstall build scripts by default. Both ship prebuilt binaries and
       work fine without them; run `aube approve-builds` only if you deliberately
       want to enable them.
-3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
+3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generateGo` to update server stubs.
 
 ### Commits and verification
 

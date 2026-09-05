@@ -42,7 +42,7 @@ Use aube when available and npm otherwise. Run TypeScript scripts under
   backward-compatibility shims, legacy aliases, deprecation paths, or dual-format
   handling unless the user explicitly asks for them; replace the old behavior
   outright.
-- Define API changes in `api/openapi.yaml`, then run `mage generate:go`.
+- Define API changes in `api/openapi.yaml`, then run `mage generateGo`.
 - Use the shared tooltip, typography, file-path, and URL components described in
   [docs/agent-guide.md](docs/agent-guide.md) instead of recreating them.
 

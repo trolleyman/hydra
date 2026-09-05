@@ -206,7 +206,7 @@ white page; keeping it means the failure mode is merely the old behaviour.
 1. `ProjectInfo.Builtin` + `EnsureChatProject` (git init, initial commit,
    register with the fixed ID), called from `runtime.go` right after
   `projects.NewManager(store)`.
-2. `builtin` through the API (`api/openapi.yaml` -> `mage generate:go` + the web
+2. `builtin` through the API (`api/openapi.yaml` -> `mage generateGo` + the web
    client).
 3. `/` redirect; delete the two dead-end empty states.
 4. Pin + path suppression in `ProjectDropdown` and `ProjectSwitcher`.

@@ -16,23 +16,23 @@ export type CodexUsageResponse = {
      */
     captured_at?: string;
     /**
-     * Percent of the primary Codex rate-limit window used (0-100).
+     * Percent used (0-100) for the shortest Codex rate-limit window shorter than one week, when available across the account's limit groups.
      */
     session_percent_used?: number | null;
     /**
-     * When the primary Codex rate-limit window resets.
+     * When the selected short Codex rate-limit window resets.
      */
     session_resets_at?: string | null;
     /**
-     * Display label for the primary Codex rate-limit window.
+     * Display label for the selected short Codex rate-limit window.
      */
     session_reset_text?: string | null;
     /**
-     * Percent of the secondary Codex rate-limit window used (0-100), when available.
+     * Percent used (0-100) for the shortest week-or-longer Codex window, choosing the most constrained matching limit group.
      */
     weekly_percent_used?: number | null;
     /**
-     * Display label for the secondary Codex rate-limit window.
+     * Display label for the selected week-or-longer Codex rate-limit window.
      */
     weekly_reset_text?: string | null;
 };
