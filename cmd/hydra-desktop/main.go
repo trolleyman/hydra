@@ -76,6 +76,7 @@ func main() {
 	diagnostics := flag.Bool("diagnostics", false, "print desktop capability diagnostics as JSON")
 	developerTools := flag.Bool("devtools", os.Getenv("HYDRA_DESKTOP_DEVTOOLS") == "1", "enable the WebKit Web Inspector (Ctrl+Shift+I)")
 	compositingIndicators := flag.Bool("compositing-indicators", os.Getenv("HYDRA_DESKTOP_COMPOSITING_INDICATORS") == "1", "draw WebKit compositing borders and repaint counters")
+	disablePersistentAnimations := flag.Bool("disable-persistent-animations", os.Getenv("HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS") == "1", "hold looping web animations still to avoid WebKitGTK repaint churn")
 	flag.Parse()
 	if *diagnostics {
 		if err := json.NewEncoder(os.Stdout).Encode(desktop.Diagnostics()); err != nil {
@@ -97,8 +98,9 @@ func main() {
 	}
 	if err == nil {
 		err = desktop.Run(serverURL, desktop.RunOptions{
-			DeveloperTools:        *developerTools,
-			CompositingIndicators: *compositingIndicators,
+			DeveloperTools:              *developerTools,
+			CompositingIndicators:       *compositingIndicators,
+			DisablePersistentAnimations: *disablePersistentAnimations,
 		})
 	}
 	if err != nil {

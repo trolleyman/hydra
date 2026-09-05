@@ -9608,15 +9608,31 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // resumes with a normal step instead of a teleport.
       const dt = Math.min(Math.max(now - followPrevTimeRef.current, 0), 50)
       followPrevTimeRef.current = now
-      const dist = node.scrollHeight - node.clientHeight - node.scrollTop
-      if (dist <= 0.5) {
-        node.scrollTop = node.scrollHeight
+      const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight)
+      const dist = maxScrollTop - node.scrollTop
+      // WebKitGTK can clamp scrollTop to a fractional maximum which remains
+      // more than 0.5px below scrollHeight - clientHeight. Retrying that
+      // unreachable remainder schedules a frame forever and, on WebKitGTK,
+      // repaints the whole window on every attempt. One CSS pixel is below the
+      // visible precision of this easing and gives that engine a firm exit.
+      if (dist <= 1) {
+        node.scrollTop = maxScrollTop
         return
       }
       // Exponential ease-out: frame-rate independent, and it converges on a
       // target that is still moving while tokens stream in. The floor keeps the
       // tail from crawling sub-pixel forever.
-      node.scrollTop += Math.max(dist * (1 - Math.exp(-dt / FOLLOW_TAU_MS)), Math.min(dist, 0.5))
+      const previousTop = node.scrollTop
+      node.scrollTop = Math.min(
+        maxScrollTop,
+        previousTop + Math.max(dist * (1 - Math.exp(-dt / FOLLOW_TAU_MS)), Math.min(dist, 0.5)),
+      )
+      // Also stop when the engine made no observable progress. This covers a
+      // clamped value whose reported maximum differs by more than our epsilon.
+      if (node.scrollTop <= previousTop + 0.01 || maxScrollTop - node.scrollTop <= 1) {
+        node.scrollTop = maxScrollTop
+        return
+      }
       followRafRef.current = requestAnimationFrame(step)
     }
     followRafRef.current = requestAnimationFrame(step)

@@ -266,7 +266,7 @@ is granted, and detect when that access is no longer available.
 ### Profiling the webview
 
 The Linux shell keeps WebKit developer features off during ordinary runs and
-exposes two opt-in diagnostics:
+exposes opt-in diagnostics:
 
 - `hydra-desktop --devtools` enables the WebKit Web Inspector. Open it from the
   application menu or with Ctrl+Shift+I, select Timelines, start recording, and
@@ -278,6 +278,11 @@ exposes two opt-in diagnostics:
   large diff surfaces while scrolling point to paint/compositing cost rather
   than React render work. Run this separately from the timing capture because
   the diagnostic overlay adds work of its own.
+- `hydra-desktop --disable-persistent-animations` holds looping gradients,
+  shimmers, status pulses, spinners, and work sparks still. Ordinary desktop
+  runs retain their animation. Use the static mode as an A/B comparison when a
+  timeline shows continuous full-window paints while the page is otherwise
+  idle; short interaction and entrance transitions remain enabled.
 
 For a checkout-local profiling run, use the environment form so Mage can keep
 its normal development state and daemon setup:
@@ -289,7 +294,15 @@ mage runDesktopLocal
 ```
 
 Use only `HYDRA_DESKTOP_DEVTOOLS=1` for the first timing capture. Then repeat
-with only `HYDRA_DESKTOP_COMPOSITING_INDICATORS=1` to inspect repaint behavior.
+with only `HYDRA_DESKTOP_COMPOSITING_INDICATORS=1` to inspect repaint behavior,
+or compare the original timeline against:
+
+```bash
+HYDRA_DESKTOP_DEVTOOLS=1 \
+HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS=1 \
+mage runDesktopLocal
+```
+
 The flags and environment variables apply to every webview opened by that
 desktop process and are not persisted in Hydra settings.
 
