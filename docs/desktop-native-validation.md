@@ -65,6 +65,19 @@ exercise lifecycle but cannot accept the production trust/update path.
 Automate repeatable assertions: clean install scripts, protocol/auth checks,
 window launch counts, WebSocket continuity, persisted profile/cookies, update
 readiness/rollback, database preservation, and accessibility-tree smoke tests.
+The browser E2E suite runs the composer editing regressions in Playwright's
+WebKit build when the host is Linux, giving every Linux run a quick WebKit
+layout and editing pass. The `desktop_linux` runner also builds Hydra's GTK
+shell, opts it into automation with `--automation`, attaches the distribution's
+`WebKitWebDriver`, and sends real X11 keyboard, pointer, and clipboard events in
+a private Xvfb display. It requires WebKitWebDriver, Xvfb, xdotool, and xclip;
+missing tools produce explicit skips.
+
+The automation switch is opt-in and intended only for tests. Ordinary desktop
+launches leave WebKit remote automation disabled. Treat the native runner as
+development coverage rather than a packaged release result: release acceptance
+still runs the installed application against the distribution's WebKitGTK
+runtime.
 Keep a short manual checklist for IME composition, screen-reader speech,
 notification click behavior, multi-display movement, visual scaling, and OS
 trust prompts. Record OS version, architecture, webview/runtime version, display

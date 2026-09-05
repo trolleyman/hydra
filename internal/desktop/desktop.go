@@ -22,13 +22,14 @@ import (
 
 var desktopLinkID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// Run opens a native Hydra window connected to rawURL.
-func Run(rawURL string) error {
+// Run opens a native Hydra window connected to rawURL. Automation is disabled
+// for ordinary launches and must be explicitly enabled by a test runner.
+func Run(rawURL string, automation bool) error {
 	appURL, err := localServerURL(rawURL)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(run(appURL.String()))
+	return errtrace.Wrap(run(appURL.String(), automation))
 }
 
 // ApplyDeepLink maps the public hydra:// grammar onto a trusted server URL.

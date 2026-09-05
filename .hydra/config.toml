@@ -114,6 +114,7 @@ test_prefetch = false
 [sandbox.cache]
 aube_cache = { env = "AUBE_CACHE_DIR" }
 aube_store = { env = "AUBE_STORE_DIR" }
+fonts = { env = "FONT_BUILD_CACHE_DIR" }
 go_build = { env = "GOCACHE" }
 go_modules = { env = "GOMODCACHE" }
 mage = { env = "MAGEFILE_CACHE" }
@@ -564,9 +565,16 @@ fi
 echo "::hydra:progress:: Building e2e app"
 $PM run build
 
-# A no-op once the browser is in the shared ~/.cache/ms-playwright.
-echo "::hydra:progress:: Preparing Chromium"
-$PX playwright install chromium
+# A no-op once the browsers are in the project-scoped Playwright cache. Linux
+# also exercises the editor regression file with Playwright's WebKit build,
+# matching the desktop shell's engine family without claiming to be the
+# packaged WebKitGTK application.
+echo "::hydra:progress:: Preparing browser engines"
+if [ "$(uname -s)" = Linux ]; then
+  $PX playwright install chromium webkit
+else
+  $PX playwright install chromium
+fi
 
 # Pick a free port at run time: the config's default is FIXED, and two heads
 # testing at once would collide on it.
@@ -577,6 +585,31 @@ export E2E_PORT
 # server on that port can never be adopted (it also enables one retry).
 echo "::hydra:progress:: Running browser tests"
 CI=1 $PX playwright test --reporter=./e2e/hydra-reporter.ts
+'''
+timeout_sec = 900
+auto_run = "never"
+type = "stdout"
+
+[tests.desktop_linux]
+# Native editor regressions against the actual GTK shell and the Linux
+# distribution's WebKitGTK runtime. The script reports skips on non-Linux hosts
+# or when WebKitWebDriver/Xvfb/xdotool/xclip are unavailable. On Ubuntu those
+# tools come from webkit2gtk-driver, xvfb, xdotool, and xclip.
+script = '''
+cd web
+
+if command -v aube >/dev/null 2>&1; then
+  PM=aube
+else
+  PM=npm
+fi
+
+echo "::hydra:progress:: Installing native e2e dependencies"
+$PM install
+echo "::hydra:progress:: Building native e2e app"
+$PM run build
+echo "::hydra:progress:: Running Linux desktop WebKitGTK tests"
+node e2e/linux-desktop-webkit.ts
 '''
 timeout_sec = 900
 auto_run = "never"

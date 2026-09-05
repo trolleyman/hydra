@@ -36,6 +36,7 @@ struct HydraDesktop {
 	char *browser_storage_path;
 	guint browser_storage_flush;
 	gboolean keep_running;
+	gboolean automation;
 };
 
 typedef struct {
@@ -48,6 +49,30 @@ typedef struct {
 } HydraImagePasteRequest;
 
 static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolean compact_chat);
+static void hydra_show_main_window(HydraDesktop *desktop);
+
+static WebKitWebView *hydra_automation_create_web_view(WebKitAutomationSession *session, gpointer data) {
+	HydraDesktop *desktop = data;
+	// WebDriver requests a dedicated browsing context for the session. Returning
+	// the window opened during application activation permits script execution,
+	// but WebKitGTK does not enable native input synthesis for that pre-existing
+	// context.
+	hydra_open_window_at(desktop, desktop->uri, FALSE);
+	GtkWindow *active = gtk_application_get_active_window(desktop->app);
+	desktop->primary_window = active;
+	HydraWindow *window = active == NULL ? NULL : g_object_get_data(G_OBJECT(active), "hydra-window");
+	return window == NULL ? NULL : window->web_view;
+}
+
+static void hydra_automation_started(WebKitWebContext *context, WebKitAutomationSession *session, gpointer data) {
+	WebKitApplicationInfo *info = webkit_application_info_new();
+	webkit_application_info_set_name(info, "Hydra");
+	webkit_application_info_set_version(info,
+		webkit_get_major_version(), webkit_get_minor_version(), webkit_get_micro_version());
+	webkit_automation_session_set_application_info(session, info);
+	webkit_application_info_unref(info);
+	g_signal_connect(session, "create-web-view", G_CALLBACK(hydra_automation_create_web_view), data);
+}
 
 static void hydra_show_main_window(HydraDesktop *desktop) {
 	if (desktop->primary_window != NULL) {
@@ -430,7 +455,8 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	webkit_user_content_manager_add_script(manager, capabilities);
 	webkit_user_script_unref(capabilities);
 	WebKitWebView *web_view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
-		"network-session", desktop->network_session, "user-content-manager", manager, NULL));
+		"network-session", desktop->network_session, "user-content-manager", manager,
+		"is-controlled-by-automation", desktop->automation, NULL));
 	g_object_unref(manager);
 
 	HydraWindow *state = g_new0(HydraWindow, 1);
@@ -518,6 +544,7 @@ static void hydra_quit(GSimpleAction *action, GVariant *parameter, gpointer data
 static void hydra_activate(GtkApplication *app, gpointer data) {
 	HydraDesktop *desktop = data;
 	desktop->app = app;
+	if (desktop->automation && desktop->primary_window == NULL) return;
 	GtkWindow *active = gtk_application_get_active_window(app);
 	if (active != NULL) gtk_window_present(active);
 	else hydra_show_main_window(desktop);
@@ -528,6 +555,10 @@ static int hydra_command_line(GApplication *application, GApplicationCommandLine
 	desktop->app = GTK_APPLICATION(application);
 	int argc = 0;
 	char **argv = g_application_command_line_get_arguments(command_line, &argc);
+	if (desktop->automation && desktop->primary_window == NULL) {
+		g_strfreev(argv);
+		return 0;
+	}
 	const char *uri = argc > 1 && hydra_same_origin(desktop, argv[1]) ? argv[1] : desktop->uri;
 	if (g_strcmp0(uri, desktop->uri) == 0) hydra_show_main_window(desktop);
 	else hydra_open_window_at(desktop, uri, FALSE);
@@ -538,6 +569,7 @@ static int hydra_command_line(GApplication *application, GApplicationCommandLine
 static void hydra_startup(GApplication *application, gpointer data) {
 	HydraDesktop *desktop = data;
 	desktop->app = GTK_APPLICATION(application);
+	if (desktop->automation) g_application_hold(application);
 	gtk_window_set_default_icon_name(g_application_get_application_id(application));
 	const GActionEntry actions[] = {
 		{ "new-window", hydra_new_window, NULL, NULL, NULL },
@@ -564,8 +596,13 @@ static void hydra_startup(GApplication *application, gpointer data) {
 	g_object_unref(menu);
 }
 
-static int hydra_desktop_run(const char *application_id, const char *uri, const char *profile_directory) {
-	HydraDesktop desktop = { .uri = uri, .origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL), .keep_running = TRUE };
+static int hydra_desktop_run(const char *application_id, const char *uri, const char *profile_directory, gboolean automation) {
+	HydraDesktop desktop = {
+		.uri = uri,
+		.origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL),
+		.keep_running = TRUE,
+		.automation = automation,
+	};
 	if (desktop.origin == NULL) return 2;
 	desktop.browser_storage = g_key_file_new();
 	desktop.browser_storage_path = g_build_filename(profile_directory, "browser-storage.ini", NULL);
@@ -576,6 +613,11 @@ static int hydra_desktop_run(const char *application_id, const char *uri, const 
 		g_clear_error(&storage_error);
 	}
 	desktop.network_session = webkit_network_session_new_ephemeral();
+	if (desktop.automation) {
+		WebKitWebContext *context = webkit_web_context_get_default();
+		g_signal_connect(context, "automation-started", G_CALLBACK(hydra_automation_started), &desktop);
+		webkit_web_context_set_automation_allowed(context, TRUE);
+	}
 	GtkApplication *app = gtk_application_new(application_id, G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_signal_connect(app, "startup", G_CALLBACK(hydra_startup), &desktop);
 	g_signal_connect(app, "activate", G_CALLBACK(hydra_activate), &desktop);
@@ -618,7 +660,7 @@ import (
 	"github.com/trolleyman/hydra/internal/daemon"
 )
 
-func run(rawURL string) error {
+func run(rawURL string, automation bool) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	applicationID := C.CString(LinuxApplicationID())
@@ -634,7 +676,7 @@ func run(rawURL string) error {
 	}
 	profilePath := C.CString(profileDirectory)
 	defer C.free(unsafe.Pointer(profilePath))
-	if status := C.hydra_desktop_run(applicationID, uri, profilePath); status != 0 {
+	if status := C.hydra_desktop_run(applicationID, uri, profilePath, C.gboolean(boolToInt(automation))); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
 	}
 	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {
@@ -645,6 +687,13 @@ func run(rawURL string) error {
 		}
 	}
 	return nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func nativeRuntimeDiagnostics() map[string]string {

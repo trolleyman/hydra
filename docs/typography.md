@@ -159,3 +159,9 @@ it a literal and say why in the file.
 | localStorage keys | `web/src/lib/storage.ts` (`font*`, `fontSize*`) |
 | Code surfaces' shared size/leading | `web/src/lib/diffMetrics.ts` |
 | Self-hosted + subset webfonts | `web/scripts/build-fonts.ts`, `web/public/fonts` |
+
+The font build is content-addressed and shared across Hydra heads and sandboxed
+runners through the project-scoped `FONT_BUILD_CACHE_DIR` cache. A signature is
+cut once; later worktrees copy its generated faces into `web/public/fonts`
+instead of running the subsetter again. Outside Hydra, the same script falls
+back to the conventional `~/.cache/hydra/fonts` directory.
