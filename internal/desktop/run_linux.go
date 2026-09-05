@@ -39,6 +39,7 @@ struct HydraDesktop {
 	gboolean developer_tools;
 	gboolean compositing_indicators;
 	gboolean disable_persistent_animations;
+	gboolean disable_hardware_acceleration;
 };
 
 typedef struct {
@@ -441,6 +442,9 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	WebKitSettings *settings = webkit_web_view_get_settings(web_view);
 	webkit_settings_set_enable_developer_extras(settings, desktop->developer_tools);
 	webkit_settings_set_draw_compositing_indicators(settings, desktop->compositing_indicators);
+	webkit_settings_set_hardware_acceleration_policy(settings, desktop->disable_hardware_acceleration
+		? WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER
+		: WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS);
 
 	HydraWindow *state = g_new0(HydraWindow, 1);
 	state->desktop = desktop;
@@ -588,7 +592,8 @@ static void hydra_startup(GApplication *application, gpointer data) {
 }
 
 static int hydra_desktop_run(const char *application_id, const char *uri, const char *profile_directory,
-	gboolean developer_tools, gboolean compositing_indicators, gboolean disable_persistent_animations) {
+	gboolean developer_tools, gboolean compositing_indicators, gboolean disable_persistent_animations,
+	gboolean disable_hardware_acceleration) {
 	HydraDesktop desktop = {
 		.uri = uri,
 		.origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL),
@@ -596,6 +601,7 @@ static int hydra_desktop_run(const char *application_id, const char *uri, const 
 		.developer_tools = developer_tools,
 		.compositing_indicators = compositing_indicators,
 		.disable_persistent_animations = disable_persistent_animations,
+		.disable_hardware_acceleration = disable_hardware_acceleration,
 	};
 	if (desktop.origin == NULL) return 2;
 	desktop.browser_storage = g_key_file_new();
@@ -677,7 +683,11 @@ func run(rawURL string, options RunOptions) error {
 	if options.DisablePersistentAnimations {
 		disablePersistentAnimations = 1
 	}
-	if status := C.hydra_desktop_run(applicationID, uri, profilePath, developerTools, compositingIndicators, disablePersistentAnimations); status != 0 {
+	disableHardwareAcceleration := C.gboolean(0)
+	if options.HardwareAcceleration == HardwareAccelerationNever {
+		disableHardwareAcceleration = 1
+	}
+	if status := C.hydra_desktop_run(applicationID, uri, profilePath, developerTools, compositingIndicators, disablePersistentAnimations, disableHardwareAcceleration); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
 	}
 	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {

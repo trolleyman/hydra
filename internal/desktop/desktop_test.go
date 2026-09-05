@@ -64,6 +64,31 @@ func TestLocalServerURL(t *testing.T) {
 	}
 }
 
+func TestParseHardwareAccelerationPolicy(t *testing.T) {
+	tests := []struct {
+		value string
+		want  HardwareAccelerationPolicy
+	}{
+		{value: "always", want: HardwareAccelerationAlways},
+		{value: "never", want: HardwareAccelerationNever},
+	}
+	for _, test := range tests {
+		got, err := ParseHardwareAccelerationPolicy(test.value)
+		if err != nil {
+			t.Fatalf("ParseHardwareAccelerationPolicy(%q): %v", test.value, err)
+		}
+		if got != test.want {
+			t.Errorf("ParseHardwareAccelerationPolicy(%q) = %v, want %v", test.value, got, test.want)
+		}
+	}
+	if _, err := ParseHardwareAccelerationPolicy(""); err == nil {
+		t.Fatal("ParseHardwareAccelerationPolicy(\"\") succeeded")
+	}
+	if _, err := ParseHardwareAccelerationPolicy("sometimes"); err == nil {
+		t.Fatal("ParseHardwareAccelerationPolicy(\"sometimes\") succeeded")
+	}
+}
+
 func TestResolveServerExplicitURL(t *testing.T) {
 	t.Parallel()
 	got, err := ResolveServer(context.Background(), "http://127.0.0.1:49152", "")

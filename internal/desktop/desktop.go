@@ -22,12 +22,34 @@ import (
 
 var desktopLinkID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
+// HardwareAccelerationPolicy selects WebKitGTK's rendering path. The zero value
+// preserves the native default used by ordinary desktop runs.
+type HardwareAccelerationPolicy uint8
+
+const (
+	HardwareAccelerationAlways HardwareAccelerationPolicy = iota
+	HardwareAccelerationNever
+)
+
+// ParseHardwareAccelerationPolicy validates the user-facing policy spelling.
+func ParseHardwareAccelerationPolicy(value string) (HardwareAccelerationPolicy, error) {
+	switch value {
+	case "always":
+		return HardwareAccelerationAlways, nil
+	case "never":
+		return HardwareAccelerationNever, nil
+	default:
+		return HardwareAccelerationAlways, errtrace.Wrap(fmt.Errorf("hardware acceleration must be always or never, got %q", value))
+	}
+}
+
 // RunOptions controls opt-in native webview diagnostics. These settings are
 // intentionally per-process so profiling does not change normal desktop runs.
 type RunOptions struct {
 	DeveloperTools              bool
 	CompositingIndicators       bool
 	DisablePersistentAnimations bool
+	HardwareAcceleration        HardwareAccelerationPolicy
 }
 
 // Run opens a native Hydra window connected to rawURL.

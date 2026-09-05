@@ -52,7 +52,7 @@ func TestIsBackendCommand(t *testing.T) {
 			t.Errorf("isBackendCommand(%q) = false", command)
 		}
 	}
-	for _, command := range []string{"", "--url", "--project", "--diagnostics", "--devtools", "--compositing-indicators", "--disable-persistent-animations", "hydra://settings"} {
+	for _, command := range []string{"", "--url", "--project", "--diagnostics", "--devtools", "--compositing-indicators", "--disable-persistent-animations", "--hardware-acceleration", "hydra://settings"} {
 		if isBackendCommand(command) {
 			t.Errorf("isBackendCommand(%q) = true", command)
 		}

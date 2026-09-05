@@ -283,6 +283,11 @@ exposes opt-in diagnostics:
   runs retain their animation. Use the static mode as an A/B comparison when a
   timeline shows continuous full-window paints while the page is otherwise
   idle; short interaction and entrance transitions remain enabled.
+- `hydra-desktop --hardware-acceleration=never` selects WebKitGTK's
+  non-accelerated rendering path. The default is `always`, matching the normal
+  WebKitGTK 6 policy. Treat `never` as a profiling comparison rather than an
+  assumed optimization: depending on the graphics stack and page, it can reduce
+  full-surface compositing work or make rendering slower.
 
 For a checkout-local profiling run, use the environment form so Mage can keep
 its normal development state and daemon setup:
@@ -302,6 +307,20 @@ HYDRA_DESKTOP_DEVTOOLS=1 \
 HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS=1 \
 mage runDesktopLocal
 ```
+
+To compare accelerated and non-accelerated rendering while retaining ordinary
+animations, run:
+
+```bash
+HYDRA_DESKTOP_DEVTOOLS=1 \
+HYDRA_DESKTOP_HARDWARE_ACCELERATION=never \
+mage runDesktopLocal
+```
+
+`HYDRA_DESKTOP_HARDWARE_ACCELERATION` accepts only `always` or `never`; an
+invalid value stops the launch with an error. It can be combined with
+`HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS=1` for the fourth case in a full
+rendering-path/animation A/B comparison.
 
 The flags and environment variables apply to every webview opened by that
 desktop process and are not persisted in Hydra settings.
