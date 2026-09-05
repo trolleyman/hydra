@@ -42,6 +42,16 @@ func bindSource(t *testing.T, res *seedResult, target string) string {
 	return ""
 }
 
+func TestSeedHeadPreparesUploadsBeforeSandboxLaunch(t *testing.T) {
+	projectRoot, home := t.TempDir(), t.TempDir()
+	seedClaudeHead(t, projectRoot, home, "head-one", gate.Policy{})
+
+	uploads := paths.GetUploadsDirFromProjectRoot(projectRoot)
+	if info, err := os.Stat(uploads); err != nil || !info.IsDir() {
+		t.Fatalf("uploads directory was not prepared at %q: %v", uploads, err)
+	}
+}
+
 // TestSeedHeadClaudeConfigIsPerHead pins two properties of the seeded
 // ~/.claude.json: it declares the Hydra control server (the file half of the
 // belt-and-braces with AgentArgv's --mcp-config), and it is per-head. It used to

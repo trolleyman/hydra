@@ -313,7 +313,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		Caches:                cfg.ResolveSharedCaches(string(agentType)),
 		MaterializeCachePaths: true,
 		WritablePaths:         append(writable, seed.WritablePaths...),
-		ReadablePaths:         readable,
+		ReadablePaths:         headReadablePaths(projectRoot, readable),
 		MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, id, masked),
 		Network:               net,
 		Binds:                 seed.Binds,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,6 +166,9 @@ func (c *capBuffer) String() string { return c.buf.String() }
 func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sandbox.AgentType, policy ShellCommandPolicy, command string) (*sandbox.Spec, func(), error) {
 	home, _ := os.UserHomeDir()
 	cfg, _ := config.Load(projectRoot)
+	if err := paths.EnsureHydraLocalIgnored(paths.GetUploadsDirFromProjectRoot(projectRoot)); err != nil {
+		return nil, func() {}, errtrace.Wrap(fmt.Errorf("prepare uploads: %w", err))
+	}
 	env := agentEnv(agentType, cfg.ResolveInheritedEnv(string(agentType)), home, "", readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
 	env = append(env, sandbox.MiseEnv(projectRoot, worktree)...)
 	env = append(env, readPreSpawnEnv(sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, sessionID)))...)
@@ -185,7 +189,7 @@ func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sa
 	opts.GitCommonDir = commonDirForSandbox(projectRoot, gitIsolation)
 	opts.GitIsolation = gitIsolation
 	opts.WritablePaths = writable
-	opts.ReadablePaths = readable
+	opts.ReadablePaths = headReadablePaths(projectRoot, readable)
 	opts.MaskedPaths = resolvedSandboxMasks(projectRoot, worktree, sessionID, masked)
 
 	var cowLayerDir string

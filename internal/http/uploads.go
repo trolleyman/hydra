@@ -39,11 +39,9 @@ const DefaultUploadMaxBytes = int64(1) << 30 // 1 GiB
 
 // The response is api.UploadResponse. Path is the absolute host path of the
 // stored file. Crucially, that same path is valid *inside* every agent sandbox:
-// the whole host filesystem is bind-mounted read-only at the same locations (see
-// internal/sandbox/linux.go "--ro-bind / /"). The uploads directory in Hydra's
-// state root is not masked or overlaid with tmpfs. So inserting this path into
-// an agent's prompt/terminal lets it read the file directly - an agent-agnostic
-// mechanism that works for Claude, Gemini and Copilot alike.
+// head launch policy exposes the project uploads directory read-only at its host
+// location. So inserting this path into an agent's prompt/terminal lets it read
+// the file directly - an agent-agnostic mechanism that works for every provider.
 
 // HandleUpload accepts a multipart file upload (a pasted image, or any attached
 // file) and stores it under the project's directory in Hydra's state root.
