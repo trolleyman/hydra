@@ -863,6 +863,28 @@ body {
   animation: work-spark-pulse 1.32s ease-in-out infinite;
 }
 
+/* WebKitGTK can repaint the full native window for every frame of even a tiny
+   CSS animation instead of keeping these status marks on isolated compositor
+   layers. The desktop's opt-in static mode keeps the same status shapes and
+   text while holding persistent motion still. Short interaction and entrance
+   transitions remain enabled. */
+.hydra-disable-persistent-animations .animate-gradient,
+.hydra-disable-persistent-animations .animate-shimmer::after,
+.hydra-disable-persistent-animations .animate-status-pulse,
+.hydra-disable-persistent-animations .animate-barber-pole,
+.hydra-disable-persistent-animations .animate-spin,
+.hydra-disable-persistent-animations .animate-pulse,
+.hydra-disable-persistent-animations .animate-ping,
+.hydra-disable-persistent-animations .chat-text-shimmer,
+.hydra-disable-persistent-animations .work-spark,
+.hydra-disable-persistent-animations .work-spark-spoke {
+  animation: none;
+}
+.hydra-disable-persistent-animations .chat-text-shimmer {
+  background-image: none;
+  color: inherit;
+}
+
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */
 @keyframes chat-sheet-up {
   from { transform: translateY(100%); }

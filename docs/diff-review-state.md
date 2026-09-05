@@ -124,7 +124,7 @@ viewing proves insufficient on its own.
 
 - `internal/git/diff.go` - `DiffFile`, `GetDiff`/`GetDiffFiles` (add blob sha).
 - `internal/http/handlers.go` - `GetAgentDiff` response mapping (`apiDiffFiles`).
-- `api/openapi.yaml` - `DiffFile` schema (then `mage generate:go` + web codegen).
+- `api/openapi.yaml` - `DiffFile` schema (then `mage generateGo` + web codegen).
 - `web/src/DiffViewer.tsx` - file cards, header count, checkbox.
 - `web/src/lib/agentViewPrefs.ts` - viewed map (v1 storage).
 - `internal/db` + `api` - only if promoting storage / adding the marker.

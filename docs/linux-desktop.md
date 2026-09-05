@@ -263,6 +263,64 @@ development and unusual environments. Portal document handles must not become
 the persisted project identity: store the canonical project path after access
 is granted, and detect when that access is no longer available.
 
+### Profiling the webview
+
+The Linux shell keeps WebKit developer features off during ordinary runs and
+exposes opt-in diagnostics:
+
+- `hydra-desktop --devtools` enables the WebKit Web Inspector. Open it from the
+  application menu or with Ctrl+Shift+I, select Timelines, start recording, and
+  reproduce the interaction. A diff-scroll capture should include a few seconds
+  at rest before and after the scroll so JavaScript, style/layout, paint, and
+  compositing work can be separated.
+- `hydra-desktop --compositing-indicators` draws WebKit's accelerated-layer
+  borders and repaint counters in the page. Repaint counters that climb across
+  large diff surfaces while scrolling point to paint/compositing cost rather
+  than React render work. Run this separately from the timing capture because
+  the diagnostic overlay adds work of its own.
+- `hydra-desktop --disable-persistent-animations` holds looping gradients,
+  shimmers, status pulses, spinners, and work sparks still. Ordinary desktop
+  runs retain their animation. Use the static mode as an A/B comparison when a
+  timeline shows continuous full-window paints while the page is otherwise
+  idle; short interaction and entrance transitions remain enabled.
+
+For a checkout-local profiling run, use the environment form so Mage can keep
+its normal development state and daemon setup:
+
+```bash
+HYDRA_DESKTOP_DEVTOOLS=1 \
+HYDRA_DESKTOP_COMPOSITING_INDICATORS=1 \
+mage runDesktopLocal
+```
+
+Use only `HYDRA_DESKTOP_DEVTOOLS=1` for the first timing capture. Then repeat
+with only `HYDRA_DESKTOP_COMPOSITING_INDICATORS=1` to inspect repaint behavior,
+or compare the original timeline against:
+
+```bash
+HYDRA_DESKTOP_DEVTOOLS=1 \
+HYDRA_DESKTOP_DISABLE_PERSISTENT_ANIMATIONS=1 \
+mage runDesktopLocal
+```
+
+The flags and environment variables apply to every webview opened by that
+desktop process and are not persisted in Hydra settings.
+
+When the Web Inspector shows little main-thread work but the window still
+stutters, record the native multi-process application with Linux `perf`:
+
+```bash
+perf record --call-graph dwarf -- ./dist/linux/hydra-desktop --devtools
+perf report --children
+```
+
+WebKit uses separate UI, web-content, network, and GPU processes, so retain
+child-process samples and compare their command names. Distribution debug
+symbols make native stacks substantially more useful. Some systems restrict
+unprivileged performance counters; use the Web Inspector path when local policy
+does not permit `perf`, rather than changing machine-wide security settings just
+for Hydra.
+
 ## Packaging and updates
 
 ### Initial artifact set

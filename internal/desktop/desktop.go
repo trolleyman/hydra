@@ -22,14 +22,23 @@ import (
 
 var desktopLinkID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// Run opens a native Hydra window connected to rawURL. Automation is disabled
-// for ordinary launches and must be explicitly enabled by a test runner.
-func Run(rawURL string, automation bool) error {
+// RunOptions controls opt-in native webview diagnostics and automation. These
+// settings are intentionally per-process so tests and profiling do not change
+// normal desktop runs.
+type RunOptions struct {
+	Automation                  bool
+	DeveloperTools              bool
+	CompositingIndicators       bool
+	DisablePersistentAnimations bool
+}
+
+// Run opens a native Hydra window connected to rawURL.
+func Run(rawURL string, options RunOptions) error {
 	appURL, err := localServerURL(rawURL)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(run(appURL.String(), automation))
+	return errtrace.Wrap(run(appURL.String(), options))
 }
 
 // ApplyDeepLink maps the public hydra:// grammar onto a trusted server URL.

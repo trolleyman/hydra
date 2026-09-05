@@ -4058,25 +4058,25 @@ components:
           type: number
           format: float
           nullable: true
-          description: Percent of the primary Codex rate-limit window used (0-100).
+          description: Percent used (0-100) for the shortest Codex rate-limit window shorter than one week, when available across the account's limit groups.
         session_resets_at:
           type: string
           format: date-time
           nullable: true
-          description: When the primary Codex rate-limit window resets.
+          description: When the selected short Codex rate-limit window resets.
         session_reset_text:
           type: string
           nullable: true
-          description: Display label for the primary Codex rate-limit window.
+          description: Display label for the selected short Codex rate-limit window.
         weekly_percent_used:
           type: number
           format: float
           nullable: true
-          description: Percent of the secondary Codex rate-limit window used (0-100), when available.
+          description: Percent used (0-100) for the shortest week-or-longer Codex window, choosing the most constrained matching limit group.
         weekly_reset_text:
           type: string
           nullable: true
-          description: Display label for the secondary Codex rate-limit window.
+          description: Display label for the selected week-or-longer Codex rate-limit window.
 
     ProjectInfo:
       type: object
