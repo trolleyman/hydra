@@ -367,6 +367,12 @@ extension-host bundle, a React Webview bundle, styles/assets, and one platform-
 specific `hydra-agent-host` executable. Marketplace releases are targeted per
 platform and architecture rather than putting every native binary in one VSIX.
 
+The package generates one TypeScript type graph from `api/agent-host.yaml` with
+`openapi-typescript`, typechecks both extension and Webview code, and bundles
+them independently with esbuild. The initial contributed Activity Bar container,
+sidebar Webview, commands, registered `hydra.*` settings, profile resolution,
+native-host controller, and React shell are in `vscode/`.
+
 The initial support matrix is:
 
 | Environment | Initial status |

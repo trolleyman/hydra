@@ -1,0 +1,190 @@
+{
+  "name": "hydra",
+  "displayName": "Hydra",
+  "description": "A profile-driven, sandboxed Claude and Codex chat for VS Code.",
+  "version": "0.1.0",
+  "publisher": "trolleyman",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "files": [
+    "dist",
+    "media",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "generate": "openapi-typescript ../api/agent-host.yaml -o src/generated/protocol.ts",
+    "build": "npm run generate && node scripts/build.mjs",
+    "check": "npm run generate && tsc --noEmit && node scripts/build.mjs",
+    "package": "npm run check && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/vscode": "^1.105.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^6.0.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "hydra.newChat",
+        "title": "Hydra: New Chat",
+        "icon": "$(add)"
+      },
+      {
+        "command": "hydra.showHistory",
+        "title": "Hydra: Show Chat History",
+        "icon": "$(history)"
+      },
+      {
+        "command": "hydra.showProfiles",
+        "title": "Hydra: Edit Profiles",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "hydra.cycleProfile",
+        "title": "Hydra: Cycle Profile"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "hydra",
+          "title": "Hydra",
+          "icon": "media/hydra.svg"
+        }
+      ]
+    },
+    "views": {
+      "hydra": [
+        {
+          "type": "webview",
+          "id": "hydra.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "hydra.newChat",
+          "when": "view == hydra.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "hydra.showHistory",
+          "when": "view == hydra.chatView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "hydra.showProfiles",
+          "when": "view == hydra.chatView",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Hydra",
+      "properties": {
+        "hydra.profiles": {
+          "type": "object",
+          "scope": "window",
+          "default": {
+            "implement": {
+              "provider": "codex",
+              "prompt": "Work carefully in the opened workspace and complete the user's request.",
+              "filesystem": {
+                "readable": [
+                  "."
+                ],
+                "writable": [
+                  "."
+                ],
+                "masked": [
+                  ".env*"
+                ]
+              },
+              "network": {
+                "mode": "hard",
+                "allowed_hosts": [],
+                "blocked_hosts": []
+              },
+              "tools": {
+                "core": {
+                  "read": "allow",
+                  "search": "allow",
+                  "edit": "allow",
+                  "bash": "allow",
+                  "fetch": "allow"
+                }
+              },
+              "git": {
+                "isolation": "readonly",
+                "protected_branches": [
+                  "main",
+                  "master",
+                  "release/*"
+                ]
+              }
+            }
+          },
+          "description": "Named agent profiles. Use Hydra: Edit Profiles for the structured editor."
+        },
+        "hydra.defaultProfile": {
+          "type": "string",
+          "default": "implement",
+          "scope": "window",
+          "description": "Profile selected for a new conversation."
+        },
+        "hydra.profileChangeBehavior": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "interrupt",
+            "nextTurn"
+          ],
+          "default": "ask",
+          "scope": "window",
+          "description": "How profile changes are applied while a turn is running."
+        },
+        "hydra.providers.claude.path": {
+          "type": "string",
+          "default": "claude",
+          "scope": "machine-overridable",
+          "description": "Claude Code executable available on the workspace host."
+        },
+        "hydra.providers.codex.path": {
+          "type": "string",
+          "default": "codex",
+          "scope": "machine-overridable",
+          "description": "Codex executable available on the workspace host."
+        },
+        "hydra.agentHost.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Development override for the packaged hydra-agent-host executable."
+        }
+      }
+    }
+  }
+}
