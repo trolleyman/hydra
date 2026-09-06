@@ -6,5 +6,5 @@ generate:
 output-options:
   skip-prune: true
 import-mapping:
-  ./openapi.yaml: github.com/trolleyman/hydra/internal/api
+  ./chat.yaml: github.com/trolleyman/hydra/internal/api
   ./policy.yaml: github.com/trolleyman/hydra/internal/policyapi

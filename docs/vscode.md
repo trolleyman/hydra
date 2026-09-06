@@ -81,10 +81,11 @@ api/agent-host.yaml    extension-to-host commands and host-to-extension frames
 api/openapi.yaml       Hydra server API, referencing the shared schemas
 ```
 
-Extraction is incremental. The schemas currently live in `api/openapi.yaml`.
-The first host implementation may consume those generated types directly; the
-chat and policy files are split once both the Hydra web client and VS Code client
-consume them, with conformance tests preventing drift.
+Extraction is incremental. `api/chat.yaml` is the focused generation entry point
+and currently references the canonical definitions in `api/openapi.yaml`; the
+agent-host protocol already imports it as a separate Go package boundary. The
+event definition bodies move behind that entry point once the VS Code client is
+generating its TypeScript contract, with conformance tests preventing drift.
 
 ### Chat representation
 

@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: Hydra normalized chat protocol
+  version: 1.0.0
+
+paths: {}
+
+# This focused entry point lets non-web clients generate only the normalized
+# conversation contract. The definitions remain in openapi.yaml while Hydra's
+# server is their primary producer; moving their bodies here later does not
+# change either consumer because both already reference this file.
+components:
+  schemas:
+    ChatEvent:
+      $ref: './openapi.yaml#/components/schemas/ChatEvent'
+    ChatEventUnion:
+      $ref: './openapi.yaml#/components/schemas/ChatEventUnion'
+    ChatProjection:
+      $ref: './openapi.yaml#/components/schemas/ChatProjection'
+    ChatFrame:
+      $ref: './openapi.yaml#/components/schemas/ChatFrame'

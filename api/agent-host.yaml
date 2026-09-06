@@ -209,7 +209,7 @@ components:
       properties:
         type: { type: string, enum: [state_snapshot] }
         projection:
-          $ref: './openapi.yaml#/components/schemas/ChatProjection'
+          $ref: './chat.yaml#/components/schemas/ChatProjection'
 
     ChatHistoryFrame:
       type: object
@@ -221,7 +221,7 @@ components:
         events:
           type: array
           items:
-            $ref: './openapi.yaml#/components/schemas/ChatEvent'
+            $ref: './chat.yaml#/components/schemas/ChatEvent'
         next_cursor:
           type: string
           x-go-type-skip-optional-pointer: true
@@ -234,7 +234,7 @@ components:
       properties:
         type: { type: string, enum: [chat_event] }
         event:
-          $ref: './openapi.yaml#/components/schemas/ChatEvent'
+          $ref: './chat.yaml#/components/schemas/ChatEvent'
 
     SubagentEventsFrame:
       type: object
@@ -247,7 +247,7 @@ components:
         events:
           type: array
           items:
-            $ref: './openapi.yaml#/components/schemas/ChatEvent'
+            $ref: './chat.yaml#/components/schemas/ChatEvent'
 
     ReplayDoneFrame:
       type: object
