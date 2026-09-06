@@ -1,5 +1,6 @@
 import { ThemeSection } from './ThemeSection'
 import { ComposerSection } from './ComposerSection'
+import { EnterSendsSection } from './EnterSendsSection'
 import { AutoPairSection } from './AutoPairSection'
 import { SpellcheckSection } from './SpellcheckSection'
 import { FontSection } from './FontSection'
@@ -25,6 +26,7 @@ export function BrowserSections() {
     <>
       <ThemeSection />
       <ComposerSection />
+      <EnterSendsSection />
       <AutoPairSection />
       <SpellcheckSection />
       <FontSection />

@@ -1,6 +1,11 @@
 package sandbox
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 func TestParseMiseTrusted(t *testing.T) {
 	const root = "/home/u/proj"
@@ -35,12 +40,61 @@ func TestParseMiseTrusted(t *testing.T) {
 	}
 }
 
-// TestMiseTrustEnvNoOp covers the early returns that don't touch mise at all.
-func TestMiseTrustEnvNoOp(t *testing.T) {
-	if env := MiseTrustEnv("/p", ""); env != nil {
+// TestMiseEnvNoRunDir covers the trust-path early returns without depending on
+// the machine running the test having mise installed.
+func TestMiseEnvNoRunDir(t *testing.T) {
+	if env := miseEnv("/p", "", ""); env != nil {
 		t.Errorf("empty runDir: got %v, want nil", env)
 	}
-	if env := MiseTrustEnv("/p", "/p"); env != nil {
+	if env := miseEnv("/p", "/p", ""); env != nil {
 		t.Errorf("runDir == projectRoot: got %v, want nil", env)
+	}
+	want := "/home/u/.local/share/mise/bootstrap/mise-2026.8.15"
+	if env := miseEnv("/p", "/p", want); len(env) != 1 || env[0] != "MISE_INSTALL_PATH="+want {
+		t.Errorf("bootstrap env = %v, want MISE_INSTALL_PATH", env)
+	}
+}
+
+func TestHostMiseInstallPathUsesExportedExecutable(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "mise")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MISE_INSTALL_PATH", bin)
+	if got := hostMiseInstallPath(); got != bin {
+		t.Errorf("hostMiseInstallPath() = %q, want %q", got, bin)
+	}
+}
+
+func TestHostMiseInstallPathResolvesExistingBootstrapOffline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mise launcher probing uses sh on Unix")
+	}
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data", "mise")
+	bin := filepath.Join(dataDir, "bootstrap", "mise-2026.8.15")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("bootstrap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launcherDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(launcherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(launcherDir, "mise")
+	script := "#!/bin/sh\n" +
+		"test \"$MISE_OFFLINE\" = 1 || exit 41\n" +
+		"test \"$MISE_AUTO_UPDATE\" = 0 || exit 42\n" +
+		"printf '%s\\n' '" + bin + "'\n"
+	if err := os.WriteFile(launcher, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MISE_INSTALL_PATH", "")
+	t.Setenv("MISE_DATA_DIR", dataDir)
+	t.Setenv("PATH", launcherDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if got := hostMiseInstallPath(); got != bin {
+		t.Errorf("hostMiseInstallPath() = %q, want %q", got, bin)
 	}
 }

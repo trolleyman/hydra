@@ -25,13 +25,14 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 		return ev
 	}
 	appendEvent("user_message", map[string]any{"id": "m1", "text": "hello"})
+	appendEvent("conversation_started", map[string]any{"model": "claude-sonnet-4-6", "api_key_source": "ANTHROPIC_API_KEY"})
 	appendEvent("plan_updated", map[string]any{"plan": []map[string]any{{"id": "1", "status": "pending"}}})
 	appendEvent("subagent_started", map[string]any{"id": "sub", "status": "running"})
 	appendEvent("queued_message", map[string]any{"id": "m2", "status": "queued", "content": []map[string]string{{"type": "text", "text": "later"}}})
 	appendEvent("commit_created", map[string]any{"head": "abc", "sha": "abc"})
 
 	p := s.Snapshot()
-	if p.Through != 5 || p.Head != "abc" || p.Subagents["sub"].Status != "running" || p.Queue["m2"].Id != "m2" {
+	if p.Through != 6 || p.Head != "abc" || p.Model != "claude-sonnet-4-6" || p.ApiKeySource != "ANTHROPIC_API_KEY" || p.Subagents["sub"].Status != "running" || p.Queue["m2"].Id != "m2" {
 		t.Fatalf("unexpected projection: %+v", p)
 	}
 	var plan []map[string]any
@@ -43,14 +44,14 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if done || next != "4" || len(page) != 2 || page[0].Seq != 4 || page[1].Seq != 5 {
+	if done || next != "5" || len(page) != 2 || page[0].Seq != 5 || page[1].Seq != 6 {
 		t.Fatalf("last page = %+v, next=%q done=%v", page, next, done)
 	}
 	page, _, done, err = s.Before(next, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !done || len(page) != 3 || page[0].Seq != 1 || page[2].Seq != 3 {
+	if !done || len(page) != 4 || page[0].Seq != 1 || page[3].Seq != 4 {
 		t.Fatalf("older page = %+v, done=%v", page, done)
 	}
 }

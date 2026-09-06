@@ -58,6 +58,34 @@ describe('ProjectDropdown - Escape to close', () => {
   })
 })
 
+describe('ProjectDropdown - attention dots', () => {
+  const attentionProjects: ProjectInfo[] = [
+    { id: 'a', name: 'Alpha', path: '/tmp/alpha', unread_count: 2 } as ProjectInfo,
+    { id: 'b', name: 'Bravo', path: '/tmp/bravo', unread_count: 1, needs_input_count: 1 } as ProjectInfo,
+  ]
+
+  it('overlays each project icon and gives needs-input priority', () => {
+    renderDropdown(attentionProjects, 'a')
+    fireEvent.click(screen.getByLabelText('Select project'))
+
+    const unread = screen.getByTitle('2 unread updates')
+    const blocked = screen.getByTitle('1 agent needs your input')
+    expect(unread.className).toContain('bg-sky-500')
+    expect(blocked.className).toContain('bg-red-500')
+    for (const dot of [unread, blocked]) {
+      expect(dot.className).toContain('-bottom-0.5')
+      expect(dot.parentElement?.className).toContain('relative')
+    }
+  })
+
+  it('puts the aggregate other-project marker on the icon bottom-right', () => {
+    renderDropdown(attentionProjects, 'a')
+    const dot = screen.getByLabelText('an agent in another project needs your input')
+    expect(dot.className).toContain('bg-red-500')
+    expect(dot.className).toContain('-bottom-1')
+  })
+})
+
 // A hidden project is out of the list everywhere except the two places it has to
 // stay reachable: edit mode (where it is hidden and shown again) and the picker
 // of the project you currently have open.

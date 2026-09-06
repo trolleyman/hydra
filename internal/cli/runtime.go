@@ -275,7 +275,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// the uncommitted blocks before it starts. Runs inline (see SetOnChatResume):
 	// once the new process appends, the tail is no longer safe to judge.
 	reg.SetOnChatResume(func(id, worktree string) {
-		retracted, err := chatEvents.RetractOrphanedTurn(id, paths.ClaudeProjectDir(worktree))
+		agent, _ := store.GetAgent(id)
+		projectRoot := ""
+		if agent != nil {
+			projectRoot = agent.ProjectPath
+		}
+		home, _ := os.UserHomeDir()
+		retracted, err := chatEvents.RetractOrphanedTurn(id, paths.ClaudeProjectDirForSession(projectRoot, id, home, worktree))
 		if err != nil {
 			log.Printf("warn: retract orphaned turn for %s: %v", id, err)
 			return
@@ -468,11 +474,10 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		}
 		heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
 	}()
-	// On a head transitioning into a resting status (finished/waiting/needs_input)
-	// the agent has stopped editing, so pre-generate its diff artifacts at once
-	// rather than waiting for the periodic worktree-settle sweep below. Run in its
-	// own goroutine so the 1s poller loop never blocks on the (git + build-kickoff)
-	// work, and against the server-lifetime context so it dies on shutdown.
+	// On a head transitioning into a resting status (finished/waiting/needs_input),
+	// start its settled-policy tests and diff artifacts at once. Run in its own
+	// goroutine so the poller never blocks on the git + build kickoff work, and
+	// against the server-lifetime context so it dies on shutdown.
 	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub, func(projectRoot, headID string) {
 		go server.PrefetchHeadNow(server.BackgroundCtx, projectRoot, headID)
 	})

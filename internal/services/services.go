@@ -578,7 +578,7 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 		"HYDRA_PROJECT_ROOT="+root,
 		"HYDRA_SERVICE_NAME="+sv.spec.Name,
 	)
-	env = append(env, sandbox.MiseTrustEnv(root, root)...)
+	env = append(env, sandbox.MiseEnv(root, root)...)
 
 	command := sv.spec.Script
 	if sv.spec.IsStrict() {
@@ -597,13 +597,14 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	var egressSess *egress.Session
 	if !sv.spec.Host {
 		cfg, _ := config.Load(root)
-		writable, masked, restore, _, netPol, _ := cfg.ResolveSandboxOptions("")
+		cfg.ApplySharedCaches(&opts, root, "", false)
+		writable, readable, masked, _, netPol, _ := cfg.ResolveSandboxOptions("")
 		if gcd, err := git.GetCommonDir(root); err == nil {
 			opts.GitCommonDir = gcd
 		}
 		opts.WritablePaths = writable
-		opts.MaskedPaths = masked
-		opts.RestoreRO = restore
+		opts.ReadablePaths = readable
+		opts.MaskedPaths = sandbox.ResolveMaskedPaths(root, root, masked)
 		// Sandboxed services honor the project's network mode like agent heads do
 		// (hard = pasta netns + nft + CONNECT proxy); the session lives as long as
 		// the service process (closed via the returned cleanup). Unknown hosts are

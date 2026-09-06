@@ -74,6 +74,7 @@ const GRAPH = /^[*|\\/_ ]*[*|\\/_] */
 // The file-header block, split by whether what follows the label is a path
 // worth reading or a mode, a percentage or nothing.
 const FILE_LABEL = /^(diff --git |rename from |rename to |copy from |copy to |Binary files )(.*)$/
+const DIFF_GIT_PATH = /^diff --git (?:"a\/((?:\\.|[^"])*)"|a\/(\S+)) (?:"b\/((?:\\.|[^"])*)"|b\/(\S+))$/
 const FILE_META = /^(old mode|new mode|new file mode|deleted file mode|similarity index|dissimilarity index|GIT binary patch)\b/
 // `index 560e9b39..28c6f309 100644`.
 const INDEX = /^(index )([0-9a-f]+\.\.[0-9a-f]+)( .*)?$/
@@ -139,6 +140,42 @@ const BARE_ENTRY = /^(\t)(\S.*)$/
 // there to read; only the letters where "staged" genuinely means added and
 // "unstaged" genuinely means deleted still say it twice.
 const OFF_SIDE: Record<string, string> = { '?': DIM, '!': DIM, M: MOD, T: MOD }
+
+// decodeGitQuotedPath decodes the C-style quoting Git uses when a diff path has
+// spaces, control characters or bytes outside printable ASCII. Octal escapes
+// are bytes of the path's UTF-8 form, so collect bytes and decode them together
+// rather than turning each one into a separate Unicode character.
+function decodeGitQuotedPath(value: string): string {
+  const bytes: number[] = []
+  const encoder = new TextEncoder()
+  const push = (text: string) => bytes.push(...encoder.encode(text))
+  const escapes: Record<string, string> = {
+    a: '\x07', b: '\b', t: '\t', n: '\n', v: '\x0b', f: '\f', r: '\r', '"': '"', '\\': '\\',
+  }
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] !== '\\') { push(value[i]); continue }
+    const octal = /^[0-7]{1,3}/.exec(value.slice(i + 1))
+    if (octal) {
+      bytes.push(Number.parseInt(octal[0], 8) & 0xff)
+      i += octal[0].length
+      continue
+    }
+    const escaped = value[++i]
+    if (escaped === undefined) { push('\\'); break }
+    push(escapes[escaped] ?? escaped)
+  }
+  return new TextDecoder().decode(Uint8Array.from(bytes))
+}
+
+// gitDiffPath returns the destination path at a unified diff boundary. The
+// destination is the useful label for renames; ordinary edits and deletions use
+// the same path on both sides. Null means the line is not a complete boundary,
+// so a tail-truncated patch that starts inside a hunk stays honestly anonymous.
+export function gitDiffPath(line: string): string | null {
+  const match = DIFF_GIT_PATH.exec(line)
+  if (!match) return null
+  return match[3] !== undefined ? decodeGitQuotedPath(match[3]) : match[4]
+}
 
 function columnClass(code: string, side: string): string {
   if (code === ' ') return ''

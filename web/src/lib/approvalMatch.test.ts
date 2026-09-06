@@ -49,4 +49,9 @@ describe('approvalMatchesTool', () => {
   it('never matches an egress request (no tool call behind it)', () => {
     expect(approvalMatchesTool(req({ kind: 'egress', tool: 'WebFetch', target: 'example.com' }), 'WebFetch', {})).toBe(false)
   })
+
+  it('matches a filesystem request to the Hydra MCP tool that raised it', () => {
+    const a = req({ kind: 'filesystem_read', tool: 'mcp__hydra__request_read_access', target: '/opt/sdk' })
+    expect(approvalMatchesTool(a, 'mcp__hydra__request_read_access', { path: '/opt/sdk' })).toBe(true)
+  })
 })

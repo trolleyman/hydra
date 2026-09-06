@@ -73,29 +73,23 @@ func TestHeadContextEnv(t *testing.T) {
 		} else if v != w {
 			t.Errorf("%s = %q, want %q", k, v, w)
 		}
-		// Every variable must be owned by Hydra so it can't leak from the host.
-		if !envKeysHydraOwns[k] {
-			t.Errorf("%s missing from envKeysHydraOwns", k)
+		if !strings.HasPrefix(k, "HYDRA_") {
+			t.Errorf("head context variable %s is not in Hydra's namespace", k)
 		}
 	}
 }
 
-func TestAgentEnvReplacesInheritedTempPaths(t *testing.T) {
-	t.Setenv("TMPDIR", "/host/project/.hydra/test-tmp")
-	t.Setenv("TMP", "/host/tmp")
-	t.Setenv("TEMP", "/host/temp")
-	got := agentEnv("/home/test", "test", "", "")
-	values := map[string]string{}
-	for _, entry := range got {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			values[key] = value
-		}
+func TestHeadReadablePathsIncludesProjectUploads(t *testing.T) {
+	projectRoot := t.TempDir()
+	configured := []string{"/configured/input"}
+	got := headReadablePaths(projectRoot, configured)
+
+	wantUpload := paths.GetUploadsDirFromProjectRoot(projectRoot)
+	if len(got) != 2 || got[0] != configured[0] || got[1] != wantUpload {
+		t.Fatalf("headReadablePaths() = %v, want configured path plus %q", got, wantUpload)
 	}
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		if values[key] != "/tmp" {
-			t.Errorf("%s = %q, want /tmp", key, values[key])
-		}
+	if len(configured) != 1 {
+		t.Fatalf("headReadablePaths mutated configured paths: %v", configured)
 	}
 }
 

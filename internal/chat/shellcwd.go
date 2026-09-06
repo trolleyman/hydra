@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 
 	"github.com/trolleyman/hydra/internal/claudestream"
@@ -92,7 +93,11 @@ func (w *worker) syncShellCwds() {
 	if len(w.pendingBash) == 0 || w.ctx.AgentType != "claude" {
 		return
 	}
-	transcript := claudestream.LatestTranscript(paths.ClaudeProjectDir(w.ctx.WorkingDirectory()))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	transcript := claudestream.LatestTranscript(paths.ClaudeProjectDirForSession(w.ctx.ProjectRoot, w.id, home, w.ctx.WorkingDirectory()))
 	if transcript == "" {
 		return
 	}

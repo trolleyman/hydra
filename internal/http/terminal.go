@@ -19,6 +19,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -187,6 +188,16 @@ func parseTermSize(r *http.Request, defRows, defCols uint16) (uint16, uint16) {
 		return uint16(n)
 	}
 	return parse("rows", defRows), parse("cols", defCols)
+}
+
+// headCanHostSession reports whether the head still has a directory in which
+// its provider can run. Project-directory heads deliberately have no Worktree,
+// so every attach/resume decision must use WorkingDir rather than testing that
+// field directly. Archived project-directory heads retain their project path
+// for history and diffs, but must only be revived through the explicit resume
+// endpoint.
+func headCanHostSession(head heads.Head) bool {
+	return !head.Archived && head.WorkingDir() != ""
 }
 
 // reviewSlotStatus is a head reviewer's own resting status, read from the
@@ -371,7 +382,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// on attach and stop the stale session; the resume below then relaunches the
 	// head in the mode it is actually set to (the conversation carries over,
 	// exactly like the toggle itself).
-	if !useShell && !useReview && head.Worktree != nil {
+	if !useShell && !useReview && headCanHostSession(*head) {
 		wantKind := session.KindTerminal
 		if chatMode {
 			wantKind = session.KindChat
@@ -384,7 +395,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resumed := false
-	if !useShell && !useReview && !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
+	if !useShell && !useReview && !s.Sessions.IsLive(head.ID) && headCanHostSession(*head) {
 		// The agent's session isn't running (e.g. the daemon was restarted).
 		// Resume it on demand so opening the page brings the agent back via its
 		// own --resume, instead of showing "Agent is not running".
@@ -478,12 +489,17 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// here would make the review pane replay the HEAD's conversation and queue its
 	// messages against the head. That separation is the whole reason the reviewer
 	// gets its own tree (docs/review-agent.md).
-	worktree := ""
-	if head.Worktree != nil {
-		worktree = *head.Worktree
-	}
+	worktree := head.WorkingDir()
 	if useReview {
 		worktree = paths.GetReviewCheckoutDirFromProjectRoot(projectRoot, head.ID)
+	}
+	shellPolicy := heads.ShellCommandPolicy{
+		WorkingDirReadOnly: head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+		GitIsolation:       head.GitIsolation,
+	}
+	if useReview {
+		shellPolicy.WorkingDirReadOnly = true
+		shellPolicy.GitIsolation = string(sandbox.GitIsolationReadonly)
 	}
 
 	// WebSocket → session stdin (and resize control messages)
@@ -521,7 +537,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				}
 			case websocket.TextMessage:
 				if chatMode {
-					s.handleChatClientMessage(conn, projectRoot, worktree, sessionID, data)
+					s.handleChatClientMessage(conn, projectRoot, worktree, sessionID, shellPolicy, data)
 					continue
 				}
 				var msg termResizeMsg

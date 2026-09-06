@@ -20,6 +20,7 @@ import (
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -51,7 +52,9 @@ import (
 func toAPIQueuedMessages(msgs []heads.QueuedMessage) []api.ChatQueuedMessage {
 	out := make([]api.ChatQueuedMessage, 0, len(msgs))
 	for _, m := range msgs {
-		out = append(out, api.ChatQueuedMessage{Id: m.ID, Content: m.Content, Origin: m.Origin})
+		out = append(out, api.ChatQueuedMessage{
+			Id: m.ID, Content: m.Content, Origin: m.Origin, Reason: m.Reason, SourceAgentId: m.SourceAgentID,
+		})
 	}
 	return out
 }
@@ -82,7 +85,7 @@ func hasPendingAsk(pending []claudestream.PendingAsk, requestID string) bool {
 // projectRoot locates the head's on-disk message queue; worktree is the cwd a
 // "!command" runs in; conn is needed to answer the frames that carry a reply
 // (load_events_before, load_subagent, task_output).
-func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, sessionID string, data []byte) {
+func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, sessionID string, shellPolicy heads.ShellCommandPolicy, data []byte) {
 	var msg api.ChatClientMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		log.Printf("chat ws: bad client frame for %q: %v", sessionID, err)
@@ -134,7 +137,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		if strings.TrimSpace(msg.Command) == "" {
 			return
 		}
-		go s.runChatShellCommand(conn, projectRoot, worktree, sessionID, msg.Id, msg.Command)
+		go s.runChatShellCommand(conn, projectRoot, worktree, sessionID, shellPolicy, msg.Id, msg.Command)
 	case "shell_stop":
 		// Stop button on a running "!command" card: cancel its context, which
 		// kills the sandboxed process. The run then settles as "stopped" with
@@ -203,7 +206,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 // to the agent (a user turn carrying the command + output). Runs on its own
 // goroutine. conn streams the live output; a closed socket just drops the live
 // frames (the durable settle still persists).
-func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sessionID, msgID, command string) {
+func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sessionID string, policy heads.ShellCommandPolicy, msgID, command string) {
 	// Make the run cancellable so a shell_stop frame can kill it mid-flight. Keyed
 	// by the send id; registered for its whole lifetime and cleaned up on exit.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -215,7 +218,13 @@ func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sess
 	onChunk := func(chunk string) {
 		writeFrame(conn, api.ChatShellOutputFrame{Type: api.ShellOutput, Id: msgID, Chunk: chunk})
 	}
-	res, err := heads.RunShellCommand(ctx, projectRoot, worktree, command, onChunk)
+	agentType := sandbox.AgentTypeBash
+	if s.Sessions != nil {
+		if sess, ok := s.Sessions.Get(sessionID); ok {
+			agentType = sess.AgentType
+		}
+	}
+	res, err := heads.RunShellCommand(ctx, projectRoot, worktree, sessionID, agentType, policy, command, onChunk)
 	if err != nil {
 		// A launch/spec failure (e.g. no worktree): surface it in the card's output
 		// so the user isn't left with a silently-hung "running" card.
@@ -463,8 +472,12 @@ func tailNotifications(dir string, stop <-chan struct{}, out chan<- [][]byte) {
 // claudeProjectDir resolves the Claude project directory recording a
 // worktree's transcripts (~/.claude/projects/<worktree-slug>), or "" when it
 // can't be determined.
-func claudeProjectDir(worktree string) string {
-	return paths.ClaudeProjectDir(worktree)
+func claudeProjectDir(projectRoot, sessionID, worktree string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return paths.ClaudeProjectDirForSession(projectRoot, sessionID, home, worktree)
 }
 
 // pumpChatOutput relays a chat session's events to the socket until
@@ -512,7 +525,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		// live contains only events appended after it.
 		s.sendChatHistory(conn, sessionID, fmt.Sprintf("%d", snapshot.Through+1), 100)
 	}
-	dir := claudeProjectDir(worktree)
+	dir := claudeProjectDir(projectRoot, sessionID, worktree)
 	// Which of the questions just replayed is the CLI actually still blocked on.
 	// Ahead of replay_done, so the client has it when it settles the transcript.
 	if pending, known := s.Sessions.PendingQuestions(sessionID); known {

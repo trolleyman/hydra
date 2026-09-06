@@ -691,6 +691,12 @@ body {
 
 /* Dark: One Dark, matching the palette this UI used before the Prism switch. */
 .dark .token.comment, .dark .token.prolog, .dark .token.doctype, .dark .token.cdata { color: #5c6370; }
+/* Changed words need more separation from their red/green fill when they sit
+   inside the deliberately muted comment token. A restrained mid-grey is clear
+   without the selected-text look of near-white. Keep this scoped to the word
+   mark: ordinary comments and every other syntax token retain the palette. */
+.dark .token.comment .diff-word-del,
+.dark .token.comment .diff-word-add { color: #9aa3b2; }
 .dark .token.punctuation { color: #abb2bf; }
 .dark .token.keyword, .dark .token.atrule, .dark .token.rule, .dark .token.important { color: #c678dd; }
 .dark .token.operator, .dark .token.entity, .dark .token.url { color: #56b6c2; }
@@ -998,6 +1004,52 @@ body {
   transform-box: view-box;
   transform-origin: 12px 9.2px;
   animation: work-spark-pulse 1.32s ease-in-out infinite;
+}
+
+/* WebKitGTK can repaint the full native window for every frame of even a tiny
+   CSS animation instead of keeping these status marks on isolated compositor
+   layers. The desktop's opt-in static mode keeps the same status shapes and
+   text while holding persistent motion still. Short interaction and entrance
+   transitions remain enabled. */
+.hydra-disable-persistent-animations .animate-gradient,
+.hydra-disable-persistent-animations .animate-shimmer::after,
+.hydra-disable-persistent-animations .animate-status-pulse,
+.hydra-disable-persistent-animations .animate-barber-pole,
+.hydra-disable-persistent-animations .animate-spin,
+.hydra-disable-persistent-animations .animate-pulse,
+.hydra-disable-persistent-animations .animate-ping,
+.hydra-disable-persistent-animations .chat-text-shimmer,
+.hydra-disable-persistent-animations .work-spark,
+.hydra-disable-persistent-animations .work-spark-spoke {
+  animation: none;
+}
+.hydra-disable-persistent-animations .chat-text-shimmer {
+  background-image: none;
+  color: inherit;
+}
+
+/* This deliberately severe desktop profiling mode separates page styling cost
+   from WebKitGTK's final-surface paint cost. It is not a product theme. Keep the
+   page usable for scrolling and typing while removing common paint, clipping,
+   and compositing triggers. */
+.hydra-low-paint *,
+.hydra-low-paint *::before,
+.hydra-low-paint *::after {
+  animation: none !important;
+  transition: none !important;
+  background-image: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  clip-path: none !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  will-change: auto !important;
+}
+.hydra-low-paint .sticky {
+  position: static !important;
 }
 
 /* The mobile thinking viewer slides up from the bottom edge as a sheet. */

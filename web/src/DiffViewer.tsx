@@ -4,11 +4,12 @@ import { Link, linkOptions, useNavigate, type LinkProps } from '@tanstack/react-
 import { canHighlight, highlightHtml, highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
+import { isGeneratedFile } from './lib/generatedFile'
 import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
+import { MessageOrigin, MessageReason, type AgentResponse, type CommitInfo, type DiffFile, type DiffHunk, type DiffLine, type DiffResponse, type ReviewImageAnchor, type ReviewThread } from './api'
 import { CommitCard, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
 import { ChangeStats } from './components/ChangeStats'
 import { ChangeTypeIcon as SharedChangeTypeIcon } from './components/ChangeTypeIcon'
@@ -18,12 +19,12 @@ import { providerLabel } from './lib/forgeDisplay'
 import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadContext'
 import {
   Plus, Calendar, TriangleAlert,
-  ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
+  ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, ArrowUp, ArrowDown, MailOpen, Paperclip,
   SquareArrowOutUpRight,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, ArrowUpToLine, ArrowDownToLine, UnfoldVertical,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
@@ -35,8 +36,8 @@ import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { rowSelected, selectRow, formatLineParam, parseLineParam, type DiffSide, type DiffLineSelection } from './lib/diffSelection'
 import { formatLineHash } from './lib/lineRange'
-import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
-import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from './lib/whitespaceMarks'
+import { buildWordRangeMaps, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
+import { diffCodeHtml } from './lib/diffCode'
 import { useWhitespaceMarks } from './lib/whitespacePrefs'
 import { Tooltip } from './components/Tooltip'
 import { DirectoryTooltip } from './components/DirectoryTooltip'
@@ -48,21 +49,23 @@ import { useMeasuredHeight, useMeasuredWidth } from './lib/useMeasuredHeight'
 import {
   UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS,
   SBS_ROW, SBS_HALF, SBS_LINE_NUM, SBS_MARKER, SBS_CODE,
-  EXPANDER_ROW, EXPANDER_BTN, EXPANDER_BTNS, EXPANDER_COUNT, EXPANDER_CONTEXT, NOTICE_BLOCK, HIDDEN_BLOCK,
+  EXPANDER_ROW, EXPANDER_BTN, EXPANDER_BTNS, EXPANDER_CONTEXT, NOTICE_BLOCK, HIDDEN_BLOCK,
   measureBodyHeight, queueMeasure,
 } from './lib/diffMetrics'
 import { useFontSizePx, useFontStack } from './lib/fontPrefs'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, leadingGap, trailingGap, atFileEnd, isContiguous, isChangeLine,
-  hunkContext, regionAfterHunk, regionKey, LEAD_REGION_ID, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
+  hunkContext, regionAfterHunk, regionKey, LEAD_REGION_ID, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
   type RenderSeg, type RevealMap,
 } from './lib/diffBody'
+import { parseDiffContextLines } from './lib/diffPrefs'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
 import { TestsPanel } from './components/TestsPanel'
 import { PreviewPanel } from './components/PreviewPanel'
 import { ImageDiffView, type ImageDiffMode } from './components/ArtifactImageDiff'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './components/SettingsPopover'
+import { DiffContextSelect } from './components/DiffContextSelect'
 import { InfoTooltip } from './components/InfoTooltip'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
@@ -91,6 +94,7 @@ import { mergeBaseInstruction } from './lib/mergeBaseInstruction'
 import { commitIdx, commitParentSelection, reconcileRightSelection, type LeftSel, type RightSel } from './lib/commitRange'
 import { createArrayIndex } from './lib/arrayIndex'
 import { hasWebKitDesktopBridge } from './lib/desktopBridge'
+import { LanguagePicker } from './components/LanguagePicker'
 
 const indexCommits = createArrayIndex<CommitInfo, string>((commit) => commit.sha)
 const indexDiffFiles = createArrayIndex<DiffFile, string>((file) => file.path)
@@ -1199,19 +1203,6 @@ const UNIFIED_ROW_HOVER = "after:content-[''] after:pointer-events-none hover:af
 // keep a stable prop identity when word highlighting is off or a file has none.
 const EMPTY_WORD_RANGES: Map<number, WordRange[]> = new Map()
 
-// codeCellHtml resolves the HTML for a diff line's code cell: the word-diff
-// overlay when this line has changed ranges, else the plain syntax-highlighted
-// HTML, with the whitespace marks (lib/whitespaceMarks) laid over whichever it
-// is - last, so neither the highlighter nor the word diff has to know about
-// them. Returns null to signal "render the raw content as a text node" (no
-// highlight, no word ranges, nothing to mark) - the safe path that needs no
-// dangerouslySetInnerHTML.
-function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string, ws: WhitespaceMarks): string | null {
-  const html = ranges && ranges.length ? renderWordDiffHtml(highlighted, content, ranges, wordClass) : highlighted
-  if (html != null) return markWhitespace(html, ws)
-  return markWhitespaceText(content, ws)
-}
-
 const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   path: string
@@ -1253,7 +1244,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
         const wordRanges = isAdd
           ? (line.new_line_num != null ? wordRangesNew.get(line.new_line_num) : undefined)
           : isDel ? (line.old_line_num != null ? wordRangesOld.get(line.old_line_num) : undefined) : undefined
-        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS, ws)
+        const codeHtml = diffCodeHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS, ws)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         const markerClass = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
         const rowSel = rowSelected(selection, line.old_line_num, line.new_line_num)
@@ -1345,8 +1336,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
         // a context line shown on both sides.
         const oldWordRanges = line.oldType === 'deletion' && line.oldLineNum != null ? wordRangesOld.get(line.oldLineNum) : undefined
         const newWordRanges = line.newType === 'addition' && line.newLineNum != null ? wordRangesNew.get(line.newLineNum) : undefined
-        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS, ws) : null
-        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS, ws) : null
+        const oldCodeHtml = line.oldContent != null ? diffCodeHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS, ws) : null
+        const newCodeHtml = line.newContent != null ? diffCodeHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS, ws) : null
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         // Both halves light together: they are one row of the file, and lighting
@@ -1442,8 +1433,7 @@ export function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: stri
   return <SharedChangeTypeIcon type={type} className={className} />
 }
 
-// How many extra lines each ⌄/⌃ expander reveals per click (the default context
-// either side of a change is diffBody's CTX).
+// How many extra lines each ⌄/⌃ expander reveals per click.
 const EXPAND_STEP = 20
 
 // Files with at least this many changed lines start hidden ("Load diff" button)
@@ -1566,10 +1556,10 @@ function nearestScrollParent(el: HTMLElement): Element | null {
 
 // estimateVisibleRows approximates how many rows a file's body renders in its
 // default state (no per-region reveals) without building anything: change runs
-// count in full, each unchanged run contributes up to CTX context per adjacent
-// change plus one expander row - mirroring buildSegments. Non-expanded files
-// render their -U3 hunks as-is plus expander rows.
-function estimateVisibleRows(file: DiffFile): number {
+// count in full, each unchanged run contributes up to the selected context per
+// adjacent change plus one expander row - mirroring buildSegments. Non-expanded
+// files render their windowed hunks as-is plus expander rows.
+function estimateVisibleRows(file: DiffFile, contextLines: number): number {
   const hunks = file.hunks ?? []
   if (hunks.length === 0) return 2
   if (!file.expanded) {
@@ -1589,8 +1579,8 @@ function estimateVisibleRows(file: DiffFile): number {
   let rows = 0
   runs.forEach((run, ri) => {
     if (run.change) { rows += run.len; return }
-    const top = Math.min(run.len, ri === 0 ? 0 : CTX)
-    const bot = Math.min(run.len - top, ri === runs.length - 1 ? 0 : CTX)
+    const top = Math.min(run.len, ri === 0 ? 0 : contextLines)
+    const bot = Math.min(run.len - top, ri === runs.length - 1 ? 0 : contextLines)
     const hidden = run.len - top - bot
     rows += hidden <= MIN_COLLAPSE_GAP ? run.len : top + bot + 1
   })
@@ -1627,17 +1617,25 @@ function HunkContextLabel({ label }: { label: ContextLabel | undefined }) {
     : <span className={EXPANDER_CONTEXT} title={label.text}>{label.text}</span>
 }
 
-function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) {
+function RevealButton({ direction, hidden, onClick }: {
+  direction: 'up' | 'down' | 'all'
+  hidden?: number
+  onClick: () => void
+}) {
+  const Icon = direction === 'up' ? ArrowUpToLine : direction === 'down' ? ArrowDownToLine : UnfoldVertical
+  const label = direction === 'all'
+    ? `Show all ${hidden} line${hidden === 1 ? '' : 's'}`
+    : `${direction === 'up' ? 'Up' : 'Down'} ${EXPAND_STEP} lines`
   return (
-    <button onClick={onClick} className={EXPANDER_COUNT}>
-      ···  {hidden} line{hidden !== 1 ? 's' : ''}  ···
+    <button onClick={onClick} className={EXPANDER_BTN}>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span>{label}</span>
     </button>
   )
 }
 
-// GapExpander sits between two changes. Both ⌄ (reveal more after the upper
-// change) and ⌃ (reveal more before the lower change) live together on the left;
-// the "··· N lines ···" label reveals the whole gap.
+// GapExpander sits between two changes. Its three labelled actions reveal from
+// either edge or show the entire unchanged run.
 function AnimatedExpanderRow({ closing, children }: { closing?: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
@@ -1665,14 +1663,10 @@ function GapExpander({ seg, label, onDown, onUp, onAll }: {
   return (
     <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
-        <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-          <button onClick={onDown} className={EXPANDER_BTN}><ChevronDown className="w-3 h-3" /></button>
-        </Tooltip>
-        <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-          <button onClick={onUp} className={EXPANDER_BTN}><ChevronUp className="w-3 h-3" /></button>
-        </Tooltip>
+        <RevealButton direction="up" onClick={onUp} />
+        <RevealButton direction="down" onClick={onDown} />
+        <RevealButton direction="all" hidden={seg.hidden!} onClick={onAll} />
       </div>
-      <GapCount hidden={seg.hidden!} onClick={onAll} />
       <HunkContextLabel label={label} />
     </AnimatedExpanderRow>
   )
@@ -1688,13 +1682,9 @@ function EdgeExpander({ seg, label, onStep, onAll }: {
   return (
     <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
-        <Tooltip side="top" content={`Expand ${up ? 'up' : 'down'} ${EXPAND_STEP} lines`}>
-          <button onClick={onStep} className={EXPANDER_BTN}>
-            {up ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          </button>
-        </Tooltip>
+        <RevealButton direction={up ? 'up' : 'down'} onClick={onStep} />
+        <RevealButton direction="all" hidden={seg.hidden!} onClick={onAll} />
       </div>
-      <GapCount hidden={seg.hidden!} onClick={onAll} />
       <HunkContextLabel label={label} />
     </AnimatedExpanderRow>
   )
@@ -1711,11 +1701,6 @@ function EdgeExpander({ seg, label, onStep, onAll }: {
 // it, the same way Tests/Artifacts cards dock below their section header via
 // --sticky-section-h. Mirrors STICKY_CARD_TOP's approach.
 export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(--sticky-files-h, 0px))'
-
-// How long the file-body collapse/expand height glide runs - kept in JS so the
-// deferred-unmount timer matches the CSS duration (mirrors CollapsibleCard's
-// COLLAPSE_MS). See FileDiff's `bodyMounted`.
-const FILE_COLLAPSE_MS = 200
 
 // A context reveal grows one existing unchanged run. Animate that run's measured
 // height rather than the whole file body: the expander and nearby change move
@@ -1789,7 +1774,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo, revealLine }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, showingSinceViewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo, revealLine }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -1799,6 +1784,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // flips it (given the head blob sha to key on). Both omitted in the read-only
   // repo view, which has no per-agent review progress.
   viewed?: boolean
+  // True when this card is a delta from the version previously marked viewed,
+  // rather than the head's complete change against its base branch.
+  showingSinceViewed?: boolean
   onToggleViewed?: (path: string, headBlobSha: string | null | undefined) => void
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string, attachments: string[]) => void
@@ -1853,7 +1841,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // no ref to browse, which hides the header button.
   openInRepo?: (path: string) => LinkProps
 }) {
-  const lang = getLanguage(file.path, firstFileLine(file))
+  const fileHead = firstFileLine(file)
+  const detectedLang = getLanguage(file.path, fileHead)
+  const [languageOverride, setLanguageOverride] = useState<string | null>(null)
+  const lang = languageOverride ?? detectedLang
+  const generated = isGeneratedFile(file.path, fileHead)
   const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
@@ -1879,30 +1871,23 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     return () => io.disconnect()
   }, [near])
 
-  // Collapse/expand glides the file body between 0 and its measured height - the
-  // same height-tween the tests/artifacts CollapsibleCard uses, so the two feel
-  // identical. The body stays mounted while open and for one collapse animation,
-  // then unmounts so a collapsed file (and its highlighting) costs nothing -
-  // hence the derived memos below key off `bodyMounted`, not the raw prop, so
-  // their content stays put for the 200ms the glide plays. headless mode (the
-  // repository one-file view) is always open and never animates.
+  // Opening glides from zero to the measured body height. Closing is immediate:
+  // hiding a reviewed or generated file should get it out of the way without a
+  // departing card pushing the rest of the review for 200ms.
   const [bodyRef, bodyH] = useMeasuredHeight(0)
   const [bodyMounted, setBodyMounted] = useState(!isCollapsed)
   useEffect(() => {
-    // Mount on the next frame (not synchronously here) so the body first paints at
-    // height 0 and the 0->height glide can play - deferring via rAF also keeps this
-    // out of the synchronous effect body. Cancel it if we re-collapse before it fires.
     if (!isCollapsed) {
       const r = requestAnimationFrame(() => setBodyMounted(true))
       return () => cancelAnimationFrame(r)
     }
-    const t = setTimeout(() => setBodyMounted(false), FILE_COLLAPSE_MS)
-    return () => clearTimeout(t)
+    let cancelled = false
+    queueMicrotask(() => { if (!cancelled) setBodyMounted(false) })
+    return () => { cancelled = true }
   }, [isCollapsed])
-  // Open (fully expanded, height = content) vs. animating/closed. bodyMounted
-  // stays true through the collapse tween; bodyOpen flips to false at once so the
-  // height animates back to 0. On expand, bodyMounted is set in the effect above
-  // (after a paint at height 0) so the 0→height glide can play.
+  // Open (fully expanded, height = content) vs. closed. bodyOpen flips false at
+  // once; the microtask only defers discarding the now-invisible subtree. On
+  // expand, bodyMounted is set after a paint at height 0 so the opening glide can play.
   const bodyOpen = !isCollapsed && bodyMounted
 
 
@@ -2098,8 +2083,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     })
   }, [near, headless, boxW, file, sideBySide, isHidden, currentContext, codeFont, codeSizePx])
   const estBodyH = useMemo(
-    () => (near ? 0 : measuredBodyH ?? (isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H)),
-    [near, measuredBodyH, isHidden, file],
+    () => (near ? 0 : measuredBodyH ?? (isHidden || file.binary ? 100 : estimateVisibleRows(file, currentContext) * EST_ROW_H)),
+    [near, measuredBodyH, isHidden, file, currentContext],
   )
 
   // The height the body wrapper renders at. Held in one place because it is not
@@ -2121,7 +2106,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     if (prev == null || wrapperH == null) return
     const delta = wrapperH - prev
     if (!delta) return
-    // The 200ms glide belongs to the collapse/expand toggle. This height is also
+    // The 200ms glide belongs only to opening a file. Closing snaps, and this
+    // height is also
     // where a measurement correction lands - the placeholder's predicted height
     // giving way to the body's real one when the card mounts - and animating
     // THAT spent a fifth of a second dragging every card below it down the pane,
@@ -2131,7 +2117,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     // commits it) before this frame paints: the reader sees one reflow, not a
     // slide. Restoring the empty string hands the glide straight back to the
     // class for the next real toggle.
-    if (wasOpen === bodyOpen && boxEl.current) {
+    if (((wasOpen && !bodyOpen) || wasOpen === bodyOpen) && boxEl.current) {
       const el = boxEl.current
       el.style.transition = 'none'
       void el.offsetHeight
@@ -2161,7 +2147,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // rename) has nothing to collapse - render its lines plainly rather than
   // folding the entire body behind one expander.
   const noChanges = file.additions === 0 && file.deletions === 0
-  const segments = useMemo(() => (fullLines && !noChanges ? buildSegments(fullLines, reveal) : null), [fullLines, reveal, noChanges])
+  const segments = useMemo(
+    () => (fullLines && !noChanges ? buildSegments(fullLines, reveal, currentContext) : null),
+    [fullLines, reveal, noChanges, currentContext],
+  )
 
   // Each expander's context label, highlighted. Keyed by segment key (whole-file
   // path) / hunk header (windowed path) and rebuilt only when the segments, the
@@ -2336,55 +2325,65 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
         // overflow-hidden + rounded-t-lg instead, plus rounded-b-lg while collapsed.
         <div
           style={{ top: FILE_STICKY_TOP }}
-          className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
+          className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
           onClick={toggleCollapse}
         >
-          {/* No onClick of its own: the header div handles the toggle, and a
-            second handler here would fire too (bubbling) and toggle right
-            back - the chevron was a no-op because of exactly that. */}
-          <button
-            aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
-          >
-            <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
-          </button>
-          {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            {/* The file-header path reads as sans (item 2); the diff body stays mono. */}
-            <span className="text-xs min-w-0 truncate cursor-pointer hover:underline">
-              {file.change_type === 'renamed' && file.old_path ? (
-                <>
-                  <PathName path={file.old_path} />
-                  <span className="text-gray-400 dark:text-gray-500"> → </span>
+          <div className="flex min-w-40 flex-1 items-center gap-2">
+            {/* No onClick of its own: the header div handles the toggle, and a
+              second handler here would fire too (bubbling) and toggle right
+              back - the chevron was a no-op because of exactly that. */}
+            <button
+              aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
+              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+            </button>
+            {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              {/* The file-header path reads as sans (item 2); the diff body stays mono. */}
+              <span className="text-xs min-w-0 truncate cursor-pointer hover:underline">
+                {file.change_type === 'renamed' && file.old_path ? (
+                  <>
+                    <PathName path={file.old_path} />
+                    <span className="text-gray-400 dark:text-gray-500"> → </span>
+                    <PathName path={file.path} />
+                  </>
+                ) : (
                   <PathName path={file.path} />
-                </>
-              ) : (
-                <PathName path={file.path} />
+                )}
+              </span>
+              <ChangeTypeIcon type={file.change_type} />
+              {generated && (
+                <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">Auto-generated</span>
               )}
-            </span>
-            <ChangeTypeIcon type={file.change_type} />
-            {/* Copy-path rides with the path itself rather than sitting out in the
-              header's right-hand action cluster: the flex-1 above pushed it all
-              the way over there, next to buttons that have nothing to do with the
-              path, which is what made "which of these copies what?" ambiguous. */}
-            <CopyButton text={file.path} what="file path" idleLabel="Copy path" />
+              {/* Copy-path rides with the path itself rather than sitting out in the
+                header's right-hand action cluster: the flex-1 above pushed it all
+                the way over there, next to buttons that have nothing to do with the
+                path, which is what made "which of these copies what?" ambiguous. */}
+              <CopyButton text={file.path} what="file path" idleLabel="Copy path" />
+            </div>
           </div>
-          {/* Copy the whole file's diff. A binary file has no text to copy. */}
-          {!file.binary && file.hunks.length > 0 && (
-            <CopyButton
-              text={fileDiffText(file)}
-              what="file diff"
-              idleLabel="Copy file diff"
-              idle={FileDiffIcon}
-            />
-          )}
-          {/* A deleted file no longer exists at the branch tip, so a repo-view link
-            would 404 - hide it there; every other change type opens fine. */}
-          {openInRepo && file.change_type !== 'deleted' && <RepoOpenButton target={openInRepo(file.path)} />}
-          {!file.binary && (
-            <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-1 text-xs font-medium" />
-          )}
-          {onToggleViewed && (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <LanguagePicker detected={detectedLang} selected={languageOverride} onSelect={setLanguageOverride} />
+            {/* Copy the whole file's diff. A binary file has no text to copy. */}
+            {!file.binary && file.hunks.length > 0 && (
+              <CopyButton
+                text={fileDiffText(file)}
+                what="file diff"
+                idleLabel="Copy file diff"
+                idle={FileDiffIcon}
+              />
+            )}
+            {/* A deleted file no longer exists at the branch tip, so a repo-view link
+              would 404 - hide it there; every other change type opens fine. */}
+            {openInRepo && file.change_type !== 'deleted' && <RepoOpenButton target={openInRepo(file.path)} />}
+            {!file.binary && (
+              <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-1 text-xs font-medium" />
+            )}
+            {showingSinceViewed && (
+              <span className="shrink-0 text-2xs font-medium text-blue-500 dark:text-blue-400">New since viewed</span>
+            )}
+            {onToggleViewed && (
             // Marking a file viewed records its current head blob sha; when the
             // agent later changes the file the sha no longer matches and it re-shows
             // as unviewed. Stops propagation so ticking it doesn't also collapse the
@@ -2403,13 +2402,14 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               />
               Viewed
             </label>
-          )}
+            )}
+          </div>
         </div>
       )}
       {/* Body. rounded-b-lg + overflow-hidden clip the edge-to-edge diff content's
           bottom corners (the root dropped its overflow-hidden so the header can be
-          sticky). For the stacked view the wrapper also height-tweens the body on
-          collapse/expand - the inner measured div carries bodyRef; see
+          sticky). For the stacked view the wrapper height-tweens only when opening;
+          closing is immediate. The inner measured div carries bodyRef; see
           bodyOpen/bodyMounted. headless (the repo one-file view) is bare, always
           open, and never animates. */}
       <div
@@ -2421,10 +2421,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
         // as `absolute inset-0` via ImageDiffView) in its own stacking context so
         // it can't paint over the sticky file/section/changes bars above it - see
         // the matching note in CollapsibleCard.
-        // The height glide stays declared here for the collapse/expand toggle;
-        // the layout effect above cancels it for a height change that is only a
-        // measurement correction.
-        className={headless ? 'isolate' : 'isolate overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
+        className={headless ? 'isolate' : `isolate overflow-hidden rounded-b-lg ${isCollapsed ? '' : 'transition-[height] duration-200 ease-out motion-reduce:transition-none'}`}
         style={headless ? undefined : { height: wrapperH ?? 0 }}
         aria-hidden={headless ? undefined : !bodyOpen}
       >
@@ -2502,7 +2499,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                   const atEndOfFile = isLast && atFileEnd(hunk, file.total_lines, currentContext)
                   // What each edge expander hides. The leading run is measured from
                   // the first hunk's start line; the trailing one needs the file's
-                  // length (total_lines), and stays null - a bare chevron - without it.
+                  // length (total_lines), and stays null - directional-only - without it.
                   const leadGap = isFirst ? leadingGap(hunk) : 0
                   const tailGap = isLast ? trailingGap(hunk, file.total_lines) : null
                   // The gap above this hunk is the unchanged run that starts just
@@ -2515,33 +2512,19 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       {isFirst && !atTopOfFile && (
                         <div className={EXPANDER_ROW}>
                           <div className={EXPANDER_BTNS}>
-                            <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-                              <button onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                                <ChevronUp className="w-3 h-3" />
-                              </button>
-                            </Tooltip>
+                            <RevealButton direction="up" onClick={() => windowedExpand(LEAD_REGION_ID, { bot: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
+                            {leadGap > 0 && <RevealButton direction="all" hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: currentContext + leadGap }, currentContext + leadGap)} />}
                           </div>
-                          {leadGap > 0 && (
-                            <GapCount hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + leadGap }, currentContext + leadGap)} />
-                          )}
                           <HunkContextLabel label={contextLabels.get(hunk.header)} />
                         </div>
                       )}
                       {!isFirst && gapSize > 0 && (
                         <div className={EXPANDER_ROW}>
                           <div className={EXPANDER_BTNS}>
-                            <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-                              <button onClick={() => windowedExpand(gapRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                                <ChevronDown className="w-3 h-3" />
-                              </button>
-                            </Tooltip>
-                            <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-                              <button onClick={() => windowedExpand(gapRegion, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                                <ChevronUp className="w-3 h-3" />
-                              </button>
-                            </Tooltip>
+                            <RevealButton direction="up" onClick={() => windowedExpand(gapRegion, { bot: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
+                            <RevealButton direction="down" onClick={() => windowedExpand(gapRegion, { top: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
+                            <RevealButton direction="all" hidden={gapSize} onClick={() => windowedExpand(gapRegion, { top: currentContext + gapSize }, currentContext + Math.max(gapSize, EXPAND_STEP))} />
                           </div>
-                          <GapCount hidden={gapSize} onClick={() => windowedExpand(gapRegion, { top: CTX + gapSize }, currentContext + Math.max(gapSize, EXPAND_STEP))} />
                           <HunkContextLabel label={contextLabels.get(hunk.header)} />
                         </div>
                       )}
@@ -2558,15 +2541,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       {isLast && !atEndOfFile && (
                         <div className={EXPANDER_ROW}>
                           <div className={EXPANDER_BTNS}>
-                            <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-                              <button onClick={() => windowedExpand(tailRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                                <ChevronDown className="w-3 h-3" />
-                              </button>
-                            </Tooltip>
+                            <RevealButton direction="down" onClick={() => windowedExpand(tailRegion, { top: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
+                            {tailGap != null && tailGap > 0 && <RevealButton direction="all" hidden={tailGap} onClick={() => windowedExpand(tailRegion, { top: currentContext + tailGap }, currentContext + tailGap)} />}
                           </div>
-                          {tailGap != null && tailGap > 0 && (
-                            <GapCount hidden={tailGap} onClick={() => windowedExpand(tailRegion, { top: CTX + tailGap }, currentContext + tailGap)} />
-                          )}
                         </div>
                       )}
                     </Fragment>
@@ -2584,6 +2561,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
 // ── Commit selector types & helpers ───────────────────────────────────────────
 
 type DiffParams = { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean }
+type ViewedDeltaDiffFile = DiffFile & { viewed_delta?: true }
+
+function isViewedDelta(file: DiffFile): boolean {
+  return !!(file as ViewedDeltaDiffFile).viewed_delta
+}
 
 // buildDiffParams maps the left/right selectors to the getAgentDiff query
 // params. Shared by every diff fetch (initial load, silent refresh, per-file
@@ -3291,7 +3273,10 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
     const res = await runWithToast(
-      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: mergeBaseInstruction(agent, true) }),
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, {
+        text: mergeBaseInstruction(agent, true),
+        origin: MessageOrigin.MessageOriginButton,
+      }),
       { errorPrefix: 'Failed to send fix request to agent' },
     )
     setSending(false)
@@ -3511,7 +3496,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
             text: mergeBaseInstruction(agent, false),
-            origin: 'fix_conflicts',
+            origin: MessageOrigin.MessageOriginButton,
           }),
           { errorPrefix: 'Failed to send update request to agent' },
         )
@@ -3590,16 +3575,19 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-      <Tooltip
-        content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
-        align="left"
-        className="min-w-0 flex-1"
-      >
-        <span className="text-xs truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
-          {file.path.split('/').pop()}
-        </span>
-      </Tooltip>
-      <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+      <span className="flex min-w-0 items-center gap-1.5">
+        <Tooltip
+          content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
+          align="left"
+          className="min-w-0"
+        >
+          <span className="min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">
+            {file.path.split('/').pop()}
+          </span>
+        </Tooltip>
+        <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+        {isGeneratedFile(file.path, firstFileLine(file)) && <span className="shrink-0 text-[9px] text-gray-400 dark:text-gray-500">Auto</span>}
+      </span>
       <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
     </button>
   )
@@ -3721,6 +3709,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // reviewer wants to read; `!== 'false'` so an explicit opt-out still sticks.
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(() => readLocal(StorageKeys.diffIgnoreWhitespace) !== 'false')
   const [wordHighlight, setWordHighlight] = useState(() => readLocal(StorageKeys.diffWordHighlight) !== 'false')
+  const [contextLines, setContextLines] = useState(() => parseDiffContextLines(readLocal(StorageKeys.diffContextLines)))
   const [singleFile, setSingleFile] = useState(() => readLocal(StorageKeys.diffSingleFile) === 'true')
   const [fileView, setFileView] = useState<FileView>(() => {
     const stored = readLocal(StorageKeys.diffFileView)
@@ -3768,12 +3757,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(
     () => new Set(loadAgentViewPrefs(projectId, agent.id).collapsedFiles ?? []),
   )
+  // Generated files are folded once when they first appear on this page. The
+  // seen set means a reader who expands one is not interrupted by a live diff
+  // refresh folding it again.
+  const generatedFilesSeenRef = useRef<Set<string>>(new Set())
   // Per-file "viewed" review state: path -> the head blob sha the file had when
   // marked viewed. A file is viewed iff this equals its current head_blob_sha, so
   // it auto-reverts to unviewed the instant the agent changes it.
   const [viewedFiles, setViewedFiles] = useState<Record<string, string>>(
     () => loadAgentViewPrefs(projectId, agent.id).viewedFiles ?? {},
   )
+  const viewedFilesRef = useRef(viewedFiles)
   const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
   const userShownFilesRef = useRef<Set<string>>(new Set())
   // Per-file context (number of surrounding lines). Persists across polling refreshes.
@@ -3791,6 +3785,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => { writeLocal(StorageKeys.diffSideBySide, String(sideBySide)) }, [sideBySide])
   useEffect(() => { writeLocal(StorageKeys.diffIgnoreWhitespace, String(ignoreWhitespace)) }, [ignoreWhitespace])
   useEffect(() => { writeLocal(StorageKeys.diffWordHighlight, String(wordHighlight)) }, [wordHighlight])
+  useEffect(() => { writeLocal(StorageKeys.diffContextLines, String(contextLines)) }, [contextLines])
   useEffect(() => { writeLocal(StorageKeys.diffSingleFile, String(singleFile)) }, [singleFile])
   useEffect(() => { writeLocal(StorageKeys.diffFileView, fileView) }, [fileView])
   useEffect(() => { writeLocal(StorageKeys.diffSidebarWidth, String(sidebarWidth)) }, [sidebarWidth])
@@ -3820,6 +3815,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [projectId, agent.id, collapsedFiles])
 
   useEffect(() => {
+    viewedFilesRef.current = viewedFiles
     patchAgentViewPrefs(projectId, agent.id, { viewedFiles })
   }, [projectId, agent.id, viewedFiles])
 
@@ -3827,6 +3823,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // blob sha; unmarking (or a missing sha) clears it. A file with no head blob
   // sha (a deletion) can't be marked - there is nothing to key on.
   const toggleFileViewed = useCallback((path: string, headBlobSha: string | null | undefined) => {
+    const wasViewed = !!headBlobSha && viewedFiles[path] === headBlobSha
+    if (!wasViewed && headBlobSha) {
+      setCollapsedFiles((prev) => {
+        if (prev.has(path)) return prev
+        const next = new Set(prev)
+        next.add(path)
+        return next
+      })
+    }
     setViewedFiles((prev) => {
       const isViewed = !!headBlobSha && prev[path] === headBlobSha
       if (isViewed) {
@@ -3837,7 +3842,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       if (!headBlobSha) return prev
       return { ...prev, [path]: headBlobSha }
     })
-  }, [])
+    // Unchecking a reviewed file restores the complete base-to-head diff. A
+    // newly checked file can keep its already-rendered body in place.
+    if (wasViewed) setRefreshKey((key) => key + 1)
+  }, [viewedFiles])
 
   // A file is viewed iff the sha we stored equals its current head blob sha.
   const isFileViewed = useCallback(
@@ -3848,6 +3856,47 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     () => (diff ? diff.files.reduce((n, f) => n + (isFileViewed(f) ? 1 : 0), 0) : 0),
     [diff, isFileViewed],
   )
+
+  // Replace only files that changed after being marked viewed with a diff from
+  // their saved blob to the latest blob. The first response remains the source
+  // of truth for which files belong to the overall review; the scoped bulk
+  // response only replaces the bodies and stats of affected file cards.
+  // Historical commit ranges deliberately keep their literal selected diff.
+  const applyViewedDeltas = useCallback(async (d: DiffResponse, params: DiffParams): Promise<DiffResponse> => {
+    const liveRange = leftSel.type === 'base' && !leftSel.sha && rightSel.type !== 'commit'
+    if (!liveRange) return d
+    const viewed = viewedFilesRef.current
+    const candidates = d.files.filter((file) => {
+      const baseline = viewed[file.path]
+      return !file.binary && !!baseline && !!file.head_blob_sha && baseline !== file.head_blob_sha
+    })
+    if (candidates.length === 0) return d
+
+    const replacements = new Map<string, DiffFile>()
+    try {
+      const delta = await api.default.getAgentViewedDiff(projectId ?? '', agent.id, {
+        viewed_blobs: Object.fromEntries(candidates.map((file) => [file.path, viewed[file.path]])),
+        ignore_whitespace: params.ignoreWhitespace,
+        include_uncommitted: params.includeUncommitted,
+        context: contextLines,
+        full_context: true,
+        max_full_changes: HIDDEN_FILE_THRESHOLD,
+        max_full_lines: FULL_MAX_LINES,
+      })
+      for (const updated of delta.files) {
+        replacements.set(updated.path, { ...updated, viewed_delta: true } as ViewedDeltaDiffFile)
+      }
+      if (delta.failed_paths.length > 0) {
+        console.warn(`Could not load changes since these files were viewed: ${delta.failed_paths.join(', ')}`)
+      }
+    } catch (error) {
+      // A stale/pruned blob should not hide the file. Fall back to the complete
+      // base-to-head response and leave it unviewed.
+      console.warn('Could not load changes since files were viewed', error)
+    }
+    if (replacements.size === 0) return d
+    return { ...d, files: d.files.map((file) => replacements.get(file.path) ?? file) }
+  }, [agent.id, contextLines, leftSel, projectId, rightSel])
 
   // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
@@ -3881,6 +3930,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     })
   }, [])
 
+  const applyGeneratedFileFolds = useCallback((files: DiffFile[]) => {
+    const unseen = files.filter((file) => isGeneratedFile(file.path, firstFileLine(file)) && !generatedFilesSeenRef.current.has(file.path))
+    for (const file of unseen) generatedFilesSeenRef.current.add(file.path)
+    if (!unseen.length) return
+    setCollapsedFiles((prev) => {
+      const next = new Set(prev)
+      for (const file of unseen) next.add(file.path)
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     if (!agent.branch_name && !projectDirectory) return
     api.default.getAgentCommits(projectId ?? '', agent.id)
@@ -3905,14 +3965,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // same response carries it at `context`, since the server falls back to the
   // requested windowed context when it declines to expand. So the fallback costs
   // no extra round-trip.
-  const expandFileDiff = useCallback(async (path: string, context: number = 3) => {
+  const expandFileDiff = useCallback(async (path: string, context: number = contextLines, baselineOverride?: string) => {
     if (!agent.branch_name && !projectDirectory) return
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
+    const displayed = diff?.files.find((file) => file.path === path)
+    const reviewedBaseline = baselineOverride ?? (displayed && isViewedDelta(displayed) ? viewedFiles[path] : undefined)
 
     try {
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context,
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, reviewedBaseline, context,
         true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
 
       // Select by path rather than [0] - the backend may return more than the
@@ -3945,7 +4007,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, ignoreWhitespace])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, ignoreWhitespace, contextLines, viewedFiles, diff])
 
   // Compute hidden-file state from a fresh diff response.
   // Large files (HIDDEN_FILE_THRESHOLD changed lines) start hidden, unless the user has explicitly shown them.
@@ -4019,14 +4081,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
-    // Fetch the whole diff in one request: all files at -U3, plus each eligible
+    // Fetch the whole diff in one request at the selected context, plus each eligible
     // file's full content inline (full_context) so context expansion needs no
     // per-file follow-up requests.
     api.default.getAgentDiff(projectId ?? '', agent.id,
-      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+      params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, undefined, contextLines, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+      .then((d) => applyViewedDeltas(d, params))
       .then((d) => {
         if (!cancelled) {
           const { files } = reconcileFiles(d.files)
+          applyGeneratedFileFolds(files)
           setDiff({ ...d, files })
           applyHiddenFiles(files)
           setLoadingDiff(false)
@@ -4035,7 +4099,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => { if (!cancelled) { setDiffError(formatError(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles, reconcileFiles])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, contextLines, applyHiddenFiles, applyGeneratedFileFolds, applyViewedDeltas, reconcileFiles])
 
   // Version params for the artifacts panel, mirroring the diff request logic.
   // Artifacts (e.g. screenshots) don't care about whitespace, so pass false.
@@ -4130,14 +4194,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       return
     }
     setDiff({ ...d, files })
+    applyGeneratedFileFolds(files)
     applyHiddenFiles(files)
     for (const path of promoted) {
-      expandFileDiffRef.current(path, 3).catch(() => { })
+      const file = files.find((candidate) => candidate.path === path)
+      if (!file?.expanded) {
+        expandFileDiffRef.current(path, contextLines, file && isViewedDelta(file) ? viewedFilesRef.current[path] : undefined).catch(() => { })
+      }
     }
     for (const [path, ctx] of contexts) {
-      if (ctx > 3 && !promoted.has(path)) expandFileDiffRef.current(path, ctx).catch(() => { })
+      if (ctx > contextLines && !promoted.has(path)) expandFileDiffRef.current(path, ctx).catch(() => { })
     }
-  }, [applyHiddenFiles, reconcileFiles])
+  }, [applyHiddenFiles, applyGeneratedFileFolds, reconcileFiles, contextLines])
 
   // A background refresh deferred because the user had an active selection. Flushed
   // by the selectionchange listener once the selection clears. Latest fetch wins.
@@ -4197,7 +4265,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
       // Fetch full diff silently - preserves open comments since we diff against previous state.
       const diffP = api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, 3, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, undefined, contextLines, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
+        .then((d) => applyViewedDeltas(d, params))
         .then((d) => {
           // Defer applying while the user is selecting text - otherwise the re-render
           // wipes their selection. The selectionchange listener flushes it later.
@@ -4438,7 +4507,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setCommentReveal({ path: c.path, side: c.isNew ? 'new' : 'old', line: c.lineNum, nonce: Date.now() })
     // A large/windowed file does not hold the hidden line yet. Ask for its full
     // content; once it arrives, FileDiff applies the reveal target above.
-    if (!diff.files[idx].expanded) void expandFileDiff(c.path, 3)
+    if (!diff.files[idx].expanded) void expandFileDiff(c.path, contextLines)
     // Scroll to the LINE, not to the comment card: the line is what mounts the
     // lazy body, and it is the anchor that exists whether or not the card has
     // rendered yet. The card sits directly beneath it, so centring the line puts
@@ -4450,7 +4519,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       c.isNew ? 'new' : 'old',
       c.lineNum,
     )
-  }, [diff, singleFile, collapsedFiles, toggleFileCollapse, hiddenFiles, handleShowFile, expandFileDiff])
+  }, [diff, singleFile, collapsedFiles, toggleFileCollapse, hiddenFiles, handleShowFile, expandFileDiff, contextLines])
 
   const handleSingleFileChange = useCallback((v: boolean) => {
     setSingleFile(v); setSingleFileIdx(0)
@@ -4656,6 +4725,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [projectId, agent.id])
 
   const [threads, setThreads] = useState<ReviewThread[]>([])
+  const [batchedSuggestionNumbers, setBatchedSuggestionNumbers] = useState<Set<number>>(new Set())
+  const [applyingSuggestions, setApplyingSuggestions] = useState(false)
 
   // Every top-level comment stop on this diff, in document order (file order,
   // then line), across both origins. Navigation uses ALL stops: resolving a
@@ -4879,6 +4950,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     try {
       const res = await api.default.getReviewThreads(projectId, agent.id)
       setThreads(res.threads ?? [])
+      const available = new Set((res.threads ?? []).flatMap((thread) => thread.notes.flatMap((note) =>
+        note.suggestion && !note.suggestion.applied && note.number != null ? [note.number] : [],
+      )))
+      setBatchedSuggestionNumbers((current) => new Set([...current].filter((number) => available.has(number))))
       if (res.stale) console.warn('review threads are stale:', res.error)
     } catch (e) {
       console.error('Failed to load review threads:', e)
@@ -4894,6 +4969,34 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const t = setTimeout(() => void refreshThreads(), 0)
     return () => clearTimeout(t)
   }, [refreshThreads])
+
+  const suggestionNumbers = useMemo(() => threads.flatMap((thread) => thread.notes.flatMap((note) =>
+    note.suggestion && !note.suggestion.applied && note.number != null ? [note.number] : [],
+  )), [threads])
+  const selectedSuggestionNumbers = useMemo(
+    () => suggestionNumbers.filter((number) => batchedSuggestionNumbers.has(number)),
+    [suggestionNumbers, batchedSuggestionNumbers],
+  )
+
+  const applySuggestions = useCallback(async (numbers: number[]) => {
+    if (!projectId || numbers.length === 0) return
+    const res = await api.default.applyReviewSuggestions(projectId, agent.id, { numbers })
+    const applied = new Set(res.applied)
+    setThreads((current) => current.map((thread) => ({
+      ...thread,
+      notes: thread.notes.map((note) => note.number != null && applied.has(note.number) && note.suggestion
+        ? { ...note, suggestion: { ...note.suggestion, applied: true } }
+        : note),
+    })))
+    setBatchedSuggestionNumbers((current) => {
+      const next = new Set(current)
+      for (const number of res.applied) next.delete(number)
+      return next
+    })
+    setRefreshKey((value) => value + 1)
+    const count = res.applied.length
+    showSentToast(count === 0 ? 'Suggestions already applied' : count === 1 ? 'Applied suggestion' : `Applied ${count} suggestions`)
+  }, [projectId, agent.id, showSentToast])
 
   // The thread actions handed to every card by context. Each write returns the
   // refreshed thread set, so the card re-renders with the reply already in place.
@@ -4946,10 +5049,19 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         await api.default.sendAgentInput(projectId, agent.id, {
           text: `Address this review comment on [${where}](${where}) (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
             + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
-          origin: 'review_thread',
+          origin: MessageOrigin.MessageOriginButton,
+          reason: MessageReason.MessageReasonReviewThread,
         })
         showSentToast('Sent the thread to the agent')
       },
+      applySuggestion: async (number) => applySuggestions([number]),
+      suggestionsInBatch: batchedSuggestionNumbers,
+      toggleSuggestionBatch: (number) => setBatchedSuggestionNumbers((current) => {
+        const next = new Set(current)
+        if (next.has(number)) next.delete(number)
+        else next.add(number)
+        return next
+      }),
       // In-progress replies persist like the line drafts do: a thread card
       // unmounts when it scrolls out of the virtualised diff, and losing a
       // half-written reply to a reviewer is worse than losing a note to the agent.
@@ -4959,7 +5071,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         clear: (threadId) => clearThreadDraft(projectId, agent.id, threadId),
       },
     }
-  }, [projectId, agent.id, agent.review?.provider, linkedMR, showSentToast])
+  }, [projectId, agent.id, agent.review?.provider, linkedMR, showSentToast, applySuggestions, batchedSuggestionNumbers])
 
   // Threads grouped by file, mirroring commentsByPath so each FileDiff gets only
   // its own (and files with none keep a stable empty identity for their memo).
@@ -5246,6 +5358,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <SettingsOptionRow type="checkbox" checked={wordHighlight} onChange={setWordHighlight} label="Highlight changed words" />
         <SettingsOptionRow type="checkbox" checked={ignoreWhitespace} onChange={setIgnoreWhitespace} label="Ignore whitespace" />
         <SettingsOptionRow type="checkbox" checked={singleFile} onChange={handleSingleFileChange} label="One file at a time" />
+        <DiffContextSelect value={contextLines} onChange={setContextLines} className="mt-2" />
       </div>
     </SettingsPopover>
   )
@@ -5400,6 +5513,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               sideBySide={sideBySide}
               wordHighlight={wordHighlight}
               viewed={isFileViewed(diff.files[singleFileIdx])}
+              showingSinceViewed={isViewedDelta(diff.files[singleFileIdx]) && !isFileViewed(diff.files[singleFileIdx])}
               onToggleViewed={toggleFileViewed}
               isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
               onToggleCollapse={toggleFileCollapse}
@@ -5423,7 +5537,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onShow={getShowCallback(diff.files[singleFileIdx].path)}
               // eslint-disable-next-line react-hooks/refs
               fileRef={getFileRef(diff.files[singleFileIdx].path)}
-              currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? 3}
+              currentContext={fileContexts.get(diff.files[singleFileIdx].path) ?? contextLines}
               imageDiffMode={imageDiffMode}
               imageBefore={imageUrlsFor(diff.files[singleFileIdx]).before}
               imageAfter={imageUrlsFor(diff.files[singleFileIdx]).after}
@@ -5445,6 +5559,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             return (
               <FileDiff key={f.path} file={f} projectId={projectId} sideBySide={sideBySide} wordHighlight={wordHighlight}
                 viewed={isFileViewed(f)}
+                showingSinceViewed={isViewedDelta(f) && !isFileViewed(f)}
                 onToggleViewed={toggleFileViewed}
                 isCollapsed={collapsedFiles.has(f.path)}
                 onToggleCollapse={toggleFileCollapse}
@@ -5461,7 +5576,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
                 isHidden={hiddenFiles.has(f.path)}
                 onShow={getShowCallback(f.path)}
                 fileRef={getFileRef(f.path)}
-                currentContext={fileContexts.get(f.path) ?? 3}
+                currentContext={fileContexts.get(f.path) ?? contextLines}
                 imageDiffMode={imageDiffMode}
                 imageBefore={img.before}
                 imageAfter={img.after}
@@ -5649,6 +5764,25 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
                           </button>
                         </Tooltip>
                       </div>
+                    )}
+                    {selectedSuggestionNumbers.length > 0 && (
+                      <Tooltip content={`Apply ${selectedSuggestionNumbers.length} selected review suggestion${selectedSuggestionNumbers.length === 1 ? '' : 's'}`} side="bottom">
+                        <button
+                          type="button"
+                          disabled={applyingSuggestions}
+                          onClick={() => {
+                            setApplyingSuggestions(true)
+                            void applySuggestions(selectedSuggestionNumbers)
+                              .catch((error) => showSentToast(formatError(error), 'error'))
+                              .finally(() => setApplyingSuggestions(false))
+                          }}
+                          className="inline-flex h-6 items-center gap-1.5 rounded-md bg-violet-600 px-2 text-3xs font-medium text-white hover:bg-violet-700 dark:bg-violet-500 dark:hover:bg-violet-400 disabled:opacity-50 cursor-pointer"
+                        >
+                          {applyingSuggestions ? <LoaderCircle className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          <span className="optical-center">Apply batch</span>
+                          <span className="optical-center rounded bg-white/20 px-1 tabular-nums">{selectedSuggestionNumbers.length}</span>
+                        </button>
+                      </Tooltip>
                     )}
                     <ReviewDraftPopover
                       comments={queuedComments}

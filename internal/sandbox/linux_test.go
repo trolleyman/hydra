@@ -47,8 +47,8 @@ func TestBuildSpecLinux(t *testing.T) {
 		WorktreePath:  work,
 		Home:          home,
 		WritablePaths: []string{"~/.cache", "~/.created-on-demand", "/hydra-nonexistent-abs"},
-		MaskedPaths:   []string{"~/.ssh", "~/.config"},
-		RestoreRO:     []string{"~/.config/git"},
+		ReadablePaths: []string{"~", "~/.config/git"},
+		MaskedPaths:   []string{"~/.ssh"},
 		Network:       NetworkPolicy{Enabled: false},
 		HardenGUI:     true,
 		Seccomp:       false,
@@ -65,8 +65,8 @@ func TestBuildSpecLinux(t *testing.T) {
 	if !strings.HasSuffix(spec.Path, "bwrap") {
 		t.Errorf("Path = %q, want .../bwrap", spec.Path)
 	}
-	if !hasPair(args, "--ro-bind", "/", "/") {
-		t.Error("missing --ro-bind / /")
+	if hasPair(args, "--ro-bind", "/", "/") {
+		t.Error("host root must not be exposed wholesale")
 	}
 	// Worktree must be writable.
 	if !hasPair(args, "--bind", work, work) {
@@ -96,18 +96,28 @@ func TestBuildSpecLinux(t *testing.T) {
 	if !hasPair2(args, "--tmpfs", secret) {
 		t.Error("~/.ssh not masked with tmpfs")
 	}
-	// Restore RO applied after mask.
-	maskIdx := pairIndex(args, "--tmpfs", filepath.Join(home, ".config"))
-	restoreIdx := pairIndex(args, "--ro-bind", gitcfg)
-	if maskIdx == -1 || restoreIdx == -1 {
-		t.Fatalf("expected mask(%d) and restore(%d) present", maskIdx, restoreIdx)
+	if !hasPair(args, "--ro-bind", gitcfg, gitcfg) {
+		t.Error("configured readable path not bound read-only")
 	}
-	if restoreIdx < maskIdx {
-		t.Error("restore must come after mask")
+	readHomeIdx := pairIndex(args, "--ro-bind", home)
+	maskSecretIdx := pairIndex(args, "--tmpfs", secret)
+	if readHomeIdx == -1 || maskSecretIdx == -1 || maskSecretIdx < readHomeIdx {
+		t.Errorf("credential mask must follow broad read allowance: read=%d mask=%d", readHomeIdx, maskSecretIdx)
 	}
 	// Network disabled.
 	if argIndex(args, "--unshare-net") == -1 {
 		t.Error("expected --unshare-net when network disabled")
+	}
+	for key, want := range map[string]string{
+		"TMPDIR":         "/tmp",
+		"GOCACHE":        "/tmp/cache/go-build",
+		"GOMODCACHE":     "/tmp/go/pkg/mod",
+		"GOPATH":         "/tmp/go",
+		"MISE_CACHE_DIR": "/tmp/cache/mise",
+	} {
+		if got := linuxEnvValue(spec.Env, key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 	// chdir to worktree.
 	if !hasPair2(args, "--chdir", work) {
@@ -134,6 +144,40 @@ func TestBuildSpecLinux(t *testing.T) {
 	}
 	if !hasPair2(args, "--gid", strconv.Itoa(os.Getgid())) {
 		t.Errorf("expected --gid %d to pin the host group", os.Getgid())
+	}
+}
+
+func TestBuildSpecLinuxOnlyExposesSelectedProviderState(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	for _, dir := range []string{work, filepath.Join(home, ".claude"), filepath.Join(home, ".gemini"), filepath.Join(home, ".copilot"), filepath.Join(home, ".codex")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec, err := BuildSpec(Options{
+		AgentType:     AgentTypeCodex,
+		WorktreePath:  work,
+		Home:          home,
+		WritablePaths: append(Defaults().WritablePaths, ProviderWritablePaths(AgentTypeCodex)...),
+		ReadablePaths: Defaults().ReadablePaths,
+		Env:           []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+		Argv:          []string{"/usr/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	if codex := filepath.Join(home, ".codex"); !hasPair(spec.Args, "--bind", codex, codex) {
+		t.Fatalf("selected Codex state is not writable: %v", spec.Args)
+	}
+	for _, name := range []string{".claude", ".gemini", ".copilot"} {
+		path := filepath.Join(home, name)
+		if hasPair(spec.Args, "--bind", path, path) || hasPair(spec.Args, "--ro-bind", path, path) {
+			t.Errorf("unselected provider state %s is exposed: %v", path, spec.Args)
+		}
 	}
 }
 
@@ -288,9 +332,60 @@ func TestBuildSpecLinuxCowSupersedesWritableBind(t *testing.T) {
 	}
 }
 
+func TestBuildSpecLinuxDefaultsKeepSharedCachesAndMiseReadOnly(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	sharedCache := filepath.Join(home, ".cache")
+	sharedMise := filepath.Join(home, ".local", "share", "mise")
+	for _, dir := range []string{work, sharedCache, sharedMise} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec, err := BuildSpec(Options{
+		AgentType:     AgentTypeBash,
+		WorktreePath:  work,
+		Home:          home,
+		WritablePaths: Defaults().WritablePaths,
+		Env:           []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+		Argv:          []string{"/usr/bin/true"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	for _, path := range []string{sharedCache, sharedMise} {
+		if hasPair(spec.Args, "--bind", path, path) {
+			t.Errorf("shared persistence path %s is writable in default bwrap args", path)
+		}
+	}
+	for key, want := range map[string]string{
+		"GOCACHE":        "/tmp/cache/go-build",
+		"GOMODCACHE":     "/tmp/go/pkg/mod",
+		"GOPATH":         "/tmp/go",
+		"MISE_CACHE_DIR": "/tmp/cache/mise",
+	} {
+		if got := linuxEnvValue(spec.Env, key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 // hasPair2 reports whether args contains flag immediately followed by a.
 func hasPair2(args []string, flag, a string) bool {
 	return pairIndex(args, flag, a) != -1
+}
+
+func linuxEnvValue(entries []string, key string) string {
+	prefix := key + "="
+	for i := len(entries) - 1; i >= 0; i-- {
+		if strings.HasPrefix(entries[i], prefix) {
+			return strings.TrimPrefix(entries[i], prefix)
+		}
+	}
+	return ""
 }
 
 // pairIndex returns the index of flag where it is immediately followed by a.

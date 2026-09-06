@@ -114,13 +114,13 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 	}
 
 	// Subscribe before building the snapshot so we don't miss an event between the
-	// Get (which may kick off a run) and the subscription.
+	// read (which may kick off an "always" run) and the subscription.
 	events, unsub := mgr.Subscribe()
 	defer unsub()
 
-	// Initial snapshot. buildTestRunners triggers any needed runs, after which the
-	// subscription delivers their progress/log/settle.
-	if err := writeMsg(api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: s.buildTestRunners(projectID, mgr, runners, v, headActivelyRunning(head), "")}); err != nil {
+	// Initial snapshot. Only "always" runners may start because the panel was
+	// viewed; settled/never runners remain passive and expose cached state.
+	if err := writeMsg(api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: s.buildTestRunners(projectID, mgr, runners, v, "")}); err != nil {
 		return
 	}
 
@@ -217,12 +217,12 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 
 // buildTestRunners runs (or returns the cached verdict for) each runner and maps
 // it into the API shape - the snapshot equivalent of GetAgentTests's loop.
-func (s *Server) buildTestRunners(projectID string, mgr *hydratests.Manager, runners []config.TestScript, v hydratests.Version, agentRunning bool, forceRunner string) []api.TestRunResult {
+func (s *Server) buildTestRunners(projectID string, mgr *hydratests.Manager, runners []config.TestScript, v hydratests.Version, forceRunner string) []api.TestRunResult {
 	out := make([]api.TestRunResult, 0, len(runners))
 	for _, rspec := range runners {
 		var rep hydratests.Report
 		var err error
-		if forceRunner == rspec.Name || shouldAutoRun(rspec.AutoRun, agentRunning) {
+		if forceRunner == rspec.Name || shouldAutoRunOnView(rspec.AutoRun) {
 			rep, err = mgr.Get(rspec, v)
 		} else if cached, ok, peekErr := mgr.Peek(rspec.Name, v); peekErr != nil {
 			err = peekErr

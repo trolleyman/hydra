@@ -123,36 +123,84 @@ func readResponse(scanner *bufio.Scanner, wantID int) (result json.RawMessage, s
 
 func parseCodexRateLimits(raw json.RawMessage) (Snapshot, error) {
 	var result struct {
-		RateLimits struct {
-			Primary   *codexRateLimitWindow `json:"primary"`
-			Secondary *codexRateLimitWindow `json:"secondary"`
-		} `json:"rateLimits"`
+		RateLimits          codexRateLimits            `json:"rateLimits"`
+		RateLimitsByLimitID map[string]codexRateLimits `json:"rateLimitsByLimitId"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return Snapshot{}, errtrace.Wrap(err)
 	}
-	if result.RateLimits.Primary == nil {
+
+	// Codex can put the general weekly window in rateLimits.primary while shorter
+	// model-specific windows appear only in rateLimitsByLimitId. Summarize all
+	// groups so the compact UI shows both time scales. Duplicate top-level/map
+	// entries are harmless.
+	groups := make([]codexRateLimits, 0, len(result.RateLimitsByLimitID)+1)
+	groups = append(groups, result.RateLimits)
+	for _, limits := range result.RateLimitsByLimitID {
+		groups = append(groups, limits)
+	}
+	session, weekly := selectCodexRateLimitWindows(groups)
+	if session == nil && weekly == nil {
 		return Snapshot{CapturedAt: time.Now(), Error: "Codex account has no subscription rate limits", Permanent: true}, nil
 	}
 
 	snap := Snapshot{Available: true, CapturedAt: time.Now()}
-	snap.SessionPercentUsed = &result.RateLimits.Primary.UsedPercent
-	snap.SessionResetText = codexWindowLabel(result.RateLimits.Primary.WindowDurationMins)
-	if result.RateLimits.Primary.ResetsAt > 0 {
-		t := time.Unix(result.RateLimits.Primary.ResetsAt, 0)
+	if session != nil {
+		snap.SessionPercentUsed = &session.UsedPercent
+		snap.SessionResetText = codexWindowLabel(session.WindowDurationMins)
+	}
+	if session != nil && session.ResetsAt > 0 {
+		t := time.Unix(session.ResetsAt, 0)
 		snap.SessionResetsAt = &t
 	}
-	if secondary := result.RateLimits.Secondary; secondary != nil {
-		snap.WeeklyPercentUsed = &secondary.UsedPercent
-		snap.WeeklyResetText = codexWindowLabel(secondary.WindowDurationMins)
+	if weekly != nil {
+		snap.WeeklyPercentUsed = &weekly.UsedPercent
+		snap.WeeklyResetText = codexWindowLabel(weekly.WindowDurationMins)
 	}
 	return snap, nil
+}
+
+type codexRateLimits struct {
+	Primary   *codexRateLimitWindow `json:"primary"`
+	Secondary *codexRateLimitWindow `json:"secondary"`
 }
 
 type codexRateLimitWindow struct {
 	UsedPercent        float64 `json:"usedPercent"`
 	WindowDurationMins int     `json:"windowDurationMins"`
 	ResetsAt           int64   `json:"resetsAt"`
+}
+
+const codexWeekMinutes = 7 * 24 * 60
+
+func selectCodexRateLimitWindows(groups []codexRateLimits) (session, weekly *codexRateLimitWindow) {
+	for _, limits := range groups {
+		for _, window := range []*codexRateLimitWindow{limits.Primary, limits.Secondary} {
+			if window == nil {
+				continue
+			}
+			if window.WindowDurationMins < codexWeekMinutes {
+				session = preferCodexWindow(session, window)
+			} else {
+				weekly = preferCodexWindow(weekly, window)
+			}
+		}
+	}
+	return session, weekly
+}
+
+// preferCodexWindow keeps the shortest time scale, then the most-used quota
+// when several limit groups share that duration. The latter is the useful
+// conservative summary for a compact indicator with one value per time scale;
+// the later reset makes otherwise-equal choices deterministic and conservative.
+func preferCodexWindow(current, candidate *codexRateLimitWindow) *codexRateLimitWindow {
+	if current == nil ||
+		(candidate.WindowDurationMins > 0 && (current.WindowDurationMins <= 0 || candidate.WindowDurationMins < current.WindowDurationMins)) ||
+		(candidate.WindowDurationMins == current.WindowDurationMins && candidate.UsedPercent > current.UsedPercent) ||
+		(candidate.WindowDurationMins == current.WindowDurationMins && candidate.UsedPercent == current.UsedPercent && candidate.ResetsAt > current.ResetsAt) {
+		return candidate
+	}
+	return current
 }
 
 func codexWindowLabel(minutes int) string {

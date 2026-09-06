@@ -4,16 +4,16 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
-// headTmpDir is a head's private /tmp: a host-backed scratch directory under the
-// project's .hydra/local, keyed by head ID. It is bound over /tmp inside the
-// head's sandbox (sandbox.Options.TmpDir → linux.go) so the agent's temp files
-// - Claude's scratchpad, test-framework extractions, build junk - stay isolated
-// per head and are reclaimed on teardown instead of accumulating on the host's
-// shared /tmp.
+// headTmpDir is a head's private temporary directory under the project's Hydra
+// state, keyed by head ID. Linux binds it over /tmp; Darwin exposes the real path
+// through the standard temp environment variables. Agent scratchpads, build
+// junk, and extractions stay isolated per head and are reclaimed on teardown.
 func headTmpDir(projectRoot, id string) string {
 	return filepath.Join(paths.GetProjectStateDirFromProjectRoot(projectRoot), "tmp", id)
 }
@@ -33,9 +33,9 @@ func HeadTmpDir(projectRoot, id string) string {
 	return dir
 }
 
-// ensureHeadTmpDir creates (idempotently) and returns the head's private /tmp
-// dir, ready to bind into the sandbox. Returns "" if it can't be created (the
-// sandbox then falls back to the fresh tmpfs /tmp) or on empty inputs.
+// ensureHeadTmpDir creates (idempotently) and returns the head's private temp
+// directory, ready for the platform sandbox. Returns "" if it cannot be created
+// or on empty inputs.
 func ensureHeadTmpDir(projectRoot, id string) string {
 	if projectRoot == "" || id == "" {
 		return ""
@@ -59,4 +59,17 @@ func removeHeadTmpDir(projectRoot, id string) {
 		log.Printf("warn: head tmp: remove for %s: %v", id, err)
 	}
 	_ = os.Remove(filepath.Dir(dir))
+}
+
+// withPrivateTempPrompt tells Darwin agents where their private temporary
+// storage actually lives. Linux mounts the same host directory at /tmp, so its
+// familiar path needs no additional instruction.
+func withPrivateTempPrompt(prePrompt, hostTmpDir string) string {
+	visible := sandbox.SandboxTempDir(hostTmpDir)
+	if visible == "" || visible == "/tmp" {
+		return prePrompt
+	}
+	return strings.TrimRight(prePrompt, "\n") +
+		"\n\n- Your private temporary directory is `$TMPDIR` (`" + visible +
+		"`). Shared host `/tmp` is inaccessible. Use `$TMPDIR` or `mktemp` for temporary files.\n"
 }

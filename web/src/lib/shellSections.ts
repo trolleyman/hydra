@@ -697,8 +697,14 @@ const GIT_QUIET = /^(-q|--quiet)$/
 //
 // `--graph` and `-p` are not among them: the first only puts the topology in the
 // left margin and then prints the same lines, and the second prints a patch,
-// which lib/gitOutput now reads.
+// which lib/gitOutput now reads. Git's named pretty presets are also known
+// shapes; only a caller-authored format string is arbitrary.
 const GIT_REFUSED = /^(--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
+const GIT_NAMED_FORMAT = /^--(?:pretty|format)=(?:oneline|short|medium|full|fuller|reference|email|raw)$/
+// An empty format on `git show` suppresses the commit header but leaves its
+// patch intact. That is still one of lib/gitOutput's known shapes, unlike a
+// caller-authored format string whose lines can contain anything.
+const GIT_EMPTY_SHOW_FORMAT = /^--(?:pretty|format)=$/
 
 // parseGitReport says what a git call prints: one of the reports lib/gitOutput
 // colours - a status, a commit header, a diffstat, a patch, an ignore rule -
@@ -720,7 +726,9 @@ function parseGitReport(words: Word[]): 'report' | 'quiet' | null {
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return null
   const args = words.slice(i + 1).filter((w) => !w.quoted)
   if (args.some((w) => GIT_QUIET.test(w.text))) return 'quiet'
-  if (args.some((w) => GIT_REFUSED.test(w.text))) return null
+  if (args.some((w) => GIT_REFUSED.test(w.text) &&
+    !GIT_NAMED_FORMAT.test(w.text) &&
+    !(sub.text === 'show' && GIT_EMPTY_SHOW_FORMAT.test(w.text)))) return null
   const readonly = GIT_READONLY[sub.text]
   return !readonly || readonly(args) ? 'report' : null
 }
@@ -1058,8 +1066,16 @@ function classifyKind(p: Pipeline): ScriptStep {
   if (echo !== null && !trimmedFrom && !filtered && !sliced) {
     if (echo.trim().length < MIN_MARKER_LEN) return { kind: 'echo', text: echo }
     const typed = /^--- \[(text|file|dir)\] (.+) ---$/.exec(echo)
-    return typed
-      ? { kind: 'marker', text: echo, section: { kind: typed[1] as OutputSectionKind, label: typed[2] } }
+    if (typed) {
+      return { kind: 'marker', text: echo, section: { kind: typed[1] as OutputSectionKind, label: typed[2] } }
+    }
+    // Text is the default section kind, so its canonical spelling needs no
+    // `[text]` tag. Give it the same structural identity and ambiguity checks
+    // as the explicitly typed file/dir forms; `[text]` remains accepted above
+    // for old prompts and transcripts.
+    const text = /^--- (.+) ---$/.exec(echo)
+    return text
+      ? { kind: 'marker', text: echo, section: { kind: 'text', label: text[1] } }
       : { kind: 'marker', text: echo }
   }
 
@@ -1544,6 +1560,57 @@ function verifiedSearchBeforeView(
   return null
 }
 
+// interiorSearchDistribution recovers a numbered search in the middle of a
+// multi-command result. Unlike file content, every search row carries its own
+// line number (and often its path), so a unique run of two or more such rows can
+// separate independently attributable output on both sides. Requiring both
+// sides to distribute successfully keeps a stray `12:text` source line from
+// becoming a guessed boundary.
+function interiorSearchDistribution(
+  producers: ScriptStep[],
+  slice: string[],
+  failed: ReadonlySet<ScriptStep>,
+): Distribution | null {
+  const candidates: Distribution[] = []
+  for (let searchAt = 1; searchAt < producers.length - 1; searchAt++) {
+    const search = producers[searchAt]
+    if (search.kind !== 'matches' || !search.match.numbered) continue
+    const owns = (line: string) => {
+      const parsed = parseMatchLines([line], search.match.paths, true)[0]
+      return parsed != null && (parsed.separator || Boolean(parsed.num))
+    }
+    for (let start = 0; start < slice.length;) {
+      if (!owns(slice[start])) { start++; continue }
+      let end = start + 1
+      while (end < slice.length && owns(slice[end])) end++
+      // A single numbered-looking source line is too weak to establish two
+      // boundaries in the middle of otherwise anonymous output.
+      if (end - start < 2) { start = end; continue }
+      const before = distribute(producers.slice(0, searchAt), slice.slice(0, start), failed)
+      const after = distribute(producers.slice(searchAt + 1), slice.slice(end), failed)
+      if (before && after) {
+        const parts = producers.map(() => [] as string[])
+        const pinned = producers.map(() => false)
+        const plain = new Set<number>()
+        const languageOnly = new Map<number, string>()
+        before.parts.forEach((part, i) => { parts[i] = part })
+        before.pinned.forEach((value, i) => { pinned[i] = value })
+        before.plain.forEach((i) => plain.add(i))
+        before.languageOnly.forEach((language, i) => languageOnly.set(i, language))
+        parts[searchAt] = slice.slice(start, end)
+        pinned[searchAt] = true
+        after.parts.forEach((part, i) => { parts[searchAt + 1 + i] = part })
+        after.pinned.forEach((value, i) => { pinned[searchAt + 1 + i] = value })
+        after.plain.forEach((i) => plain.add(searchAt + 1 + i))
+        after.languageOnly.forEach((language, i) => languageOnly.set(searchAt + 1 + i, language))
+        candidates.push({ parts, pinned, plain, languageOnly })
+      }
+      start = end
+    }
+  }
+  return candidates.length === 1 ? candidates[0] : null
+}
+
 // distribute hands a stretch of output to the producers that ran inside it.
 // Null when the boundaries between them are not knowable.
 //
@@ -1563,6 +1630,9 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
 
   const verified = verifiedSearchBeforeView(producers, slice, failed)
   if (verified) return verified
+
+  const interior = interiorSearchDistribution(producers, slice, failed)
+  if (interior) return interior
 
   // Peel a search-shaped suffix before using any file-view limit. A sed range is
   // an UPPER bound, not an exact count: a range past the end of the file emits
@@ -1665,6 +1735,13 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     const n = Math.min(limit, hi - lo)
     // Printed nothing, which is a count like any other.
     if (!fits(producers[head], lo)) { exact[head] = true; continue }
+    // A self-identifying search beginning exactly after the maximum-sized
+    // prefixes proves those prefixes reached their bounds. Without carrying
+    // that proof forward, a later guarded sed kept its file language but lost
+    // line numbers even though the search row fixed its exact start.
+    if (search != null) {
+      for (let i = 0; i < head; i++) exact[i] = true
+    }
     out[head] = slice.slice(lo, lo + n)
     lo += n
     if (search != null || vouched(producers[head], bounds[head])) exact[head] = true
@@ -1704,6 +1781,29 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     plain: new Set(),
     languageOnly: new Map(),
   }
+}
+
+// plausibleMarkerBoundary reports whether the producers before a structural
+// marker could all have ended at this candidate without any bounded producer
+// swallowing more lines than its command can print. This distinguishes repeated
+// headings when the surrounding commands prove one occurrence - for example a
+// `wc -l` row followed by exactly 220 lines from `sed -n '1,220p'`. It does not
+// make an unbounded file read guess which copy of a marker-shaped source line
+// came from printf; every such candidate remains plausible and therefore
+// ambiguous.
+function plausibleMarkerBoundary(
+  pending: ScriptStep[],
+  slice: string[],
+  failed: ReadonlySet<ScriptStep>,
+): boolean {
+  const candidateFailed = new Set(failed)
+  const producers = mergeProducers(pending, candidateFailed)
+  const split = distribute(producers, slice, candidateFailed)
+  if (!split) return false
+  return producers.every((producer, i) => {
+    const limit = stepLimit(producer, candidateFailed)
+    return limit == null || split.parts[i].length <= limit
+  })
 }
 
 // splitScriptOutput cuts a command's output into one section per step that
@@ -1843,14 +1943,19 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     }, 0)
     let at = total != null && matchesAt(lines, pos + total, expected) ? pos + total : -1
     if (at < 0 && step.section) {
-      // A typed marker is structural only when it has one possible origin. If
+      // A section marker is structural only when it has one possible origin. If
       // file content contains the same canonical line, keep the whole stretch
-      // literal instead of guessing which occurrence printf printed.
+      // literal instead of guessing which occurrence printf printed. Bounded
+      // producers can rule candidates out without guessing: a 220-line sed
+      // cannot own 441 lines merely to reach the second identical marker.
       const candidates: number[] = []
       for (let j = pos; j + expected.length <= lines.length; j++) {
         if (matchesAt(lines, j, expected)) candidates.push(j)
       }
-      if (candidates.length === 1) at = candidates[0]
+      const plausible = candidates.filter((candidate) => (
+        plausibleMarkerBoundary(pending, lines.slice(pos, candidate), failed)
+      ))
+      if (plausible.length === 1) at = plausible[0]
     }
     for (let j = pos; at < 0 && !step.section && j + expected.length <= lines.length; j++) {
       if (matchesAt(lines, j, expected)) at = j

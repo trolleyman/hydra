@@ -17,6 +17,10 @@ export type ReviewThread = {
      */
     line: number;
     /**
+     * First NEW-side line covered by the comment. Omitted for a single-line comment.
+     */
+    start_line?: number;
+    /**
      * Resolved, by the forge's own flag OR Hydra's local mark (see resolved_locally).
      */
     resolved?: boolean;

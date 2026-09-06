@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -181,6 +182,66 @@ func TestGetDiffScopedRenameKeepsRename(t *testing.T) {
 	// The real change is +2/-1, not the whole-file add the bug produced.
 	if f.Additions != 2 || f.Deletions != 1 {
 		t.Errorf("+%d -%d, want +2 -1", f.Additions, f.Deletions)
+	}
+}
+
+func TestGetBlobDiffShowsOnlyChangesAfterViewedVersion(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "review.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("base\n")
+	run("add", "review.txt")
+	run("commit", "-qm", "base")
+	write("base\nfirst reviewed change\n")
+	viewedSHA := HeadBlobSHAs(dir, "", []string{"review.txt"})["review.txt"]
+	if viewedSHA == "" {
+		t.Fatal("working-tree viewed blob was not hashed")
+	}
+	// The working file can move on after the reviewed version. The earlier
+	// hash-object -w must have kept that exact baseline available in Git.
+	write("base\nfirst reviewed change\nnew after review\n")
+	currentSHA := HeadBlobSHAs(dir, "", []string{"review.txt"})["review.txt"]
+	if typ := run("cat-file", "-t", viewedSHA); typ != "blob" {
+		t.Fatalf("viewed object type = %q, want blob", typ)
+	}
+
+	files, err := GetBlobDiff(dir, viewedSHA, currentSHA, "review.txt", false, 3)
+	if err != nil {
+		t.Fatalf("GetBlobDiff: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("GetBlobDiff returned %d files, want 1", len(files))
+	}
+	f := files[0]
+	if f.Path != "review.txt" || f.HeadBlobSHA != currentSHA {
+		t.Fatalf("file identity = path %q, sha %q; want review.txt, %q", f.Path, f.HeadBlobSHA, currentSHA)
+	}
+	if f.Additions != 1 || f.Deletions != 0 {
+		t.Fatalf("changes since viewed = +%d -%d, want +1 -0", f.Additions, f.Deletions)
+	}
+	for _, hunk := range f.Hunks {
+		for _, line := range hunk.Lines {
+			if line.Type != DiffLineContext && line.Content == "first reviewed change" {
+				t.Fatal("the already-viewed change appeared as a new change")
+			}
+		}
 	}
 }
 

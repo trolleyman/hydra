@@ -105,7 +105,7 @@ export function TestsEditor({
             Re-run stale verdicts in the background
             <InfoTooltip title="Background re-runs">
               <p>When on, the daemon re-runs a head's suites in the background whenever its branch-tip verdict is missing or stale (a cached result computed for an older commit), so the verdict is fresh the instant you open the tests panel or arm auto-merge.</p>
-              <p className="mt-1.5">Turn it off for a project whose suites are too heavy to run speculatively - tests are then run only when you open the panel or at merge time. Foreground runs and the max-parallel cap above still apply either way.</p>
+              <p className="mt-1.5">Turn it off for a project whose suites are too heavy to run speculatively. Runners set to Always can still start when viewed; settled and never runners wait for Refresh or a merge/publish workflow that requires a verdict. The max-parallel cap above still applies either way.</p>
               <p className="mt-1.5">Default: on.</p>
             </InfoTooltip>
           </span>

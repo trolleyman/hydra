@@ -250,6 +250,9 @@ func (s *Server) mergeLocalNotes(projectRoot, headID string, threads []forge.Thr
 			Outdated: ptr(t.Outdated),
 			Notes:    make([]api.ReviewThreadNote, 0, len(t.Notes)),
 		}
+		if t.StartLine > 0 && t.StartLine != t.Line {
+			at.StartLine = &t.StartLine
+		}
 		if t.URL != "" {
 			at.Url = ptr(t.URL)
 		}
@@ -258,6 +261,7 @@ func (s *Server) mergeLocalNotes(projectRoot, headID string, threads []forge.Thr
 			// numbering on every render costs nothing after the first.
 			num := reviewstore.NumberForForgeNote(projectRoot, headID, n.ID, t.ID)
 			an := api.ReviewThreadNote{Id: n.ID, Body: n.Body, Origin: api.Forge}
+			an.Suggestion = reviewSuggestionAPI(projectRoot, headID, n.ID, n, t)
 			if num > 0 {
 				an.Number = &num
 				an.Read = ptr(read[num])

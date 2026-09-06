@@ -66,6 +66,24 @@ function file(over: Partial<DiffFile>): DiffFile {
 }
 
 describe('diff sidebar path tooltips', () => {
+  it('keeps the change type beside the filename and the line counts right aligned', () => {
+    render(
+      <FileRow
+        file={file({ path: 'docs/guide/README.md' })}
+        isActive={false}
+        onClick={() => {}}
+      />,
+    )
+
+    const filenameCluster = screen.getByText('README.md').parentElement?.parentElement
+    const changeType = screen.getByLabelText('modified')
+    const lineCounts = screen.getByLabelText('1 lines added, 1 lines removed')
+
+    expect(filenameCluster).toContainElement(changeType)
+    expect(filenameCluster).not.toContainElement(lineCounts)
+    expect(lineCounts).toHaveClass('ml-auto')
+  })
+
   it('shows the shared file-path treatment for a file row', () => {
     vi.useFakeTimers()
     const { container } = render(
@@ -109,8 +127,86 @@ describe('diff sidebar path tooltips', () => {
   })
 })
 
+describe('file header metadata', () => {
+  it('marks generated files and passes the current blob to the viewed toggle', () => {
+    const onToggleViewed = vi.fn()
+    render(
+      <FileDiff
+        file={file({ path: 'Cargo.lock', head_blob_sha: 'blob-1' })}
+        sideBySide={false}
+        currentContext={3}
+        viewed={false}
+        onToggleViewed={onToggleViewed}
+        onComment={() => {}}
+        onExpand={() => {}}
+        isCollapsed={false}
+        onToggleCollapse={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('Auto-generated')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
+    expect(onToggleViewed).toHaveBeenCalledWith('Cargo.lock', 'blob-1')
+  })
+
+  it('searches for and applies a syntax language override', () => {
+    render(
+      <FileDiff
+        file={file({ path: 'a.ts' })}
+        sideBySide={false}
+        currentContext={3}
+        onComment={() => {}}
+        onExpand={() => {}}
+        isCollapsed={false}
+        onToggleCollapse={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Syntax highlighting: TypeScript' }))
+    expect(screen.queryByText(/Detected:/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Use the filename and shebang')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('Search languages, aliases, extensions'), { target: { value: '.libsonnet' } })
+    fireEvent.click(screen.getByRole('button', { name: /Jsonnet/ }))
+    expect(screen.getByRole('button', { name: 'Syntax highlighting: Jsonnet' })).toBeInTheDocument()
+  })
+})
+
+describe('viewed file delta', () => {
+  it('labels new changes and marks the latest blob when reviewed', () => {
+    const onToggleViewed = vi.fn()
+    const reviewedDelta = file({
+      path: 'README.md',
+      head_blob_sha: 'current-blob',
+      hunks: [hunk([ctx('already reviewed', 1), add('new since review', 2)])],
+    })
+    const { rerender } = render(
+      <FileDiff
+        file={reviewedDelta} sideBySide={false} currentContext={3}
+        viewed={false} showingSinceViewed onToggleViewed={onToggleViewed}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('New since viewed')).toBeVisible()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
+    expect(onToggleViewed).toHaveBeenCalledWith('README.md', 'current-blob')
+
+    rerender(
+      <FileDiff
+        file={reviewedDelta} sideBySide={false} currentContext={3}
+        viewed showingSinceViewed={false} onToggleViewed={onToggleViewed}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    expect(screen.queryByText('New since viewed')).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Viewed' })).toBeChecked()
+  })
+})
+
 // A whole-file (expanded) diff: 40 unchanged lines, a change, 40 more. The
-// reveal model shows CTX lines either side of the change and collapses the rest
+// reveal model shows the selected context either side of the change and collapses the rest
 // behind expanders, so the rendered row count is far below the line count.
 function wholeFile(): DiffFile {
   const lines: DiffLine[] = []
@@ -168,10 +264,10 @@ function windowedFile(): DiffFile {
   })
 }
 
-function renderBody(f: DiffFile, sideBySide: boolean) {
+function renderBody(f: DiffFile, sideBySide: boolean, currentContext = 3) {
   const { container } = render(
     <FileDiff
-      file={f} sideBySide={sideBySide} currentContext={3}
+      file={f} sideBySide={sideBySide} currentContext={currentContext}
       onComment={() => {}} onExpand={() => {}}
       isCollapsed={false} onToggleCollapse={() => {}}
     />,
@@ -223,9 +319,18 @@ describe('bodyShape matches what the body renders', () => {
 
   it('carries the label text of each expander, so a narrow pane can be measured', () => {
     const shape = bodyShape(wholeFile(), false, false, 3)
-    // Leading and trailing edge expanders: one chevron each, both counting the
-    // 37 lines they hide (40 minus the CTX shown next to the change).
-    expect(shape).toMatchObject({ expanders: [{ buttons: 1, hidden: 37 }, { buttons: 1, hidden: 37 }] })
+    // Leading and trailing edge expanders each offer a directional action and
+    // show-all, both counting the 37 lines they hide.
+    expect(shape).toMatchObject({ expanders: [{ buttons: 2, hidden: 37 }, { buttons: 2, hidden: 37 }] })
+  })
+
+  it('uses the selected context for whole-file rendering and measurement', () => {
+    const f = wholeFile()
+    const shape = bodyShape(f, false, false, 10)
+    const seen = renderBody(f, false, 10)
+    expect(rows(shape)).toBe(seen.unifiedCells)
+    expect(expanders(shape)).toBe(seen.expanders)
+    expect(shape).toMatchObject({ expanders: [{ buttons: 2, hidden: 30 }, { buttons: 2, hidden: 30 }] })
   })
 
   it('describes the fixed-height bodies', () => {
@@ -308,7 +413,7 @@ describe('expander context labels', () => {
 })
 
 // A file too big to ship whole arrives as `-U3` fragments, and its two edge
-// expanders used to be bare chevrons: the gaps BETWEEN hunks could state their
+// expanders identify their direction and count: the gaps BETWEEN hunks can state their
 // size (two hunk headers bracket them) but the runs above the first and below the
 // last had nothing to measure against, so the reader was told "there is more"
 // without being told how much - and only learnt it after a click promoted the
@@ -342,15 +447,15 @@ describe('a windowed file counts what its edges hide', () => {
       expect.stringContaining('395 lines'),
     ])
     expect(bodyShape(f, false, false, 3)).toMatchObject({
-      expanders: [{ buttons: 1, hidden: 99 }, { buttons: 1, hidden: 395 }],
+      expanders: [{ buttons: 2, hidden: 99 }, { buttons: 2, hidden: 395 }],
     })
   })
 
-  it('still counts the leading run without one, and leaves the trailing chevron bare', () => {
+  it('still counts the leading run without one, and leaves the trailing action directional-only', () => {
     const f = windowedDeep()
-    expect(expanderTexts(f)).toEqual([expect.stringContaining('99 lines'), ''])
+    expect(expanderTexts(f)).toEqual([expect.stringContaining('99 lines'), 'Down 20 lines'])
     expect(bodyShape(f, false, false, 3)).toMatchObject({
-      expanders: [{ buttons: 1, hidden: 99 }, { buttons: 1, hidden: null }],
+      expanders: [{ buttons: 2, hidden: 99 }, { buttons: 1, hidden: null }],
     })
   })
 
@@ -361,7 +466,7 @@ describe('a windowed file counts what its edges hide', () => {
   it('drops the trailing expander when the last hunk provably reaches EOF', () => {
     const atEof = windowedDeep({ total_lines: 105 })
     expect(expanderTexts(atEof)).toEqual([expect.stringContaining('99 lines')])
-    expect(bodyShape(atEof, false, false, 3)).toMatchObject({ expanders: [{ buttons: 1, hidden: 99 }] })
+    expect(bodyShape(atEof, false, false, 3)).toMatchObject({ expanders: [{ buttons: 2, hidden: 99 }] })
   })
 
   it('leaves a file that starts at line 1 without a leading expander', () => {

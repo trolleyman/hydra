@@ -63,6 +63,10 @@ describe('parseView', () => {
     ])
     expect(view('git show HEAD~2:a.go')?.path).toBe('a.go')
     expect(view('git show :a.go')?.path).toBe('a.go')
+    expect(view('git show :0:a.go')?.path).toBe('a.go')
+    expect(view('git show :1:a.go')?.path).toBe('a.go')
+    expect(view('git show :2:internal/heads/heads.go')?.path).toBe('internal/heads/heads.go')
+    expect(view('git show :3:internal/heads/heads.go')?.path).toBe('internal/heads/heads.go')
     expect(view('git -C /repo show main:a.go')?.path).toBe('a.go')
     // Everything else git prints is a report about the repository, not a file.
     expect(view('git show HEAD')).toBeNull()

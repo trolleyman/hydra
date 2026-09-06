@@ -267,7 +267,8 @@ func (s *Server) sendReviewerNotice(projectRoot, slot, line string) bool {
 	return s.ChatQueues.Submit(projectRoot, slot, heads.QueuedMessage{
 		ID:      fmt.Sprintf("hydra-input-%d", agentInputSeq.Add(1)),
 		Content: content,
-		Origin:  string(reasonReviewMention),
+		Origin:  api.MessageOriginHydra,
+		Reason:  reasonReviewMention,
 	}, false)
 }
 

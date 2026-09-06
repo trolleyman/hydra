@@ -5,6 +5,8 @@
 import type { AddProjectRequest } from '../models/AddProjectRequest';
 import type { AgentInputRequest } from '../models/AgentInputRequest';
 import type { AgentResponse } from '../models/AgentResponse';
+import type { ApplyReviewSuggestionsRequest } from '../models/ApplyReviewSuggestionsRequest';
+import type { ApplyReviewSuggestionsResponse } from '../models/ApplyReviewSuggestionsResponse';
 import type { ApprovalDecisionRequest } from '../models/ApprovalDecisionRequest';
 import type { ApprovalListResponse } from '../models/ApprovalListResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
@@ -47,6 +49,8 @@ import type { TestsResponse } from '../models/TestsResponse';
 import type { TrackRemoteResponse } from '../models/TrackRemoteResponse';
 import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
 import type { UpdateReviewCommentBody } from '../models/UpdateReviewCommentBody';
+import type { ViewedDiffRequest } from '../models/ViewedDiffRequest';
+import type { ViewedDiffResponse } from '../models/ViewedDiffResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
 export class DefaultService {
@@ -711,6 +715,32 @@ export class DefaultService {
         });
     }
     /**
+     * Close a head's linked MR/PR and detach it from the head
+     * Closes the review on its forge, clears the head's review link, and disables automatic pushing. The head, local branch, downstream branch name, and remote branch remain intact.
+     * @param projectId
+     * @param agentId
+     * @returns AgentResponse Closed (returns the updated, unlinked agent).
+     * @throws ApiError
+     */
+    public closeReview(
+        projectId: string,
+        agentId: string,
+    ): CancelablePromise<AgentResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/close',
+            path: {
+                'project_id': projectId,
+                'agent_id': agentId,
+            },
+            errors: {
+                400: `Bad Request (not linked, adopted review, or forge rejected the close)`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Set a head's downstream branch name (the name it is pushed AS)
      * @param projectId
      * @param agentId
@@ -824,6 +854,36 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request (unlinked head, empty body, or the forge rejected it)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Apply one or more review suggestions to a head's worktree
+     * Applies the suggested replacements carried by the numbered forge comments to the head's worktree. The whole batch is validated before any file is changed; stale, missing, and overlapping suggestions are rejected together.
+     *
+     * @param projectId
+     * @param agentId
+     * @param requestBody
+     * @returns ApplyReviewSuggestionsResponse Applied.
+     * @throws ApiError
+     */
+    public applyReviewSuggestions(
+        projectId: string,
+        agentId: string,
+        requestBody: ApplyReviewSuggestionsRequest,
+    ): CancelablePromise<ApplyReviewSuggestionsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply',
+            path: {
+                'project_id': projectId,
+                'agent_id': agentId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (invalid, stale, or overlapping suggestions)`,
                 404: `Not Found`,
             },
         });
@@ -1151,6 +1211,7 @@ export class DefaultService {
      * @param ignoreWhitespace Ignore whitespace changes in the diff
      * @param includeUncommitted Include uncommitted changes in the worktree in the diff
      * @param path Only return the diff for this specific file path
+     * @param viewedBlobSha With path, compare the file version previously marked viewed to its current head-side content. This returns only changes made after that review baseline. The blob must still exist in the repository.
      * @param context Number of lines of context to show (defaults to 3)
      * @param fullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Combined with path it expands just that file, which is how the client promotes a single big file (left windowed by the bulk caps) once the reader expands it - pass caps above the bulk ones.
      * @param maxFullChanges Only auto-expand files with at most this many changed lines. Larger files (which the client also hides by default) keep the normal context so their full content isn't shipped until requested. Only meaningful with full_context.
@@ -1166,6 +1227,7 @@ export class DefaultService {
         ignoreWhitespace?: boolean,
         includeUncommitted?: boolean,
         path?: string,
+        viewedBlobSha?: string,
         context: number = 3,
         fullContext?: boolean,
         maxFullChanges: number = 1000,
@@ -1184,11 +1246,40 @@ export class DefaultService {
                 'ignore_whitespace': ignoreWhitespace,
                 'include_uncommitted': includeUncommitted,
                 'path': path,
+                'viewed_blob_sha': viewedBlobSha,
                 'context': context,
                 'full_context': fullContext,
                 'max_full_changes': maxFullChanges,
                 'max_full_lines': maxFullLines,
             },
+            errors: {
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get changes made after files were marked viewed
+     * @param projectId Project ID
+     * @param agentId
+     * @param requestBody
+     * @returns ViewedDiffResponse Changes after each available viewed baseline
+     * @throws ApiError
+     */
+    public getAgentViewedDiff(
+        projectId: string,
+        agentId: string,
+        requestBody: ViewedDiffRequest,
+    ): CancelablePromise<ViewedDiffResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{agent_id}/diff/viewed',
+            path: {
+                'project_id': projectId,
+                'agent_id': agentId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 404: `Not Found`,
                 500: `Internal Server Error`,

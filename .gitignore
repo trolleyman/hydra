@@ -13,6 +13,7 @@
 /dist/macos/
 /dist/windows/
 /dist/linux/
+/desktop/macos/.build/
 /desktop/windows/bin/
 /desktop/windows/obj/
 

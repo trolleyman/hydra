@@ -98,7 +98,7 @@ export function ArtifactsEditor({
             Pre-generate artifacts in the background
             <InfoTooltip title="Background pre-generation">
               <p>When on, the daemon renders a head's diff artifacts in the background once its working tree stops changing, so they're ready the instant you open the diff instead of starting the work on click.</p>
-              <p className="mt-1.5">Turn it off for a project whose generators are too heavy to run speculatively - artifacts are then generated only when you view a diff. Foreground generation and the max-parallel cap above still apply either way.</p>
+              <p className="mt-1.5">Turn it off for a project whose generators are too heavy to run speculatively. Scripts set to Always can still start when viewed; settled and never scripts wait for Refresh or an explicit retry. The max-parallel cap above still applies either way.</p>
               <p className="mt-1.5">Default: on.</p>
             </InfoTooltip>
           </span>

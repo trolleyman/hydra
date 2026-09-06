@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, fileChangeCounts, fileChangeRows, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
@@ -9,6 +9,7 @@ import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { editorForMarkdownComposer } from '../lib/rich-editor/mountedEditors'
 import { optimisticEchoIndex } from '../lib/optimisticEcho'
+import { useEnterSendsStore } from '../lib/composerPrefs'
 
 describe('optimistic user echo reconciliation', () => {
   const pending = [{ clientId: 'client-send-id', text: 'same message' }]
@@ -67,9 +68,13 @@ class FakeWebSocket {
 // The same socket, but reachable from the test so it can push chat frames in.
 const sockets: RecordingWebSocket[] = []
 class RecordingWebSocket extends FakeWebSocket {
+  sent: string[] = []
   constructor(url: string) {
     super(url)
     sockets.push(this)
+  }
+  override send(data: string) {
+    this.sent.push(data)
   }
   emit(frame: unknown) {
     this.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent)
@@ -176,6 +181,32 @@ describe('Bash card summary comments', () => {
   })
 })
 
+describe('Codex file-change previews', () => {
+  it('keeps real hunk offsets and computes changed-word ranges', () => {
+    const rows = fileChangeRows('@@ -585,2 +585,2 @@\n-\tfor key := range caches {\n+\tfor _, key := range keys {\n unchanged', 'update')
+
+    expect(rows.map((row) => [row.type, row.oldNum, row.newNum, row.content])).toEqual([
+      ['del', 585, null, '\tfor key := range caches {'],
+      ['add', null, 585, '\tfor _, key := range keys {'],
+      ['context', 586, 586, 'unchanged'],
+    ])
+    expect(rows[0].ranges?.length).toBeGreaterThan(0)
+    expect(rows[1].ranges?.length).toBeGreaterThan(0)
+  })
+
+  it('numbers complete added files on the new side', () => {
+    expect(fileChangeRows('package config\n\nconst enabled = true\n', 'add').map((row) => [row.oldNum, row.newNum])).toEqual([
+      [null, 1], [null, 2], [null, 3],
+    ])
+  })
+
+  it('counts the additions and deletions rendered for each change kind', () => {
+    expect(fileChangeCounts('@@ -8,2 +8,3 @@\n-old\n+new\n+extra\n context', 'update')).toEqual({ additions: 2, deletions: 1 })
+    expect(fileChangeCounts('first\nsecond\n', 'add')).toEqual({ additions: 2, deletions: 0 })
+    expect(fileChangeCounts('removed\n', 'delete')).toEqual({ additions: 0, deletions: 1 })
+  })
+})
+
 describe('sectioned search output', () => {
   it('shares the widest gutter between a multiline command and numbered output', () => {
     const sections = [{
@@ -200,6 +231,8 @@ describe('sectioned search output', () => {
       lines: ['9:first', '10:last'],
     }])
     const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    expect(container.querySelector('[data-copy-code]')?.className).toContain('--app-font-code-step')
 
     const gutters = container.querySelectorAll('[data-copy-skip].min-h-4')
     expect(gutters).toHaveLength(2)
@@ -265,9 +298,86 @@ describe('sectioned search output', () => {
     expect(screen.getAllByText('web/src/')).not.toHaveLength(0)
     expect(container.querySelectorAll('.border-t')).toHaveLength(3)
     expect(container.querySelectorAll('.border-b')).toHaveLength(3)
+    const headings = container.querySelectorAll('[data-copy-skip].sticky')
+    expect(headings).toHaveLength(3)
+    for (const heading of headings) {
+      expect(heading).toHaveClass('top-0', 'z-10', 'bg-[#fdfcf9]', 'dark:bg-[#1d1c1a]')
+      expect(heading.children[1]).toHaveClass('py-1')
+    }
   })
 
-  it('renders one inset rule between nonconsecutive matches in the same file', () => {
+  it('wraps every output heading kind like an ordinary output line', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'text', label: 'diagnostics-with-one-very-long-unbroken-label' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'file', label: 'deep/path/to/a-very-long-file-name.txt' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'dir', label: 'deep/path/to/a-very-long-directory-name/' }, lines: ['marker'] },
+    ])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    const textLabel = screen.getByText('diagnostics-with-one-very-long-unbroken-label')
+    const fileLabel = screen.getByText('a-very-long-file-name.txt').parentElement
+    const directoryLabel = screen.getAllByText('deep/path/to/a-very-long-directory-name/')[0]
+
+    expect(textLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(fileLabel).toHaveClass('whitespace-normal', 'break-words')
+    expect(fileLabel).not.toHaveClass('truncate')
+    expect(directoryLabel).toHaveClass('whitespace-pre-wrap', 'break-words')
+    expect(directoryLabel).not.toHaveClass('truncate')
+
+    const headings = container.querySelectorAll('[data-copy-skip].sticky')
+    expect(headings).toHaveLength(3)
+    expect(headings[1].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
+    expect(headings[2].children[1].firstElementChild).toHaveClass('min-w-0', 'flex-1')
+  })
+
+  it('highlights marked Markdown and Go sections by their file headings', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'file', label: 'docs/policy.md' }, lines: ['marker'] },
+      {
+        kind: 'view',
+        view: { path: 'docs/policy.md', start: 1, end: null, numbered: false, command: 'git show HEAD:docs/policy.md' },
+        lines: ['# Policy', 'Status: **implemented.**'],
+      },
+      { kind: 'section', section: { kind: 'file', label: 'internal/policy.go' }, lines: ['marker'] },
+      {
+        kind: 'view',
+        view: { path: 'internal/policy.go', start: 1, end: null, numbered: false, command: 'git show HEAD:internal/policy.go' },
+        lines: ['package policy'],
+      },
+    ])
+
+    expect(rows.map((row) => row.header?.label ?? row.html)).toEqual([
+      'docs/policy.md',
+      expect.stringContaining('token title important'),
+      expect.stringContaining('token bold'),
+      'internal/policy.go',
+      expect.stringContaining('token keyword'),
+    ])
+  })
+
+  it('derives file headings from unified diff boundaries', () => {
+    const rows = scriptOutputRows([{
+      kind: 'git',
+      command: 'git diff main',
+      lines: [
+        'diff --git a/internal/a.go b/internal/a.go',
+        '--- a/internal/a.go',
+        '+++ b/internal/a.go',
+        '@@ -1 +1 @@',
+        '-old',
+        '+new',
+        'diff --git a/docs/old.md b/docs/new.md',
+        '--- a/docs/old.md',
+        '+++ b/docs/new.md',
+      ],
+    }])
+
+    expect(rows.filter((row) => row.header).map((row) => row.header?.label)).toEqual([
+      'internal/a.go', 'docs/new.md',
+    ])
+  })
+
+  it('renders one full-width rule between nonconsecutive matches in the same file', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',
       command: 'rg -n value a.ts',
@@ -278,7 +388,28 @@ describe('sectioned search output', () => {
 
     expect(rows.filter((row) => row.divider)).toHaveLength(1)
     const divider = container.querySelector('[data-copy-skip].border-t')
-    expect(divider).toHaveClass('mx-2.5')
+    expect(divider).toHaveClass('col-span-2')
+    expect(divider).not.toHaveClass('mx-2.5')
+  })
+
+  it('turns an rg context separator into a rule only within the same file', () => {
+    const same = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value a.go',
+      match: { paths: ['a.go'], numbered: true },
+      lines: ['29:first', '30:second', '--', '67:later'],
+    }])
+    expect(same.filter((row) => row.divider)).toHaveLength(1)
+    expect(same.filter((row) => !row.header && !row.divider).map((row) => row.num)).toEqual(['29', '30', '67'])
+
+    const different = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n -C 5 value src',
+      match: { paths: [], numbered: true },
+      lines: ['src/a.go:29:first', '--', 'src/b.go:67:later'],
+    }])
+    expect(different.filter((row) => row.divider)).toHaveLength(0)
+    expect(different.filter((row) => row.header).map((row) => row.header?.label)).toEqual(['src/a.go', 'src/b.go'])
   })
 })
 
@@ -291,8 +422,13 @@ async function connectedComposer(): Promise<HTMLElement> {
   return composer
 }
 
-function setComposerValue(composer: HTMLElement, value: string) {
-  editorForMarkdownComposer(composer)!.commands.setContent(value, { contentType: 'markdown' })
+async function setComposerValue(composer: HTMLElement, value: string) {
+  await act(async () => {
+    const editor = editorForMarkdownComposer(composer)!
+    editor.commands.setContent(value, { contentType: 'markdown' })
+    editor.commands.focus('end')
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+  })
 }
 
 function composerValue(composer: HTMLElement): string {
@@ -311,8 +447,50 @@ describe('composer status and actions', () => {
   afterAll(() => vi.unstubAllGlobals())
   afterEach(() => {
     sockets.length = 0
+    useEnterSendsStore.getState().setEnabled(true)
     localStorage.clear()
     useAgentStore.setState({ agents: [] })
+  })
+
+  it('sends with Enter and Cmd/Ctrl+Enter by default while Shift+Enter adds a newline', async () => {
+    renderChat()
+    let ta = await connectedComposer()
+    const ws = sockets[0]
+
+    await setComposerValue(ta, 'plain')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled())
+    fireEvent.keyDown(ta, { key: 'Enter' })
+    expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'plain' }] })
+    await waitFor(() => expect(composerValue(ta)).toBe(''))
+    ta = await connectedComposer()
+
+    await setComposerValue(ta, 'modified')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled())
+    fireEvent.keyDown(ta, { key: 'Enter', metaKey: true })
+    expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'modified' }] })
+    await waitFor(() => expect(composerValue(ta)).toBe(''))
+    ta = await connectedComposer()
+
+    await setComposerValue(ta, 'two')
+    fireEvent.keyDown(ta, { key: 'Enter', shiftKey: true })
+    expect(composerValue(ta)).toBe('two\n')
+  })
+
+  it('flips Enter to newline and Cmd/Ctrl+Enter to send when Enter sends is off', async () => {
+    useEnterSendsStore.getState().setEnabled(false)
+    renderChat()
+    const ta = await connectedComposer()
+    const ws = sockets[0]
+
+    await setComposerValue(ta, 'first line')
+    fireEvent.keyDown(ta, { key: 'Enter' })
+    expect(editorForMarkdownComposer(ta)!.getJSON().content).toHaveLength(2)
+    expect(ws.sent).toHaveLength(0)
+
+    await setComposerValue(ta, 'send this')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled())
+    fireEvent.keyDown(ta, { key: 'Enter', ctrlKey: true })
+    expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'send this' }] })
   })
 
   it('offers Send when the reviewer finishes even if the owning head is running', async () => {
@@ -333,7 +511,7 @@ describe('composer status and actions', () => {
       />,
     )
     const ta = await connectedComposer()
-    setComposerValue(ta, 'one more question')
+    await setComposerValue(ta, 'one more question')
 
     act(() => sockets[0].emit({ type: 'status', status: AgentStatus.RUNNING }))
     await screen.findByRole('button', { name: 'Queue message' })
@@ -350,7 +528,7 @@ describe('composer status and actions', () => {
     })
     renderChat(agentId)
     const ta = await connectedComposer()
-    setComposerValue(ta, 'ship it')
+    await setComposerValue(ta, 'ship it')
 
     act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING))
     const sendNow = await screen.findByRole('button', { name: 'Send message now' })
@@ -444,6 +622,55 @@ describe('running turn elapsed time', () => {
 
     expect(await screen.findByText('(42s)')).toBeInTheDocument()
     dateNow.mockRestore()
+  })
+
+  it('shows a completed turn cost from projected API-key auth', async () => {
+    renderChat()
+    await connectedComposer()
+
+    act(() => {
+      sockets[0].emit({
+        type: 'state_snapshot',
+        state: { version: 1, through: 40, api_key_source: 'ANTHROPIC_API_KEY' },
+      })
+      sockets[0].emit({
+        type: 'chat_event',
+        event: {
+          seq: 41,
+          type: 'turn_completed',
+          timestamp: '2026-08-30T12:00:00Z',
+          payload: { status: 'completed', cost_usd: 0.2145, usage: { output_tokens: 845 } },
+        },
+      })
+      sockets[0].emit({ type: 'replay_done' })
+    })
+
+    expect(await screen.findByText('$0.21')).toBeInTheDocument()
+  })
+
+  it('hides the client-estimated cost for subscription auth', async () => {
+    renderChat()
+    await connectedComposer()
+
+    act(() => {
+      sockets[0].emit({
+        type: 'state_snapshot',
+        state: { version: 1, through: 40, api_key_source: 'none' },
+      })
+      sockets[0].emit({
+        type: 'chat_event',
+        event: {
+          seq: 41,
+          type: 'turn_completed',
+          timestamp: '2026-08-30T12:00:00Z',
+          payload: { status: 'completed', cost_usd: 0.2145, usage: { output_tokens: 845 } },
+        },
+      })
+      sockets[0].emit({ type: 'replay_done' })
+    })
+
+    await screen.findByText(/845 tokens/)
+    expect(screen.queryByText('$0.21')).not.toBeInTheDocument()
   })
 })
 
@@ -1406,13 +1633,16 @@ describe('a message sent after a commit lands under it', () => {
     )
     const chip = await screen.findByText('Teach the loader about overlays')
     const row = chip.closest('[role="button"]')
+    expect(chip).toHaveClass('min-w-0', 'flex-1', 'whitespace-normal', 'break-words')
+    expect(chip).not.toHaveClass('truncate')
+    expect(row?.parentElement).toHaveClass('min-w-0', 'max-w-full')
     expect(screen.getByLabelText('36 lines added, 5 lines removed')).toHaveClass('top-px')
     expect(row?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[16px]')
     expect(row?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(1)
     fireEvent.mouseEnter(row?.parentElement as HTMLElement)
     expect(await screen.findByRole('tooltip', {}, { timeout: 1200 })).toHaveClass('text-left')
 
-    setComposerValue(ta, 'ship it')
+    await setComposerValue(ta, 'ship it')
     fireEvent.keyDown(ta, { key: 'Enter' })
     const bubble = await screen.findByText('ship it')
 
@@ -1429,7 +1659,7 @@ describe('a message sent after a commit lands under it', () => {
     const previousAnimate = HTMLElement.prototype.animate
     HTMLElement.prototype.animate = animate
     try {
-      setComposerValue(composer, 'animate me')
+      await setComposerValue(composer, 'animate me')
       const send = await screen.findByRole('button', { name: 'Send message' })
       await waitFor(() => expect(send).not.toBeDisabled())
       fireEvent.click(send)
@@ -1475,9 +1705,14 @@ describe('a message sent after a commit lands under it', () => {
     )
 
     const pill = await screen.findByRole('button', { name: /Merged main - 2 commits/ })
+    const mergeLabel = screen.getByText('Merged main - 2 commits')
+    expect(mergeLabel).toHaveClass('whitespace-normal', 'break-words')
+    expect(mergeLabel).not.toHaveClass('truncate')
     expect(screen.getByLabelText('10 lines added, 2 lines removed')).toHaveClass('top-px')
     fireEvent.click(pill)
     const subject = await screen.findByText('The merged change')
+    expect(subject).toHaveClass('whitespace-normal', 'break-words')
+    expect(subject).not.toHaveClass('truncate')
     expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('top-px')
     expect(pill).toHaveClass('z-10', 'rounded-b-none', 'border-b-0')
     expect(subject.parentElement).toHaveClass('items-baseline')

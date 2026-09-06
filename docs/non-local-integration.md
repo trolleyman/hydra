@@ -97,9 +97,9 @@ Every forge call runs **host-side in the daemon** with the user's own
 credentials - `gh`/`glab` for the API, the normal git credential helper /
 ssh-agent for pushes. Nothing token-shaped is ever mounted into a sandbox:
 
-- `~/.config/gh` is NOT restored into the sandbox (it once was, which quietly
-  handed every head the user's GitHub identity - `gh auth token` from Bash is
-  not gated). Forge credentials in-sandbox are opt-in via `restore_ro`.
+- `~/.config/gh` and other forge credential locations remain masked even below
+  a broader `readable_paths` entry. Raw CLI tokens are never available to a
+  head.
 - In-sandbox `git push` is gate-denied outright; publishing is a daemon action.
 - `.hydra/deploy.toml` and `.hydra/config.local.toml` are shipped mask defaults,
   since Hydra's own tooling creates the first of them.
@@ -147,6 +147,10 @@ between `hydra/<id>` and its upstream review ref and offers:
   into the head branch, so conflicts surface through the existing conflict UI
   and no history is rewritten. The agent needs no notification: its worktree IS
   the branch.
+- **Close PR/MR** from the linked review button's menu. Hydra closes the review
+  on the forge, detaches it from the head, and disables automatic pushing. The
+  local and remote branches remain intact, and the downstream branch name is
+  preserved for a later publish.
 - Diverged -> pull first, then push. The only `--force-with-lease` case is a
   head that rewrote its own history where the remote tip still matches what this
   head last pushed; foreign commits always win a pull-first.
@@ -362,11 +366,12 @@ Approving, resolving and everything else still happen on the forge.
   with no callers; the only arm endpoint is the local-tests one. Wants an arm
   endpoint/UI plus a watcher branch that prefers the forge's own auto-merge
   (it respects merge trains and protected-branch rules Hydra cannot replicate).
-- **Linked-head kill / local-merge close-or-detach dialog.** Killing or locally
-  merging a head with a linked MR currently does nothing about the MR or the
-  remote branch. It should offer "close the MR and delete the remote branch" or
-  "detach - leave it open", and locally merging a head whose MR is open should
-  be blocked-with-override like a failing test gate.
+- **Linked-head kill / local-merge close-or-detach dialog.** The review button
+  can close a Hydra-created MR/PR while keeping the head and branches. Killing or
+  locally merging a linked head still does nothing about the review or remote
+  branch. Those flows should offer a close-or-detach choice, and locally merging
+  a head whose review is open should be blocked-with-override like a failing
+  test gate.
 - **Fetch-fresh spawn base.** The spawn UI defaults to the repository's stable
   default branch (remote `origin/HEAD`, then `main`/`master`) rather than whichever
   incidental branch the project checkout currently has. There is still no
@@ -403,10 +408,9 @@ The manual route still works and needs no config: push the head branch yourself
 keep the head alive for review iteration - its branch and worktree survive as
 long as you do not merge or kill it. For head-side forge access, prefer a forge
 MCP server with `[policy] mcp_tools_allowed` (the gate parks every non-allowed
-call for approval, even under `--dangerously-skip-permissions`) over
-`restore_ro = ["~/.config/gh"]`, which makes the head *you* on the forge with no
-approval step. JIRA reads are the same story: an Atlassian MCP server plus the
-host on the network allow-list is likely the permanently correct answer.
+call for approval, even under `--dangerously-skip-permissions`). JIRA reads are
+the same story: an Atlassian MCP server plus the host on the network allow-list
+is likely the permanently correct answer.
 
 Direct local merge also remains the right tool for *local integration branches*:
 merge several stacked heads into `integration/foo`, test the combination, and

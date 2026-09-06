@@ -51,8 +51,9 @@ mid-turn steering behavior.
 Every message must be visibly attributed in both places:
 
 - The recipient sees an agent-facing prefix naming the source ID and title.
-- The chat event carries an origin such as `agent:<source-id>`, so the UI never
-  renders it as something the user typed.
+- The chat event carries `origin: agent` and a separate `source_agent_id`, so the
+  UI never renders it as something the user typed and the fixed origin enum does
+  not encode dynamic IDs.
 - The sender's tool result records target, correlation ID, and delivery state.
 
 The message is the payload, not a notification about hidden state. Cap it (for
@@ -89,9 +90,9 @@ Enforce limits in the daemon, not only in tool descriptions:
    Policy changes take effect without restarting the calling head. Chat-mode
    delivery uses the durable queue; stopped, non-chat, self, oversized, and
    unknown targets are rejected.
-3. **Built:** `agent:<source-id>` origin metadata in queued and durable events,
-   a sender marker in chat, 4 KiB message and four-item recipient queue caps,
-   six messages per chain, and six messages per pair per ten minutes. The
+3. **Built:** `agent` origin metadata plus `source_agent_id` in queued and durable
+   events, a sender marker in chat, 4 KiB message and four-item recipient queue
+   caps, six messages per chain, and six messages per pair per ten minutes. The
    simulation transcript includes a real attributed sibling-agent turn for
    browser verification.
 4. **Deferred intentionally:** cross-project discovery, broadcast,

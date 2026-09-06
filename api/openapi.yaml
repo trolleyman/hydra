@@ -1047,6 +1047,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{agent_id}/publish/close:
+    post:
+      summary: Close a head's linked MR/PR and detach it from the head
+      operationId: closeReview
+      description: >-
+        Closes the review on its forge, clears the head's review link, and
+        disables automatic pushing. The head, local branch, downstream branch
+        name, and remote branch remain intact.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Closed (returns the updated, unlinked agent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Bad Request (not linked, adopted review, or forge rejected the close)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{agent_id}/downstream-branch:
     patch:
       summary: Set a head's downstream branch name (the name it is pushed AS)
@@ -1201,6 +1244,49 @@ paths:
                 $ref: '#/components/schemas/ReviewThreadsResponse'
         '400':
           description: Bad Request (unlinked head, empty body, or the forge rejected it)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply:
+    post:
+      summary: Apply one or more review suggestions to a head's worktree
+      operationId: applyReviewSuggestions
+      description: >
+        Applies the suggested replacements carried by the numbered forge comments to
+        the head's worktree. The whole batch is validated before any file is changed;
+        stale, missing, and overlapping suggestions are rejected together.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyReviewSuggestionsRequest'
+      responses:
+        '200':
+          description: Applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyReviewSuggestionsResponse'
+        '400':
+          description: Bad Request (invalid, stale, or overlapping suggestions)
           content:
             application/json:
               schema:
@@ -1697,6 +1783,15 @@ paths:
             type: string
           description: Only return the diff for this specific file path
         - in: query
+          name: viewed_blob_sha
+          required: false
+          schema:
+            type: string
+          description: >-
+            With path, compare the file version previously marked viewed to its
+            current head-side content. This returns only changes made after that
+            review baseline. The blob must still exist in the repository.
+        - in: query
           name: context
           required: false
           schema:
@@ -1743,6 +1838,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DiffResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{agent_id}/diff/viewed:
+    post:
+      summary: Get changes made after files were marked viewed
+      operationId: getAgentViewedDiff
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ViewedDiffRequest'
+      responses:
+        '200':
+          description: Changes after each available viewed baseline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewedDiffResponse'
         '404':
           description: Not Found
           content:
@@ -3921,25 +4058,25 @@ components:
           type: number
           format: float
           nullable: true
-          description: Percent of the primary Codex rate-limit window used (0-100).
+          description: Percent used (0-100) for the shortest Codex rate-limit window shorter than one week, when available across the account's limit groups.
         session_resets_at:
           type: string
           format: date-time
           nullable: true
-          description: When the primary Codex rate-limit window resets.
+          description: When the selected short Codex rate-limit window resets.
         session_reset_text:
           type: string
           nullable: true
-          description: Display label for the primary Codex rate-limit window.
+          description: Display label for the selected short Codex rate-limit window.
         weekly_percent_used:
           type: number
           format: float
           nullable: true
-          description: Percent of the secondary Codex rate-limit window used (0-100), when available.
+          description: Percent used (0-100) for the shortest week-or-longer Codex window, choosing the most constrained matching limit group.
         weekly_reset_text:
           type: string
           nullable: true
-          description: Display label for the secondary Codex rate-limit window.
+          description: Display label for the selected week-or-longer Codex rate-limit window.
 
     ProjectInfo:
       type: object
@@ -4146,6 +4283,13 @@ components:
             spawn only; on resume it is omitted so the agent restores the model
             its transcript was saved with (and honours any in-session /model
             change). Empty/omitted inherits the CLI's own default.
+        effort:
+          type: string
+          enum: [low, medium, high, xhigh, max]
+          description: >-
+            Thinking/reasoning effort for Claude or Codex. Passed through the
+            provider's native launch or structured-chat protocol on a fresh
+            session; empty/omitted inherits the provider and model default.
         base_branch:
           type: string
           description: Base branch to create the worktree from (defaults to the repository's stable default branch)
@@ -4519,6 +4663,9 @@ components:
         line:
           type: integer
           description: NEW-side line the thread anchors to (0 when the forge reports none).
+        start_line:
+          type: integer
+          description: First NEW-side line covered by the comment. Omitted for a single-line comment.
         resolved:
           type: boolean
           description: Resolved, by the forge's own flag OR Hydra's local mark (see resolved_locally).
@@ -4562,6 +4709,80 @@ components:
           type: string
           enum: [forge, local_only]
           description: "\"forge\" - on the PR for everyone to see; \"local_only\" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants."
+        suggestion:
+          $ref: '#/components/schemas/ReviewSuggestion'
+
+    ReviewSuggestion:
+      type: object
+      description: A replacement proposed by a forge comment for its anchored line range.
+      required: [start_line, end_line, replacement, applied]
+      properties:
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+        replacement:
+          type: string
+        applied:
+          type: boolean
+
+    ApplyReviewSuggestionsRequest:
+      type: object
+      required: [numbers]
+      properties:
+        numbers:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+
+    ApplyReviewSuggestionsResponse:
+      type: object
+      required: [applied]
+      properties:
+        applied:
+          type: array
+          items:
+            type: integer
+
+    ViewedDiffRequest:
+      type: object
+      required: [viewed_blobs]
+      properties:
+        viewed_blobs:
+          type: object
+          additionalProperties:
+            type: string
+          description: File path to the blob SHA recorded when that file was marked viewed.
+        ignore_whitespace:
+          type: boolean
+        include_uncommitted:
+          type: boolean
+        context:
+          type: integer
+          default: 3
+        full_context:
+          type: boolean
+        max_full_changes:
+          type: integer
+          default: 1000
+        max_full_lines:
+          type: integer
+          default: 6000
+
+    ViewedDiffResponse:
+      type: object
+      required: [files, failed_paths]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiffFile'
+        failed_paths:
+          type: array
+          items:
+            type: string
+          description: Paths whose saved blob is unavailable or whose delta could not be produced.
 
     ReviewCommentsResponse:
       type: object
@@ -5550,7 +5771,7 @@ components:
             hunk cannot say how many lines it hides. Absent when the file was
             never read in full (its change count exceeded max_full_changes, or
             the full-context read failed), in which case that expander stays a
-            bare chevron.
+            directional action without a Show all action.
         head_blob_sha:
           type: string
           nullable: true
@@ -5628,6 +5849,18 @@ components:
           items:
             type: string
 
+    MessageOrigin:
+      type: string
+      description: Who caused a user-shaped message to be sent when it was not typed in the composer.
+      enum: [button, hydra, agent]
+      x-enum-varnames: [MessageOriginButton, MessageOriginHydra, MessageOriginAgent]
+
+    MessageReason:
+      type: string
+      description: The action or event that caused a non-composer message.
+      enum: [review_comments, review_mention, tests_failed, fix_test, review_thread]
+      x-enum-varnames: [MessageReasonReviewComments, MessageReasonReviewMention, MessageReasonTestsFailed, MessageReasonFixTest, MessageReasonReviewThread]
+
     AgentInputRequest:
       type: object
       required: [text]
@@ -5636,14 +5869,13 @@ components:
           type: string
           description: Text to send to the agent's stdin (a newline is appended automatically)
         origin:
-          type: string
+          $ref: '#/components/schemas/MessageOrigin'
           description: >-
-            Why this message exists, when the user did not type it - "review_comments",
-            "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread",
-            "fix_test".
-            Absent for anything typed in the composer. It rides through to the chat event so
-            the transcript can mark an automated turn as such; the agent sees only the text,
-            which is why those messages also carry a "[Hydra]" prefix.
+            Who caused this message when the user did not type it. Browser actions use
+            "button"; server automation uses "hydra". Absent for composer input.
+        reason:
+          $ref: '#/components/schemas/MessageReason'
+          description: Optional context for the button action or Hydra automation.
 
     ApprovalRequest:
       type: object
@@ -5657,7 +5889,7 @@ components:
           description: The tool the agent tried to use (e.g. WebFetch or an mcp__ name)
         kind:
           type: string
-          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)"
+          description: "What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', 'host_command' (run a command on the host, outside the sandbox), or 'filesystem_read' (mount a host path read-only)"
         target:
           type: string
           description: The MCP server name, '<server>__<tool>', host, or command the approval is about (for host_command, the full command text)
@@ -5713,7 +5945,7 @@ components:
           description: The user's verdict for the parked tool call
         remember:
           type: boolean
-          description: "When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again"
+          description: "When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again"
         command:
           type: string
           description: >-
@@ -5722,6 +5954,12 @@ components:
             (never re-reading the head-writable request file), which closes the
             TOCTOU window where an agent could swap the command after the user
             saw it. Ignored for every other kind.
+        path:
+          type: string
+          description: >-
+            For a filesystem_read approval only: the canonical host path the UI
+            displayed and the user approved. The daemon grants this echoed path,
+            never the target in the agent-writable request file.
 
     NetworkConfig:
       type: object
@@ -5773,6 +6011,19 @@ components:
             adb's server on 5037. No effect in other modes (they share the
             host loopback already).
 
+    SandboxCacheConfig:
+      type: object
+      description: One project-scoped cache; exactly one of env or path must be set
+      properties:
+        env:
+          type: string
+          nullable: true
+          description: Environment variable redirected to the cache directory
+        path:
+          type: string
+          nullable: true
+          description: Worktree-relative path linked to the cache directory
+
     SandboxConfig:
       type: object
       description: User-editable sandbox policy, additive on top of baked-in defaults
@@ -5782,22 +6033,36 @@ components:
           items:
             type: string
           nullable: true
+        readable_paths:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Extra host paths exposed read-only. Additive across config layers and always narrowed by masked_paths.
         masked_paths:
           type: array
           items:
             type: string
           nullable: true
-        restore_ro:
-          type: array
-          items:
-            type: string
-          nullable: true
+          description: Defense-in-depth denied paths. Additive across config layers and applied after every read/write allowance.
         cow_paths:
           type: array
           items:
             type: string
           nullable: true
           description: Paths mounted copy-on-write. The agent reads the real files and may overwrite them, but writes are kept per-head and never touch the source. A worktree-relative entry (pipeline/out) is mirrored from the project root into the worktree; a home/absolute entry (~/.gradle, /opt/cache), resolved against HOME, is overlaid in place and supersedes any default writable bind on it. For large gitignored build dirs or shared tool caches too big to copy. On Linux needs an overlay-capable bwrap.
+        cache:
+          type: object
+          nullable: true
+          additionalProperties:
+            $ref: '#/components/schemas/SandboxCacheConfig'
+          description: Project-scoped writable caches shared by matching heads and sandboxed runners. Each key owns a stable directory in Hydra project state; env redirects a cache variable and path links a worktree-relative ignored path.
+        inherit_env:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Additional daemon environment variable names passed into heads. Additive across config layers; values are resolved at launch and are never stored. Hydra-owned names, including every HYDRA_* variable, cannot be inherited.
         pre_spawn_script:
           type: string
           nullable: true
@@ -6884,9 +7149,19 @@ components:
           x-go-type: json.RawMessage
           x-go-type-skip-optional-pointer: true
         origin:
+          allOf:
+            - $ref: '#/components/schemas/MessageOrigin'
+          x-go-type-skip-optional-pointer: true
+          description: Who caused this message when it was not typed in the composer.
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/MessageReason'
+          x-go-type-skip-optional-pointer: true
+          description: Optional context for the button action or Hydra automation.
+        source_agent_id:
           type: string
           x-go-type-skip-optional-pointer: true
-          description: Why this message exists when the user did not type it.
+          description: The sending head when origin is "agent".
 
     ChatPendingAsk:
       type: object
@@ -6936,6 +7211,14 @@ components:
         model:
           type: string
           x-go-type-skip-optional-pointer: true
+        api_key_source:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Claude's authentication source from system:init. "none" means
+            subscription auth, so turn footers hide the client-estimated API
+            cost. Persisted because system:init can scroll outside the newest
+            history page.
         slash_commands:
           type: array
           items:
@@ -7162,16 +7445,21 @@ components:
         shell:
           $ref: '#/components/schemas/ChatShellResult'
         origin:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/MessageOrigin'
           x-go-type-skip-optional-pointer: true
           description: >-
-            Why this turn exists, when the user did not type it - "review_comments",
-            "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread",
-            "fix_test".
-            Absent for anything typed in the composer. The test is not "did Hydra write the
-            words" but "did the user type it", so a one-click action like Fix with agent
-            counts as automated too. Drives the chat's automated-turn marker; the agent sees
-            only the text, which is why those messages also carry a "[Hydra]" prefix.
+            Who caused this turn when it was not typed in the composer. Drives the chat's
+            attribution marker; the agent sees only the text.
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/MessageReason'
+          x-go-type-skip-optional-pointer: true
+          description: Optional context for the button action or Hydra automation.
+        source_agent_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The sending head when origin is "agent".
 
     ChatUserMessageEchoedPayload:
       type: object
@@ -7603,9 +7891,19 @@ components:
           x-go-type: json.RawMessage
           x-go-type-skip-optional-pointer: true
         origin:
+          allOf:
+            - $ref: '#/components/schemas/MessageOrigin'
+          x-go-type-skip-optional-pointer: true
+          description: Who caused this message when it was not typed in the composer.
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/MessageReason'
+          x-go-type-skip-optional-pointer: true
+          description: Optional context for the button action or Hydra automation.
+        source_agent_id:
           type: string
           x-go-type-skip-optional-pointer: true
-          description: Why this message exists when the user did not type it.
+          description: The sending head when origin is "agent".
 
     ChatQueueMessageRemovedPayload:
       type: object

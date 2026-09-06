@@ -4,8 +4,8 @@ import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
-import { ProjectDirectoryFilesystemMode, WorkspaceKind, type AgentResponse, type RepositoryBranch } from '../api'
-import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, ProviderIcon } from './ReviewControls'
+import { MessageOrigin, MessageReason, ProjectDirectoryFilesystemMode, WorkspaceKind, type AgentResponse, type RepositoryBranch } from '../api'
+import { MRStateChip, CreateMRDialog, ProviderIcon, ReviewTooltipContent } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
@@ -22,7 +22,7 @@ import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentL
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, FolderGit2, ExternalLink } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, CircleX, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, Folder, FolderGit2, ExternalLink } from 'lucide-react'
 import { hasWebKitDesktopBridge, openChatWindow } from '../lib/desktopBridge'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
@@ -490,7 +490,7 @@ function GitIsolationBadge({ mode, projectDirectory = false }: { mode?: string; 
 // window presents it. Worktree Heads get a branch chip; project-directory Heads
 // get a folder chip. Live permissions sit immediately after that chip in the
 // identity row, so workspace kind and workspace controls read as one cluster.
-function WorkspaceBadge({
+export function WorkspaceBadge({
   agent,
 }: {
   agent: AgentResponse
@@ -516,12 +516,17 @@ function WorkspaceBadge({
       content={(
         <div className="space-y-3">
           <p>This chat works directly in the shared project directory. Changes are project changes, not an isolated agent worktree.</p>
-          {agent.project_path && <p className="break-all text-xs text-gray-500 dark:text-gray-400">{agent.project_path}</p>}
+          {agent.project_path && (
+            <p className="flex items-start gap-1.5 text-xs text-stone-700 dark:text-stone-200">
+              <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
+              <span className="min-w-0 break-all">{agent.project_path}</span>
+            </p>
+          )}
         </div>
       )}
       className="shrink-0"
     >
-      <button type="button" aria-label="Project directory workspace" className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50">
+      <button type="button" aria-label="Project directory workspace" className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50">
         <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300" containerClassName="min-h-5" icon={<FolderGit2 className="w-3 h-3 shrink-0" />}>{null}</Badge>
       </button>
     </Tooltip>
@@ -569,7 +574,7 @@ function ProjectDirectoryPermissions({
 // wants from you. An unmapped status has no prose, so it stays
 // a bare chip rather than opening an empty box. No heading: it would be the
 // status word, which the chip an inch above the tooltip already says.
-function AgentStatusChip({ status }: { status: string }) {
+export function AgentStatusChip({ status }: { status: string }) {
   const badge = agentStatusBadge(status)
   const help = agentStatusHelp(status)
   const chip = <Badge className={badge.className} containerClassName="shrink-0">{badge.label}</Badge>
@@ -578,7 +583,7 @@ function AgentStatusChip({ status }: { status: string }) {
     <Tooltip content={help} className="shrink-0">
       {/* The chip is a plain span, so the tooltip needs a focusable trigger of
           its own for keyboard parity. */}
-      <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
+      <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
         {chip}
       </button>
     </Tooltip>
@@ -610,7 +615,7 @@ function metaRowSignature(a: AgentResponse) {
     base_branch: a.base_branch,
     chat_mode: a.chat_mode,
     created_at: a.created_at,
-    // Read by the DownstreamBranchEditor + MRStateChip children.
+    // Read by the MRStateChip hover summary.
     downstream_branch: a.downstream_branch,
     review: a.review,
   }
@@ -627,7 +632,7 @@ const IDENTITY_LINE_FIRST = true
 // IS and is DOING - the agent-type pill, the status chip and the head id - plus a
 // self-ticking "created X ago", right-aligned; the chip strip under it carries the
 // configuration: test verdict, network + git-isolation tags, base-branch selector,
-// terminal/chat toggle, downstream editor and MR chip. Memoized (see
+// terminal/chat toggle and MR chip. Memoized (see
 // metaRowSignature) so a running head's constant refreshes don't churn it; the
 // handlers are stabilized by the caller so only real display changes get through.
 const AgentMetaRow = memo(function AgentMetaRow({
@@ -638,14 +643,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
   savingBase,
   savingCheckoutBranch,
   savingChatMode,
-  savingDownstream,
   publishing,
   savingProjectDirectoryPermissions,
   onSaveBase,
   onCheckoutBranch,
   onRefreshBranches,
   onSaveChatMode,
-  onSaveDownstream,
   onPushToMR,
   onPullFromMR,
   onUpdateProjectDirectoryPermissions,
@@ -657,14 +660,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
   savingBase: boolean
   savingCheckoutBranch: boolean
   savingChatMode: boolean
-  savingDownstream: boolean
   publishing: boolean
   savingProjectDirectoryPermissions: boolean
   onSaveBase: (name: string) => void
   onCheckoutBranch: (name: string) => void
   onRefreshBranches: () => void
   onSaveChatMode: (next: boolean) => void
-  onSaveDownstream: (n: string) => void
   onPushToMR: () => void
   onPullFromMR: () => void
   onUpdateProjectDirectoryPermissions: (patch: { filesystem_mode?: ProjectDirectoryFilesystemMode; allow_commits?: boolean }) => void
@@ -783,17 +784,9 @@ const AgentMetaRow = memo(function AgentMetaRow({
       {projectId && agent.branch_name && !usesProjectDirectory(agent) && !agent.archived && (
         <span className="shrink-0"><TrackBranchButton projectId={projectId} agentId={agent.id} /></span>
       )}
-      {/* Downstream branch (the name this head is pushed AS) - editable
-          until first publish, then soft-locked. Only shown once set.
-          empty:hidden on both wrappers below: their child renders nothing for a
-          head with no downstream branch / no linked MR, and a zero-width span
-          still eats the row's gap on either side of it - 16px that pushed the
-          terminal/chat toggle onto a line of its own. */}
-      {!usesProjectDirectory(agent) && <span className="shrink-0 inline-flex items-center empty:hidden">
-        <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
-      </span>}
-      {/* Linked-MR state chip (state/CI/approvals/discussions/ahead-behind). The
-          ahead/behind chips are the click target for Push/Pull to MR, so a commit
+      {/* Linked-review chip. State, branch, CI, approvals and discussions live
+          in its hover summary; only actionable ahead/behind sync stays beside
+          it. The ahead/behind chips are the click target for Push/Pull to MR, so a commit
           made after the MR opened is both visible and actionable here rather than
           only inside the View MR dropdown. */}
       {!usesProjectDirectory(agent) && <span className="shrink-0 inline-flex items-center gap-1.5 empty:hidden">
@@ -837,14 +830,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
   prev.savingBase === next.savingBase &&
   prev.savingCheckoutBranch === next.savingCheckoutBranch &&
   prev.savingChatMode === next.savingChatMode &&
-  prev.savingDownstream === next.savingDownstream &&
   prev.savingProjectDirectoryPermissions === next.savingProjectDirectoryPermissions &&
   prev.publishing === next.publishing &&
   prev.onSaveBase === next.onSaveBase &&
   prev.onCheckoutBranch === next.onCheckoutBranch &&
   prev.onRefreshBranches === next.onRefreshBranches &&
   prev.onSaveChatMode === next.onSaveChatMode &&
-  prev.onSaveDownstream === next.onSaveDownstream &&
   prev.onPushToMR === next.onPushToMR &&
   prev.onPullFromMR === next.onPullFromMR &&
   deepEqual(metaRowSignature(prev.agent), metaRowSignature(next.agent)),
@@ -908,13 +899,13 @@ export function AgentDetail({
   const [checkingMergeFor, setCheckingMergeFor] = useState<string | null>(null)
   const checkingMerge = checkingMergeFor === agent.id
   const [publishing, setPublishing] = useState(false)
+  const [closingReview, setClosingReview] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
   // Review config is project-scoped, cached in the project store so it is
   // fetched once per project (not per agent) and shared with the Settings editor.
   const reviewConfig = useProjectStore((s) => (projectId ? s.reviewConfigs[projectId] ?? null : null))
   const remotes = reviewConfig?.remote ? [reviewConfig.remote] : ['origin']
-  const [savingDownstream, setSavingDownstream] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
@@ -1178,8 +1169,6 @@ export function AgentDetail({
   checkoutBranchRef.current = saveCheckoutBranch
   const saveChatModeRef = useRef(saveChatMode)
   saveChatModeRef.current = saveChatMode
-  const saveDownstreamRef = useRef(saveDownstream)
-  saveDownstreamRef.current = saveDownstream
   const pushToMRRef = useRef(handlePushToMR)
   pushToMRRef.current = handlePushToMR
   const pullFromMRRef = useRef(handlePullFromMR)
@@ -1187,7 +1176,6 @@ export function AgentDetail({
   const onSaveBase = useCallback((name: string) => { void saveBaseRef.current(name) }, [])
   const onCheckoutBranch = useCallback((name: string) => { void checkoutBranchRef.current(name) }, [])
   const onSaveChatMode = useCallback((next: boolean) => { void saveChatModeRef.current(next) }, [])
-  const onSaveDownstream = useCallback((n: string) => { void saveDownstreamRef.current(n) }, [])
   const onPushToMR = useCallback(() => { void pushToMRRef.current() }, [])
   const onPullFromMR = useCallback(() => { void pullFromMRRef.current() }, [])
 
@@ -1875,9 +1863,10 @@ export function AgentDetail({
 
   // handlePushToMR / handlePullFromMR sync a linked head with its remote branch.
   async function handlePushToMR() {
+    const noun = agent.review?.provider === 'github' ? 'PR' : 'MR'
     setPublishing(true)
     const res = await runWithToast(() => api.default.pushToMr(projectId ?? '', agent.id), {
-      success: 'Pushed to MR',
+      success: `Pushed to ${noun}`,
       errorPrefix: 'Push failed',
     })
     if (res.ok) updateAgentInStore(res.value)
@@ -1885,25 +1874,38 @@ export function AgentDetail({
   }
 
   async function handlePullFromMR() {
+    const noun = agent.review?.provider === 'github' ? 'PR' : 'MR'
     setPublishing(true)
     const res = await runWithToast(() => api.default.pullFromMr(projectId ?? '', agent.id), {
-      success: 'Pulled from MR',
+      success: `Pulled from ${noun}`,
       errorPrefix: 'Pull failed',
     })
     if (res.ok) updateAgentInStore(res.value)
     setPublishing(false)
   }
 
-  // saveDownstream edits the head's downstream branch (metadata only; soft-locked
-  // after publish - the backend rejects a rename of a linked head).
-  async function saveDownstream(next: string) {
-    setSavingDownstream(true)
-    const res = await runWithToast(() => api.default.setDownstreamBranch(projectId ?? '', agent.id, { downstream_branch: next }), {
-      success: `Downstream branch set to ${next}`,
-      errorPrefix: 'Failed to set downstream branch',
+  async function handleCloseReview() {
+    const noun = agent.review?.provider === 'github' ? 'PR' : 'MR'
+    setClosingReview(true)
+    const res = await runWithToast(() => api.default.closeReview(projectId ?? '', agent.id), {
+      success: `${noun} closed`,
+      errorPrefix: `Failed to close ${noun}`,
     })
     if (res.ok) updateAgentInStore(res.value)
-    setSavingDownstream(false)
+    setClosingReview(false)
+  }
+
+  function confirmCloseReview() {
+    const noun = agent.review?.provider === 'github' ? 'PR' : 'MR'
+    const number = agent.review?.id ? ` #${agent.review.id}` : ''
+    useDialogStore.getState().show({
+      title: `Close ${noun}${number}?`,
+      message: `This closes the ${noun} on the forge and stops automatic pushing. The head, local branch, and remote branch stay intact.`,
+      type: 'warning',
+      confirmLabel: `Close ${noun}`,
+      showCancel: true,
+      onConfirm: () => void handleCloseReview(),
+    })
   }
 
   // armPublish / disarmPublish toggle the publish-when-green arm: an unlinked head
@@ -1913,9 +1915,9 @@ export function AgentDetail({
   // menu uses - "when green" is the code's word for this, not the user's.
   async function armPublish(acknowledgeAdopted = false) {
     const linkedNow = !!agent.review
-    const noun = agent.review?.adopted ? 'PR' : 'MR'
+    const noun = (agent.review?.provider ?? reviewConfig?.provider) === 'github' ? 'PR' : 'MR'
     const res = await runWithToast(() => api.default.armAutoPush(projectId ?? '', agent.id, acknowledgeAdopted || undefined), {
-      success: linkedNow ? `Will push to the ${noun} automatically` : 'Will open a draft MR once tests pass',
+      success: linkedNow ? `Will push to the ${noun} automatically` : `Will open a draft ${noun} once tests pass`,
       errorPrefix: 'Failed to arm',
     })
     // The arm endpoint returns no body, so refresh to repaint the menu's toggle.
@@ -1941,8 +1943,9 @@ export function AgentDetail({
   }
   async function disarmPublish() {
     const linkedNow = !!agent.review
+    const noun = (agent.review?.provider ?? reviewConfig?.provider) === 'github' ? 'PR' : 'MR'
     const res = await runWithToast(() => api.default.disarmAutoPush(projectId ?? '', agent.id), {
-      success: linkedNow ? 'No longer pushing automatically' : 'MR no longer queued',
+      success: linkedNow ? 'No longer pushing automatically' : `${noun} no longer queued`,
       errorPrefix: 'Failed to cancel',
     })
     if (res.ok) onRefresh?.()
@@ -1954,10 +1957,12 @@ export function AgentDetail({
   // (docs/non-local-integration.md). Data is fetched by the agent when it reads,
   // so it is fresh at that moment, not at click time.
   async function respondToReview() {
+    const noun = agent.review?.provider === 'github' ? 'PR' : 'MR'
     await runWithToast(
       () => api.default.sendAgentInput(projectId ?? '', agent.id, {
-        text: "Fetch your MR's unresolved review comments with the `mcp__hydra__get_review_comments` tool and address them, then commit.",
-        origin: 'review_comments',
+    text: `Fetch your ${noun}'s unresolved review comments with the \`mcp__hydra__get_review_comments\` tool and address them, then commit.`,
+    origin: MessageOrigin.MessageOriginButton,
+    reason: MessageReason.MessageReasonReviewComments,
       }),
       { success: 'Asked the agent to address review comments', errorPrefix: 'Failed to send' },
     )
@@ -1977,13 +1982,13 @@ export function AgentDetail({
   //               (Force / Queue) live in its dropdown, with a failing-tests warning.
   const verdict = agent.tests?.status
   const armed = agent.merge_when_green === true
-  const busy = merging || checkingMerge || killing
+  const busy = merging || checkingMerge || killing || closingReview
   const toBranch = agent.base_branch || 'base'
   const [publishAppearance, mergeAppearance, unreadAppearance, renameAppearance, restartAppearance, killAppearance] = agentPrimaryActionAppearances({
     agent,
     provider: reviewConfig?.provider,
     merging,
-    publishing,
+    publishing: publishing || closingReview,
     killing,
     restarting,
   })
@@ -2101,11 +2106,31 @@ export function AgentDetail({
     tone: 'neutral' as const,
     disabled: busy,
   }
-  const publishAction: AgentTopBarAction = publishing
+  const closeReviewItem = {
+    label: `Close ${mrNoun}`,
+    description: `Close it on the forge. The head and branches stay intact.`,
+    icon: <CircleX className="w-4 h-4" />,
+    onClick: confirmCloseReview,
+    tone: 'red' as const,
+    danger: true,
+    disabled: busy || publishing || closingReview,
+  }
+  const reviewIsOpen = !agent.review?.state?.state || agent.review.state.state === 'open' || agent.review.state.state === 'draft'
+  const publishAction: AgentTopBarAction = closingReview
+    ? { label: `Closing ${mrNoun}...`, icon: <LoaderCircle className="w-4 h-4 animate-spin" />, onClick: () => {}, variant: 'muted' }
+    : publishing
     ? { label: publishAppearance.label, icon: publishAppearance.icon, onClick: () => {}, variant: 'muted' }
     : linked
       ? {
           label: publishAppearance.label,
+          tooltip: (
+            <ReviewTooltipContent
+              agent={agent}
+              actionLabel={leadWithPush
+                ? `Click to push ${ahead} commit${ahead === 1 ? '' : 's'} to this ${mrNoun}`
+                : `Click to open on ${agent.review?.provider === 'github' ? 'GitHub' : 'GitLab'}`}
+            />
+          ),
           count: publishAppearance.count,
           icon: publishAppearance.icon,
           onClick: leadWithPush ? () => void handlePushToMR() : () => window.open(agent.review!.url, '_blank', 'noreferrer'),
@@ -2121,6 +2146,7 @@ export function AgentDetail({
             ...(behind > 0 ? [pullItem] : []),
             ...autoPushItems,
             ...((agent.review?.state?.unresolved_discussions ?? 0) > 0 ? [respondItem] : []),
+            ...(!adoptedPR && reviewIsOpen ? [closeReviewItem] : []),
           ] as AgentTopBarMenuItem[],
         }
       : {
@@ -2271,14 +2297,12 @@ export function AgentDetail({
                     savingBase={savingBase}
                     savingCheckoutBranch={savingCheckoutBranch}
                     savingChatMode={savingChatMode}
-                    savingDownstream={savingDownstream}
                     savingProjectDirectoryPermissions={savingProjectDirectoryPermissions}
-                    publishing={publishing}
+                    publishing={publishing || closingReview}
                     onSaveBase={onSaveBase}
                     onCheckoutBranch={onCheckoutBranch}
                     onRefreshBranches={refreshBranches}
                     onSaveChatMode={onSaveChatMode}
-                    onSaveDownstream={onSaveDownstream}
                     onPushToMR={onPushToMR}
                     onPullFromMR={onPullFromMR}
                     onUpdateProjectDirectoryPermissions={updateProjectDirectoryPermissions}
@@ -2366,7 +2390,7 @@ export function AgentDetail({
                   with the show-diff button pinned after it (outside the
                   scroll). No hide counterpart: the diff screen's own back
                   chevron returns to the chat. */}
-              <div className="shrink-0 px-3 py-2 border-b border-gray-100 dark:border-gray-700/60 flex items-center gap-2">
+              <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 border-b border-gray-100 dark:border-gray-700/60 flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <AgentMetaRow
                     agent={agent}
@@ -2376,24 +2400,24 @@ export function AgentDetail({
                     savingBase={savingBase}
                     savingCheckoutBranch={savingCheckoutBranch}
                     savingChatMode={savingChatMode}
-                    savingDownstream={savingDownstream}
                     savingProjectDirectoryPermissions={savingProjectDirectoryPermissions}
-                    publishing={publishing}
+                    publishing={publishing || closingReview}
                     onSaveBase={onSaveBase}
                     onCheckoutBranch={onCheckoutBranch}
                     onRefreshBranches={refreshBranches}
                     onSaveChatMode={onSaveChatMode}
-                    onSaveDownstream={onSaveDownstream}
                     onPushToMR={onPushToMR}
                     onPullFromMR={onPullFromMR}
                     onUpdateProjectDirectoryPermissions={updateProjectDirectoryPermissions}
                   />
                 </div>
-                <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
-                  <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
-                    <FileDiff className="w-4 h-4" />
-                  </button>
-                </Tooltip>
+                <div className="shrink-0 self-start">
+                  <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
+                    <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
+                      <FileDiff className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
               {/* No padding around the chat/terminal on mobile - it fills the
                   screen edge-to-edge; only the prompt keeps a small inset. */}

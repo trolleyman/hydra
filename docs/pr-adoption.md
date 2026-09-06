@@ -214,7 +214,7 @@ the two new fields. The MR is resolved **before** the DB row is created so a bad
 number fails the spawn cleanly rather than leaving a head pointed at nothing.
 
 **API.** `GET /projects/{id}/reviews` for the picker; an `adopt_mr` field on
-`SpawnAgentRequest` (`api/openapi.yaml:2676`). Remember `mage generate:go` +
+`SpawnAgentRequest` (`api/openapi.yaml:2676`). Remember `mage generateGo` +
 the `openapi-typescript-codegen` regen from `web/`.
 
 **Web.** A "From a pull request" mode in the spawn box (`web/src/components/SpawnForm.tsx`)

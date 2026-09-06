@@ -127,7 +127,7 @@ func (m *Manager) SetConcurrency(n int) {
 // CleanCheckouts tears the slot pool down to empty (call on boot) and wipes any
 // ephemeral per-run cow_paths layers a crashed run left behind.
 func (m *Manager) CleanCheckouts() {
-	_ = os.RemoveAll(m.cowDir())
+	checkout.RemoveAllDetached(m.cowDir())
 	m.pool.Clean()
 }
 
@@ -1155,7 +1155,7 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 		"HYDRA_TEST_SOURCE="+runDir,
 		"HYDRA_TEST_REF="+ref,
 	)
-	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
+	env = append(env, sandbox.MiseEnv(m.projectRoot, runDir)...)
 
 	command := spec.Script
 	if spec.IsStrict() {
@@ -1174,14 +1174,15 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
-		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+		cfg.ApplySharedCaches(&opts, m.projectRoot, "", true)
+		writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		writable = append(writable, outputDir)
 		if gcd, err := git.GetCommonDir(m.projectRoot); err == nil {
 			opts.GitCommonDir = gcd
 		}
 		opts.WritablePaths = writable
+		opts.ReadablePaths = readable
 		opts.MaskedPaths = sandbox.ResolveMaskedPaths(m.projectRoot, runDir, masked)
-		opts.RestoreRO = restore
 		// Apply cow_paths so a shared host cache the project isolates per-head
 		// (e.g. ~/.gradle) is writable for the test run too - otherwise a
 		// Gradle-based suite runs with it READ-ONLY and can't write its lock/build

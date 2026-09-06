@@ -68,7 +68,7 @@ func TestReviewConversationIDDetectsClaudeTranscript(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	worktree := paths.GetReviewCheckoutDirFromProjectRoot(root, "h1")
-	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
+	dir := paths.ClaudeProjectDirForSession(root, ReviewSessionID("h1"), home, worktree)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -250,6 +250,10 @@ func TestKillReviewSessionReclaimsTheCheckoutAtAStablePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureReviewCheckout: %v", err)
 	}
+	tmpDir := ensureHeadTmpDir(root, ReviewSessionID("h1"))
+	if tmpDir == "" {
+		t.Fatal("ensureHeadTmpDir returned an empty review temp path")
+	}
 
 	// No session was ever started for this head, which is the case that must not
 	// panic or leave debris - a reviewer opened and closed without the registry
@@ -257,6 +261,9 @@ func TestKillReviewSessionReclaimsTheCheckoutAtAStablePath(t *testing.T) {
 	KillReviewSession(session.NewRegistry(), root, "h1")
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("closing the reviewer left its checkout at %q", dir)
+	}
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Fatalf("closing the reviewer left its private temp at %q", tmpDir)
 	}
 
 	// Re-opening rebuilds the tree at the SAME path - a fresh path would be a

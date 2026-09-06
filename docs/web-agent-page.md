@@ -34,6 +34,9 @@ and `web/src/DiffViewer.tsx`):
   status, and workspace chip lead the identity row; project-directory heads place
   Edit/Read-only and Allow commits immediately after that chip. The configuration
   strip orders test verdict, network, Git access, branch selector, and run mode.
+  The explanatory status and workspace chips keep the ordinary default cursor.
+  A project-directory workspace tooltip pairs its project path with the shared
+  blue directory icon treatment.
   A worktree head's branch selector edits base-branch metadata. A project-directory
   head's selector performs a normal non-forced checkout in the shared project
   root, so Git refuses a switch that would overwrite local changes.
@@ -49,6 +52,10 @@ and `web/src/DiffViewer.tsx`):
   set (each set's files in a masonry grid). The agent-page
   `ArtifactsPanel` is two-sided (base+head refs); `RepositoryArtifactsView` is the
   single-ref sibling used by the repository browser.
+- The Files settings choose 3, 5, 7, or 10 unchanged context lines around each
+  change, defaulting to 3. The browser-wide preference is shared with repository
+  branch comparisons and drives both the server's windowed diff context and the
+  client-side whole-file collapse model.
 - The commit range selectors keep every right-side commit selectable. Choosing a
   right endpoint that is not newer than the current left endpoint moves left to
   that commit's first parent, producing a one-commit diff; an already-valid
@@ -87,10 +94,14 @@ and `web/src/DiffViewer.tsx`):
   one comes from `total_lines` on the wire - the file's length, which the server
   fills in from the full read `getFullContextDiff` already does, so it costs no
   extra work and is simply absent for a file that read never covered. Without it
-  `trailingGap` returns null and that expander falls back to a bare chevron;
+  `trailingGap` returns null and that expander falls back to its directional
+  action without a Show all action;
   with it, `atFileEnd` also drops the expander outright when the last hunk
   provably ends at EOF (the old `trailingContext < currentContext` guess couldn't
-  tell that from a file with more below, and drew a chevron expanding to nothing).
+  tell that from a file with more below, and drew an action that expanded to nothing).
+  Every known gap presents labelled **Up 20 lines**, **Down 20 lines**, and/or
+  **Show all N lines** actions with directional line icons; a middle gap has all
+  three and a file edge has the two actions that make sense there.
 - Lazy file bodies + **measured placeholders**: a file card's body stays an empty
   placeholder until the card first scrolls near the viewport (`near`, a one-way
   IntersectionObserver latch in `FileDiff`). The placeholder's height is not
@@ -123,13 +134,22 @@ and `web/src/DiffViewer.tsx`):
   changing/scrolling diff at a much higher cost than Chromium; even a small
   visible file can otherwise make the desktop inspector scroll at roughly half
   frame rate. Browsers and the Chromium desktop bridge retain the shadows.
+- The Linux WebKit shell marks the root as `.hydra-native-webkit`. Its optional
+  static-animation profiling mode adds `.hydra-disable-persistent-animations`.
+  That class holds looping decorative/status animations still while preserving
+  their shapes, colours, and text; short interaction and entrance transitions
+  still run. The chat bottom-follow loop also treats a one-pixel remainder as
+  complete and exits when assigning a new scroll position makes no progress,
+  covering WebKitGTK's fractional `scrollTop` clamp without changing the visible
+  easing.
 - **When a prediction is wrong anyway, the correction must not be visible.** The
   prediction is exact for a plain file body but not for everything in one -
   `bodyShape` does not model inline review-comment rows, so a file carrying a
   thread mounts taller than its placeholder (79px for one thread, in the sim).
   Two things in `FileDiff` keep that from moving the page under the reader, and
   both are easy to undo by accident:
-  - The wrapper's `transition-[height]` is the collapse/expand glide, and the
+  - The wrapper's `transition-[height]` is the opening glide; closing a file is
+    immediate. The same height is also where a
     correction lands on that same height. Left to animate it turned a one-frame
     reflow into 200ms of the diff sliding - so the layout effect on `wrapperH`
     cancels the transition (set `none`, read `offsetHeight`, restore) whenever
@@ -145,6 +165,14 @@ and `web/src/DiffViewer.tsx`):
     double. This is also what keeps the **sticky file headers** attached - a
     header whose card slides out from under it goes on being painted where it
     was, so it reads as detached from its own card until the next scroll.
+- Diff file headers show the detected syntax language as a lowlit control. Its
+  picker searches the full Prism catalog by display name, grammar codename,
+  alias, or mapped file extension, and a per-file override immediately
+  re-highlights both sides. Jsonnet uses Hydra's bundled Jsonnet grammar.
+  Machine-owned lockfiles and conventional generated paths carry an
+  **Auto-generated** label and start folded once per page session. Marking a file
+  **Viewed** also folds it immediately; unmarking it leaves the reader's current
+  fold state alone.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
   (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to
@@ -177,23 +205,57 @@ and `web/src/DiffViewer.tsx`):
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
   file's real line numbers beneath a ruled, tooltip-bearing file header. Numbered
   searches group consecutive results under the sans-serif path each row names;
-  an inset rule marks each nonconsecutive jump within that file. Adjacent
+  a full-width rule across the gutter and source marks each nonconsecutive jump
+  within that file. Every text,
+  file, and directory header wraps at the panel edge like an ordinary output
+  line and sticks to the output scroller's top until the next header replaces
+  it. Adjacent
   bounded reads keep their requested starts when their exact range lengths
-  account for all returned lines. When a boundary may fall at EOF, agents print
-  a static typed marker such as
-  `printf '%s\n' '--- [file] web/src/App.tsx ---'`; `[text]` preserves an ordinary
-  heading exactly and `[dir]` selects the shared directory treatment. A constant
-  `echo` is accepted, while `printf` is the canonical cross-shell spelling. The
-  parser only consumes a typed marker when it can correlate it unambiguously with
-  the constant-printing command. In a script where a numbered search immediately
+  account for all returned lines. Adjacent bounded ranges of the same file do
+  not need headings between them. Agents label each file or directory section
+  in a multi-section call with a static marker such as
+  `echo '--- [file] web/src/App.tsx ---'`; the untyped
+  `echo '--- Notes ---'` form creates an ordinary heading and `[dir]`
+  selects the shared directory treatment. The older `[text]` spelling remains
+  accepted for existing transcripts. File and directory marker values are exact
+  paths without annotations such as `(continued)`. A Bash call with several
+  file or directory sections puts the marker immediately before every command
+  that produces one, including the first. This includes bounded reads of
+  different files because a range can stop early at EOF. The parser only consumes
+  a marker when it can correlate it unambiguously with the constant-printing
+  command. In a script where a numbered search immediately
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
+  A self-identifying search also pins the total output before it, so a bounded
+  read after that search keeps its requested line numbers, including when the
+  read is guarded with `|| true`.
+  Unified diffs derive sticky file headers from each surviving `diff --git`
+  boundary, so agents do not print redundant file markers around `git diff`.
+  Captured Vitest and Jest failures retain the runner's structure: failure
+  headings and verdicts, case file and suite hierarchy, exception names, stack
+  locations, and numbered source excerpts receive distinct treatments. Source
+  excerpts use the grammar inferred from the failed file, including TSX.
 - Bash command cards render commands relative to the head's worktree or a review
-  agent's detached checkout. A command that ran elsewhere gets a reproducible
-  `cd` preamble; when the script starts with a description comment, that comment
-  stays first and the preamble follows it. Home-relative preambles keep `~`
-  outside quotes so the shell expands it.
+  agent's detached checkout. Provider launch wrappers spelled as `bash`,
+  `/bin/bash`, `/usr/bin/bash`, or `/usr/local/bin/bash` are omitted so the card
+  shows the script itself. A command that ran elsewhere gets a reproducible `cd`
+  preamble; when the script starts with a description comment, that comment stays
+  first and the preamble follows it. Home-relative preambles keep `~` outside
+  quotes so the shell expands it. A whitespace prefix shared by every command
+  line is presentation indent and is removed while relative shell-block indent
+  remains intact. A trailing `&& echo ...` or `|| echo ...` stays beside the
+  command it reports instead of wrapping onto an orphaned line.
+- Edit tool previews, including Codex multi-file edits, use the repository diff's
+  code composition and row metrics: syntax tokens, changed-word overlays,
+  whitespace marks, gutters, and the code surface palette match the
+  corresponding file diff. Command and output panels use the same Code font size
+  preference, while retaining their denser line spacing. A multi-file Edit puts
+  the shared change-type icon immediately after each file path, shows that
+  file's additions and deletions at the right, and shows their total in the tool
+  header. A preview only shows file line numbers when the provider supplies a
+  structured patch with real offsets; string fragments are not numbered from an
+  invented line 1.
 - The spawn composer uploads attachments against its selected project. A
   desktop-native image paste that arrives before any project is selected is
   ignored; when selection restoration and paste overlap, the current project
@@ -259,6 +321,10 @@ and `web/src/DiffViewer.tsx`):
   `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
   `forwardSidebarWheelToMain` (`__root.tsx`) forwards leftover sidebar wheel
   delta into `[data-main-scroll]` / `[data-inspector-scroll]`.
+- Native desktop windows put Back and Forward controls in the global top bar,
+  between the sidebar toggle and project dropdown. They follow TanStack's
+  in-window navigation history and stay disabled when no entry exists in that
+  direction; browser tabs rely on their own browser chrome instead.
 - All resizing is hand-rolled pointer/mouse drag - no split-pane library: sidebar
   width (`__root.tsx`), diff file-list width (`DiffViewer.tsx`), terminal height
   (`AgentTerminal.tsx`).

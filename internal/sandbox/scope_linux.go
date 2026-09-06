@@ -40,6 +40,7 @@ var (
 	pidsOK         bool // pids controller delegated (TasksMax accepted)
 	systemdRunPath string
 	systemctlPath  string
+	envPath        string
 )
 
 // ScopesAvailable reports (and caches) whether transient systemd user scopes work
@@ -53,10 +54,11 @@ func ScopesAvailable() bool {
 	scopeOnce.Do(func() {
 		sr, err1 := exec.LookPath("systemd-run")
 		sc, err2 := exec.LookPath("systemctl")
-		if err1 != nil || err2 != nil {
+		env, err3 := exec.LookPath("env")
+		if err1 != nil || err2 != nil || err3 != nil {
 			return
 		}
-		systemdRunPath, systemctlPath = sr, sc
+		systemdRunPath, systemctlPath, envPath = sr, sc, env
 		if !probeScope(sr) {
 			log.Printf("sandbox: systemd user scopes unavailable; workloads run unscoped")
 			return
@@ -256,7 +258,11 @@ func WrapScope(unit string, spec *Spec, limits ScopeLimits, class ScopeClass) bo
 		return false
 	}
 	StopScope(unit) // clear a stale same-named unit left by a prior life
+	wrapScopeSpec(unit, spec, limits, class)
+	return true
+}
 
+func wrapScopeSpec(unit string, spec *Spec, limits ScopeLimits, class ScopeClass) {
 	wrapped := []string{systemdRunPath, "--user", "--scope", "--quiet", "--collect", "--unit=" + unit}
 	if class == ScopeBackground {
 		wrapped = append(wrapped, "--slice="+hydraBackgroundSlice)
@@ -264,11 +270,35 @@ func WrapScope(unit string, spec *Spec, limits ScopeLimits, class ScopeClass) bo
 		wrapped = append(wrapped, "--slice="+hydraSlice)
 	}
 	wrapped = append(wrapped, allProps(limits)...)
-	wrapped = append(wrapped, "--", spec.Path)
+	// systemd-run --user needs the daemon's session-bus discovery environment,
+	// while spec.Env is deliberately the workload's much narrower environment.
+	// Give only the wrapper XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS, then use
+	// env -i to restore the exact intended environment before the payload starts.
+	// This keeps head credential isolation intact without making scope startup
+	// depend on variables that heads must not inherit.
+	payloadEnv := append([]string(nil), spec.Env...)
+	wrapped = append(wrapped, "--", envPath, "-i")
+	wrapped = append(wrapped, payloadEnv...)
+	wrapped = append(wrapped, spec.Path)
 	wrapped = append(wrapped, spec.Args[1:]...)
 	spec.Path = systemdRunPath
 	spec.Args = wrapped
-	return true
+	spec.Env = scopeControlEnv(payloadEnv)
+}
+
+// scopeControlEnv adds only the host variables systemd uses to discover the
+// per-user manager. The wrapped payload does not inherit these additions: the
+// env -i command assembled by WrapScope reconstructs its original environment.
+func scopeControlEnv(base []string) []string {
+	env := append([]string(nil), base...)
+	for _, key := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
+		value, ok := os.LookupEnv(key)
+		env = withoutEnvKeys(env, key)
+		if ok {
+			env = append(env, key+"="+value)
+		}
+	}
+	return env
 }
 
 // StopScope stops (and, via --collect, garbage-collects) the transient scope

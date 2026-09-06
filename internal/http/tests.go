@@ -164,8 +164,9 @@ func headTotalHintRefs(head *heads.Head) []string {
 	return refs
 }
 
-// GetAgentTests runs (or returns cached) the head's test runners for one ref and
-// reports each runner's parsed verdict (single-sided; no before/after diff).
+// GetAgentTests returns the head's test runners for one ref and reports each
+// parsed verdict (single-sided; no before/after diff). A passive read starts only
+// "always" runners; Refresh explicitly starts the named runner in every mode.
 func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsRequestObject) (api.GetAgentTestsResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -205,7 +206,7 @@ func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsReq
 	if request.Params.Refresh != nil {
 		force = *request.Params.Refresh
 	}
-	out := s.buildTestRunners(request.ProjectId, mgr, runners, v, headActivelyRunning(head), force)
+	out := s.buildTestRunners(request.ProjectId, mgr, runners, v, force)
 	return api.GetAgentTests200JSONResponse(api.TestsResponse{Runners: out}), nil
 }
 

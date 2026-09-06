@@ -27,8 +27,8 @@ const (
 	EgressUnrestricted EgressMode = "unrestricted"
 	// EgressOff: network disabled entirely (the hard off-switch).
 	EgressOff EgressMode = "off"
-	// EgressHard: allow-list enforced in a pasta netns + nft lock - a real,
-	// inescapable boundary.
+	// EgressHard: allow-list enforced by the platform sandbox around the proxy -
+	// pasta+nft on Linux, loopback-only Seatbelt networking on Darwin.
 	EgressHard EgressMode = "filtered-hard"
 	// EgressAdvisory: allow-list enforced by the proxy via HTTP(S)_PROXY only -
 	// filters every proxy-respecting client, but a determined process in the
@@ -38,8 +38,9 @@ const (
 
 // egressEntry is a head's running proxy plus its mode.
 type egressEntry struct {
-	proxy *egress.Proxy
-	mode  EgressMode
+	proxy    *egress.Proxy
+	mode     EgressMode
+	proxyURL string
 }
 
 var egressProxies = struct {
@@ -49,14 +50,14 @@ var egressProxies = struct {
 
 // startEgress sets up a head's egress filtering from its resolved network policy
 // and returns the proxy env to inject plus, for hard mode, the bwrap-wrapping
-// closure to put on sandbox.Options.EgressWrap. It may set net.Enabled = false
-// (via the pointer) when a hard policy can't build its boundary, so the
-// sandbox falls back to no network at all.
+// closure to put on sandbox.Options.EgressWrap where the platform needs one. It
+// may set net.Enabled = false when a hard policy cannot build its boundary, so
+// the sandbox falls back to no network at all.
 //
 //   - mode off / !Enabled → no proxy, no network.
 //   - mode unrestricted → no proxy, unrestricted egress.
 //   - mode advisory → proxy-only filtering (escapable), no hard boundary attempted.
-//   - mode hard → the pasta+nft netns (inescapable); if the boundary can't be
+//   - mode hard → the platform kernel boundary (inescapable); if it cannot be
 //     built (tooling unavailable, proxy failed) it fails closed (no network) -
 //     hard never downgrades to a weaker posture.
 //
@@ -86,18 +87,16 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 
 	allowed := append(sandbox.DefaultAllowedHosts(agentType), net.AllowedHosts...)
 	approver := &egressApprover{projectRoot: projectRoot, id: approvalID, agentType: agentType}
-	// Pin the proxy to the port the head's netns already allows. If a supervisor is
-	// already live for this head (a resume/restart, not a first spawn), its nft rule
-	// hard-codes the port baked at first launch and is never rebuilt, so the proxy
-	// MUST come back on that same port or the agent is firewalled off and sees a
-	// permanent ConnectionRefused. A first spawn (no supervisor yet) binds a fresh
-	// ephemeral port, which is then baked into the supervisor built moments later
-	// via the EgressWrap below.
+	// Pin the proxy to the port the head's hard boundary already allows. If a
+	// supervisor is live on resume/restart, its nft rule (Linux) or Seatbelt
+	// profile (Darwin) still contains the port baked at first launch, so the proxy
+	// must return on that port. A first spawn binds a fresh ephemeral port which is
+	// then baked into the supervisor built moments later.
 	fixedPort := 0
 	if _, live := namespaceHostFor(id); live {
 		fixedPort = rememberedEgressPort(id)
 		if fixedPort == 0 {
-			log.Printf("hydra egress[%s]: supervisor already live but no remembered proxy port; a newly allocated port may desync the netns firewall", id)
+			log.Printf("hydra egress[%s]: supervisor already live but no remembered proxy port; a newly allocated port may desync the hard boundary", id)
 		}
 	}
 	p, err := egress.Start(id, fixedPort, allowed, net.BlockedHosts, approver.approve)
@@ -125,22 +124,14 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 	setEgressPort(id, port)
 
 	if net.Mode == sandbox.NetHard {
-		if hm := egress.DetectHardMode(); hm.Available && port != 0 {
-			// Hard mode: the agent reaches the host proxy at the mapped address, and
-			// nft drops everything else. The proxy itself listens on host loopback.
-			storeEgress(id, p, EgressHard)
-			proxyURL := "http://" + egress.MapAddr + ":" + itoa(port)
-			loopbackPorts := net.AllowedLoopbackPorts
-			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s); agent proxy=%s (host listener %s); loopback ports spliced: %s", id, len(allowed), proxyURL, p.Addr(), egress.LoopbackPortSpec(loopbackPorts))
-			env = egress.ProxyEnv(proxyURL)
-			wrap = func(bwrapArgv []string, preExec string) []string {
-				return egress.HardWrapArgv(hm, port, loopbackPorts, 0, bwrapArgv, preExec, egress.PastaLogFile(id))
-			}
-			return env, wrap
+		if boundary, ok := egress.PrepareHardBoundary(id, port, net, 0); ok {
+			storeEgress(id, p, EgressHard, boundary.ProxyURL)
+			log.Printf("hydra egress[%s]: hard egress boundary active (%s), %d allow-listed host(s); agent proxy=%s (host listener %s); allowed loopback ports: %v", id, boundary.Mechanism, len(allowed), boundary.ProxyURL, p.Addr(), net.AllowedLoopbackPorts)
+			return egress.ProxyEnv(boundary.ProxyURL), boundary.Wrap
 		}
 		// No inescapable boundary available → fail closed. Hard never degrades
 		// to the escapable advisory posture.
-		log.Printf("hydra egress[%s]: hard egress requested but pasta/nft unavailable; failing closed (no network)", id)
+		log.Printf("hydra egress[%s]: hard egress requested but the platform boundary is unavailable; failing closed (no network)", id)
 		_ = p.Close()
 		net.Enabled = false
 		setEgressMode(id, EgressOff)
@@ -149,7 +140,7 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 
 	// Advisory mode (explicitly chosen): shared host net, proxy reachable on
 	// loopback, filtering via HTTP(S)_PROXY only.
-	storeEgress(id, p, EgressAdvisory)
+	storeEgress(id, p, EgressAdvisory, "http://"+p.Addr())
 	log.Printf("hydra egress[%s]: advisory egress filtering (proxy only), %d allow-listed host(s)", id, len(allowed))
 	return egress.ProxyEnv("http://" + p.Addr()), nil
 }
@@ -160,12 +151,10 @@ func startEgressKeyed(projectRoot, id, approvalID string, agentType sandbox.Agen
 // stop, or rebuild anything (unlike startEgress); it only reflects the proxy the
 // agent's spawn/resume put in place.
 //
-// This matters most in hard mode: the shell is spawned as a sibling inside the
-// agent's pasta+nft netns, where the nft rule drops all egress except TCP to the
-// proxy - including port 53 - so a process without HTTP_PROXY can't even resolve
-// DNS ("Could not resolve host") and never touches the proxy (so no approval
-// prompt fires either). The agent survives only because it has this proxy env; a
-// bash tab needs the same.
+// This matters most in hard mode: the kernel boundary drops all IP egress except
+// TCP to the proxy (plus configured loopback ports), so a process without
+// HTTP_PROXY cannot reach an external host or trigger the proxy's approval flow.
+// A sibling bash tab therefore needs the same proxy environment as the agent.
 //
 // Returns nil when the head has no filtering proxy running (off / unrestricted /
 // none live), where a co-tenant either needs no proxy or has no network at all.
@@ -178,13 +167,10 @@ func EgressProxyEnvFor(id string) []string {
 	}
 	switch e.mode {
 	case EgressHard:
-		// Hard mode: reach the host proxy at the mapped address baked into the
-		// netns, on the port pinned for the supervisor's lifetime.
-		port := rememberedEgressPort(id)
-		if port == 0 {
+		if e.proxyURL == "" {
 			return nil
 		}
-		return egress.ProxyEnv("http://" + egress.MapAddr + ":" + itoa(port))
+		return egress.ProxyEnv(e.proxyURL)
 	case EgressAdvisory:
 		// Advisory mode: shared host net, proxy reachable directly on loopback.
 		return egress.ProxyEnv("http://" + e.proxy.Addr())
@@ -204,9 +190,9 @@ func EgressModeFor(id string) EgressMode {
 	return EgressNone
 }
 
-func storeEgress(id string, p *egress.Proxy, mode EgressMode) {
+func storeEgress(id string, p *egress.Proxy, mode EgressMode, proxyURL string) {
 	egressProxies.mu.Lock()
-	egressProxies.m[id] = &egressEntry{proxy: p, mode: mode}
+	egressProxies.m[id] = &egressEntry{proxy: p, mode: mode, proxyURL: proxyURL}
 	egressProxies.mu.Unlock()
 }
 
@@ -239,14 +225,14 @@ func stopEgressProxy(id string) {
 	}
 }
 
-// egressPorts remembers the loopback port each head's egress proxy is bound to,
-// for the lifetime of the head's namespace-host supervisor. In hard mode the
-// supervisor's pasta/nft netns bakes this exact port as the sole allowed egress at
-// first launch (via EgressWrap) and never rebuilds it, so every later proxy
+// egressPorts remembers the loopback port each head's filtering proxy is bound
+// to for the lifetime of its supervisor. In hard mode the
+// nft rule on Linux or Seatbelt profile on Darwin bakes in this exact port at
+// first launch and never rebuilds it, so every later proxy
 // restart for the head (resume, RestartHead, ...) MUST re-bind the same port or
 // the agent is firewalled off - a permanent ConnectionRefused. Cleared by
-// forgetEgressPort when the supervisor is torn down, so the next fresh supervisor
-// starts from a newly allocated port.
+// forgetEgressPort when the supervisor is torn down, so the next platform
+// boundary starts from a newly allocated port.
 var egressPorts = struct {
 	mu sync.Mutex
 	m  map[string]int
@@ -264,10 +250,8 @@ func setEgressPort(id string, port int) {
 	egressPorts.mu.Unlock()
 }
 
-// forgetEgressPort drops a head's remembered proxy port. Called when its
-// namespace-host supervisor is torn down (removeNamespaceHost / its watcher), so
-// the next fresh supervisor - and its fresh nft rule - starts from a newly
-// allocated port instead of trying to reclaim a stale one.
+// forgetEgressPort drops a head's remembered proxy port with its supervisor, so
+// the next fresh platform boundary does not try to reclaim a stale one.
 func forgetEgressPort(id string) {
 	egressPorts.mu.Lock()
 	delete(egressPorts.m, id)
@@ -466,18 +450,4 @@ func (e *egressApprover) restore() {
 	// Advance the timestamp so the JSON poller notices the transition.
 	next.Timestamp = time.Now().Format(time.RFC3339Nano)
 	_ = WriteAgentStatus(e.projectRoot, e.id, next)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

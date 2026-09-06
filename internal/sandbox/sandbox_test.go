@@ -3,6 +3,7 @@ package sandbox
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -70,6 +71,275 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
+func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
+	hostTmp := filepath.Join(t.TempDir(), "head-tmp")
+	got := RuntimeEnv([]string{
+		"PATH=/usr/bin",
+		"TMPDIR=/shared/one",
+		"TMP=/shared/two",
+		"TEMP=/shared/three",
+		"TMPDIR=/duplicate",
+		"GOCACHE=/shared/go-build",
+		"GOMODCACHE=/shared/go-mod",
+		"GOPATH=/shared/go",
+		"GOBIN=/shared/go/bin",
+		"XDG_CACHE_HOME=/shared/cache",
+		"MISE_CACHE_DIR=/shared/mise-cache",
+		"MISE_INSTALL_PATH=/home/u/.local/share/mise/bootstrap/mise-2026.8.15",
+	}, hostTmp)
+	wantTmp := SandboxTempDir(hostTmp)
+	wants := map[string]string{
+		"TMPDIR":            wantTmp,
+		"TMP":               wantTmp,
+		"TEMP":              wantTmp,
+		"XDG_CACHE_HOME":    filepath.Join(wantTmp, "cache"),
+		"XDG_STATE_HOME":    filepath.Join(wantTmp, "state"),
+		"GOCACHE":           filepath.Join(wantTmp, "cache", "go-build"),
+		"GOMODCACHE":        filepath.Join(wantTmp, "go", "pkg", "mod"),
+		"GOPATH":            filepath.Join(wantTmp, "go"),
+		"GOBIN":             filepath.Join(wantTmp, "go", "bin"),
+		"MAGEFILE_CACHE":    filepath.Join(wantTmp, "cache", "mage"),
+		"MISE_CACHE_DIR":    filepath.Join(wantTmp, "cache", "mise"),
+		"MISE_DATA_DIR":     filepath.Join(wantTmp, "data", "mise"),
+		"MISE_STATE_DIR":    filepath.Join(wantTmp, "state", "mise"),
+		"MISE_INSTALL_PATH": "/home/u/.local/share/mise/bootstrap/mise-2026.8.15",
+	}
+	for key, want := range wants {
+		prefix := key + "="
+		matches := make([]string, 0, 1)
+		for _, entry := range got {
+			if strings.HasPrefix(entry, prefix) {
+				matches = append(matches, entry)
+			}
+		}
+		if len(matches) != 1 || matches[0] != prefix+want {
+			t.Errorf("%s entries = %v, want [%s]", key, matches, prefix+want)
+		}
+	}
+	wantPath := filepath.Join(wantTmp, "go", "bin") + string(os.PathListSeparator) + "/usr/bin"
+	if !slices.Contains(got, "PATH="+wantPath) {
+		t.Errorf("RuntimeEnv PATH does not expose private GOBIN: %v", got)
+	}
+	if got := SandboxPreSpawnEnvFile(hostTmp); got != filepath.Join(wantTmp, PreSpawnEnvFileName) {
+		t.Errorf("SandboxPreSpawnEnvFile() = %q, want %q", got, filepath.Join(wantTmp, PreSpawnEnvFileName))
+	}
+}
+
+func TestRuntimeEnvHonorsInheritedApplicationPaths(t *testing.T) {
+	hostTmp := filepath.Join(t.TempDir(), "head-tmp")
+	got := RuntimeEnv([]string{
+		"HOME=/home/u",
+		"PATH=/usr/bin",
+		"TMPDIR=/host/tmp",
+		"GOCACHE=/host/go-build",
+		"GOBIN=/host/go-bin",
+		"PLAYWRIGHT_BROWSERS_PATH=/host/playwright",
+		"MISE_DATA_DIR=/host/mise-data",
+		"MISE_SHARED_INSTALL_DIRS=/host/mise-installs",
+	}, hostTmp, "GOCACHE", "GOBIN", "PLAYWRIGHT_BROWSERS_PATH", "MISE_DATA_DIR", "MISE_SHARED_INSTALL_DIRS")
+	env := make(map[string]string)
+	for _, entry := range got {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[key] = value
+		}
+	}
+	for key, want := range map[string]string{
+		"GOCACHE":                  "/host/go-build",
+		"GOBIN":                    "/host/go-bin",
+		"PLAYWRIGHT_BROWSERS_PATH": "/host/playwright",
+		"MISE_DATA_DIR":            "/host/mise-data",
+		"MISE_SHARED_INSTALL_DIRS": "/host/mise-installs",
+	} {
+		if env[key] != want {
+			t.Errorf("%s = %q, want %q", key, env[key], want)
+		}
+	}
+	if env["TMPDIR"] != SandboxTempDir(hostTmp) {
+		t.Errorf("managed TMPDIR = %q, want private temp", env["TMPDIR"])
+	}
+	wantPath := "/host/go-bin" + string(os.PathListSeparator) + "/usr/bin"
+	if env["PATH"] != wantPath {
+		t.Errorf("PATH = %q, want inherited GOBIN prefix %q", env["PATH"], wantPath)
+	}
+}
+
+func TestPrepareSharedCachesCreatesBackingAndWorktreeLink(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "cache")
+	worktree := cacheTestWorktree(t, "web/cache\n")
+	opts := Options{
+		WorktreePath: worktree,
+		CacheRoot:    root,
+		Caches: map[string]SharedCache{
+			"go_build": {Env: "GOCACHE"},
+			"web":      {Path: "web/cache"},
+		},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"go_build", "web"} {
+		if info, err := os.Stat(filepath.Join(root, key)); err != nil || !info.IsDir() {
+			t.Fatalf("backing cache %s missing: %v", key, err)
+		}
+	}
+	link := filepath.Join(worktree, "web", "cache")
+	if got, err := os.Readlink(link); err != nil || got != filepath.Join(root, "web") {
+		t.Fatalf("cache link = %q, %v", got, err)
+	}
+	env := SharedCacheEnv(RuntimeEnv([]string{"PATH=/usr/bin"}, filepath.Join(t.TempDir(), "tmp")), root, opts.Caches)
+	if !slices.Contains(env, "GOCACHE="+filepath.Join(root, "go_build")) {
+		t.Fatalf("shared cache did not override private GOCACHE: %v", env)
+	}
+}
+
+func TestPrepareSharedCachesRejectsUnignoredPath(t *testing.T) {
+	worktree := cacheTestWorktree(t, "")
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"web": {Path: "web/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "is not ignored by Git") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want Git-ignore error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, "web", "cache")); !os.IsNotExist(err) {
+		t.Fatalf("unignored cache path was materialized: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesDoesNotLinkReadOnlyWorkingDirectory(t *testing.T) {
+	worktree := t.TempDir()
+	opts := Options{
+		WorktreePath:          worktree,
+		WorkingDirReadOnly:    true,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"web": {Path: "web/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(worktree, "web", "cache")); !os.IsNotExist(err) {
+		t.Fatalf("read-only cache path was materialized: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesRejectsSymlinkParent(t *testing.T) {
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(worktree, "build")); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"generated": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "parent") || !strings.Contains(err.Error(), "is a symlink") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want symlink-parent error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "cache")); !os.IsNotExist(err) {
+		t.Fatalf("cache link escaped through parent symlink: %v", err)
+	}
+}
+
+func TestPrepareSharedCachesUpdatesHydraCacheLink(t *testing.T) {
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             cacheRoot,
+		Caches:                map[string]SharedCache{"old": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.Caches = map[string]SharedCache{"new": {Path: "build/cache"}}
+	if err := PrepareSharedCaches(&opts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.Readlink(filepath.Join(worktree, "build", "cache"))
+	if err != nil || got != filepath.Join(cacheRoot, "new") {
+		t.Fatalf("updated cache link = %q, %v", got, err)
+	}
+}
+
+func TestPrepareSharedCachesPreservesUnownedSymlink(t *testing.T) {
+	worktree := cacheTestWorktree(t, "build/cache\n")
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(worktree, "build", "cache")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorktreePath:          worktree,
+		CacheRoot:             filepath.Join(t.TempDir(), "cache"),
+		Caches:                map[string]SharedCache{"generated": {Path: "build/cache"}},
+		MaterializeCachePaths: true,
+	}
+	if err := PrepareSharedCaches(&opts); err == nil || !strings.Contains(err.Error(), "is not a Hydra cache link") {
+		t.Fatalf("PrepareSharedCaches() error = %v, want unowned-link error", err)
+	}
+	if got, err := os.Readlink(link); err != nil || got != outside {
+		t.Fatalf("unowned link changed to %q, %v", got, err)
+	}
+}
+
+func TestPrepareSharedCachesRejectsConflictsBeforeMutation(t *testing.T) {
+	for name, caches := range map[string]map[string]SharedCache{
+		"duplicate env": {
+			"first":  {Env: "GOCACHE"},
+			"second": {Env: "GOCACHE"},
+		},
+		"nested paths": {
+			"parent": {Path: "build/cache"},
+			"child":  {Path: "build/cache/data"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cacheRoot := filepath.Join(t.TempDir(), "cache")
+			worktree := cacheTestWorktree(t, "build/cache\n")
+			opts := Options{
+				WorktreePath:          worktree,
+				CacheRoot:             cacheRoot,
+				Caches:                caches,
+				MaterializeCachePaths: true,
+			}
+			if err := PrepareSharedCaches(&opts); err == nil {
+				t.Fatal("PrepareSharedCaches() unexpectedly accepted conflicting cache targets")
+			}
+			if _, err := os.Stat(cacheRoot); !os.IsNotExist(err) {
+				t.Fatalf("cache root was mutated before conflict rejection: %v", err)
+			}
+			if _, err := os.Lstat(filepath.Join(worktree, "build")); !os.IsNotExist(err) {
+				t.Fatalf("worktree was mutated before conflict rejection: %v", err)
+			}
+		})
+	}
+}
+
+func cacheTestWorktree(t *testing.T, ignore string) string {
+	t.Helper()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "init", "--quiet", worktree).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".gitignore"), []byte(ignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return worktree
+}
+
 // claudeArgv is the fixed head of every Claude argv - the skip-permissions flag
 // plus the inline --mcp-config that carries the Hydra control server - followed
 // by whatever the case under test adds. The MCP flag is built rather than
@@ -97,7 +367,7 @@ func TestAgentArgv(t *testing.T) {
 		{AgentTypeCodex, true, "ignored on resume", "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, c.sessionID, "")
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", "", false, c.sessionID, "", "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}
@@ -106,7 +376,7 @@ func TestAgentArgv(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false, "", ""); err == nil {
+	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", "", false, "", "", ""); err == nil {
 		t.Error("AgentArgv with unknown agent type: expected error, got nil")
 	}
 }
@@ -137,7 +407,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 		{"fresh ignores id", false, false, "abc-123", claudeArgv()},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", c.chatMode, c.sessionID, "")
+		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", "", c.chatMode, c.sessionID, "", "")
 		if err != nil {
 			t.Fatalf("%s: AgentArgv error: %v", c.name, err)
 		}
@@ -146,7 +416,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, "", ""); err == nil {
+	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", "", true, "", "", ""); err == nil {
 		t.Error("chat mode for gemini: expected error, got nil")
 	}
 }
@@ -158,7 +428,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 	for _, chatMode := range []bool{false, true} {
 		for _, resume := range []bool{false, true} {
-			argv, err := AgentArgv(AgentTypeClaude, resume, "sys", "task", "opus", chatMode, "sess-1", "")
+			argv, err := AgentArgv(AgentTypeClaude, resume, "sys", "task", "opus", "", chatMode, "sess-1", "", "")
 			if err != nil {
 				t.Fatalf("chat=%v resume=%v: %v", chatMode, resume, err)
 			}
@@ -195,7 +465,7 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 	// then supplies the control server too - so the inline JSON must be gone,
 	// not doubled up.
 	for _, chatMode := range []bool{false, true} {
-		argv, err := AgentArgv(AgentTypeClaude, false, "sys", "task", "", chatMode, "", "/tmp/hydra-mcp-config.json")
+		argv, err := AgentArgv(AgentTypeClaude, false, "sys", "task", "", "", chatMode, "", "/tmp/hydra-mcp-config.json", "")
 		if err != nil {
 			t.Fatalf("chat=%v: %v", chatMode, err)
 		}
@@ -210,10 +480,14 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 			t.Errorf("chat=%v: inline server config still present alongside the strict file: %q", chatMode, argv)
 		}
 	}
+	argv, err := AgentArgv(AgentTypeClaude, false, "", "", "", "", false, "", "/seed/mcp.json", "user")
+	if err != nil || !slices.Contains(argv, "--setting-sources") || !slices.Contains(argv, "user") {
+		t.Fatalf("Claude setting-source isolation argv = %q, %v", argv, err)
+	}
 
 	// Only Claude takes the flag; the others are configured by seeded files.
 	for _, a := range []AgentType{AgentTypeGemini, AgentTypeCodex, AgentTypeBash} {
-		argv, err := AgentArgv(a, false, "", "task", "", false, "", "")
+		argv, err := AgentArgv(a, false, "", "task", "", "", false, "", "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", a, err)
 		}
@@ -225,7 +499,7 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 
 func TestAgentArgvCodexChat(t *testing.T) {
 	for _, resume := range []bool{false, true} {
-		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", true, "", "")
+		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", "", true, "", "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,12 +526,35 @@ func TestAgentArgvModel(t *testing.T) {
 		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false, "", "")
+		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", "", false, "", "", "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}
 		if strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
 			t.Errorf("AgentArgv(%q, resume=%v, model=opus) = %v, want %v", c.agent, c.resume, got, c.want)
+		}
+	}
+}
+
+func TestAgentArgvEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		agent  AgentType
+		resume bool
+		want   []string
+	}{
+		{"claude fresh", AgentTypeClaude, false, claudeArgv("--effort", "high")},
+		{"claude resume", AgentTypeClaude, true, claudeArgv("--continue")},
+		{"codex fresh", AgentTypeCodex, false, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--config", `model_reasoning_effort="high"`}},
+		{"codex resume", AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
+	}
+	for _, tt := range tests {
+		got, err := AgentArgv(tt.agent, tt.resume, "", "", "", "high", false, "", "", "")
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
 		}
 	}
 }

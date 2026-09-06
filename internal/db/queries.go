@@ -401,9 +401,9 @@ func (s *Store) SetReviewLink(id, downstreamBranch, url, reviewID, provider, tar
 	return errtrace.Wrap(result.Error)
 }
 
-// ClearReviewLink detaches a head from its MR (leaves the forge MR alone). Used by
-// the "detach" kill/merge option. Downstream branch is preserved so a
-// re-publish reuses the same name.
+// ClearReviewLink detaches a head from its MR. Downstream branch is preserved so
+// a re-publish reuses the same name. Automatic pushing is disabled atomically
+// with the detach, since an armed unlinked head would otherwise open a new MR.
 func (s *Store) ClearReviewLink(id string) error {
 	updates := map[string]any{
 		"review_url":           "",
@@ -415,6 +415,8 @@ func (s *Store) ClearReviewLink(id string) error {
 		"review_adopted":       false,
 		"review_push_url":      "",
 		"review_can_push":      false,
+		"auto_push":            false,
+		"auto_push_at":         "",
 	}
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
 	return errtrace.Wrap(result.Error)

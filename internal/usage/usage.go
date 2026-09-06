@@ -28,7 +28,7 @@ import (
 	"braces.dev/errtrace"
 )
 
-// Snapshot is a parsed point-in-time view of Claude Code subscription usage.
+// Snapshot is a parsed point-in-time view of a provider's subscription usage.
 // Percentages are "used" (0-100); pointers are nil when the value could not be
 // parsed from the `/usage` screen.
 type Snapshot struct {

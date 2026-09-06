@@ -26,6 +26,10 @@ test('the settings page renders every split section with its seeded config', asy
   // AllowedHosts); the block-list below it has its own placeholder.
   await expect(page.getByPlaceholder('e.g. api.internal.example.com').first()).toHaveValue('api.internal.example.com')
   await expect(page.getByPlaceholder('e.g. *.tracker.io').first()).toHaveValue('*.tracker.io')
+  // The environment allow-list stores names, not values. Simulation seeds two
+  // entries so both the API round-trip and the Settings editor stay covered.
+  await expect(page.getByPlaceholder('e.g. ANDROID_HOME').nth(0)).toHaveValue('ANDROID_HOME')
+  await expect(page.getByPlaceholder('e.g. ANDROID_HOME').nth(1)).toHaveValue('SSH_AUTH_SOCK')
 
   // ArtifactsEditor + ServicesEditor, each with its one seeded entry.
   await expect(page.getByRole('heading', { name: 'Diff Artifacts' })).toBeVisible()

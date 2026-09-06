@@ -27,6 +27,10 @@ export type SpawnAgentRequest = {
      */
     model?: string;
     /**
+     * Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+     */
+    effort?: SpawnAgentRequest.effort;
+    /**
      * Base branch to create the worktree from (defaults to the repository's stable default branch)
      */
     base_branch?: string;
@@ -61,4 +65,16 @@ export type SpawnAgentRequest = {
      */
     rows?: number;
 };
+export namespace SpawnAgentRequest {
+    /**
+     * Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+     */
+    export enum effort {
+        LOW = 'low',
+        MEDIUM = 'medium',
+        HIGH = 'high',
+        XHIGH = 'xhigh',
+        MAX = 'max',
+    }
+}
 

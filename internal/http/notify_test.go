@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/session"
 )
@@ -35,7 +36,7 @@ func TestSendAgentInputAddressesHeadsByRoot(t *testing.T) {
 	}
 
 	s := &Server{DB: store, Sessions: session.NewRegistry()}
-	err = s.sendAgentInput(context.Background(), projectRoot, "head", "[Hydra] New review comment: #1.", string(reasonReviewComments))
+	err = s.sendAgentInput(context.Background(), projectRoot, "head", "[Hydra] New review comment: #1.", api.MessageOriginHydra, reasonReviewComments)
 	if err == nil {
 		t.Fatal("a head with no live session should not have accepted the write")
 	}
@@ -57,7 +58,7 @@ func TestSendAgentInputReportsAMissingHead(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	s := &Server{DB: store, Sessions: session.NewRegistry()}
-	if err := s.sendAgentInput(context.Background(), projectRoot, "gone", "hi", ""); !errors.Is(err, errAgentNotRunning) {
+	if err := s.sendAgentInput(context.Background(), projectRoot, "gone", "hi", "", ""); !errors.Is(err, errAgentNotRunning) {
 		t.Fatalf("want errAgentNotRunning, got %v", err)
 	}
 }

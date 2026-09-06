@@ -1431,7 +1431,7 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	)
 	// Trust the checkout's copied mise config when the host trusts the project's,
 	// so mise-managed toolchains (go, bun, ...) resolve inside the run dir.
-	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
+	env = append(env, sandbox.MiseEnv(m.projectRoot, runDir)...)
 
 	command := spec.Script
 	if spec.IsStrict() {
@@ -1452,9 +1452,10 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	var egressSess *egress.Session
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(m.projectRoot)
+		cfg.ApplySharedCaches(&opts, m.projectRoot, "", true)
 		// The pre-spawn script is intentionally ignored: artifact generation is a
 		// plain command, not an agent spawn.
-		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+		writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		// The artifact output dir lives outside the checkout, so make it writable
 		// explicitly (the checkout itself is covered by WorktreePath).
 		writable = append(writable, outputDir)
@@ -1462,8 +1463,8 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 			opts.GitCommonDir = gcd // ephemeral worktree git metadata lives here
 		}
 		opts.WritablePaths = writable
+		opts.ReadablePaths = readable
 		opts.MaskedPaths = sandbox.ResolveMaskedPaths(m.projectRoot, runDir, masked)
-		opts.RestoreRO = restore
 		// Apply the project's cow_paths so a shared host cache configured for
 		// per-head copy-on-write isolation (e.g. ~/.gradle) is writable during
 		// generation too - reads hit the shared warm cache, writes (Gradle's lock
@@ -1559,9 +1560,9 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 // pre-slot-pool, per-commit checkout) worktrees behind, which this wipes and
 // prunes so the pool starts clean and recreates slots on demand.
 func (m *Manager) CleanCheckouts() {
-	_ = os.RemoveAll(m.checkoutsDir()) // legacy per-commit checkouts (pre-slot-pool)
-	_ = os.RemoveAll(m.cowDir())       // ephemeral per-generation cow_paths layers
-	m.pool.Clean()                     // slot worktrees + `git worktree prune`
+	checkout.RemoveAllDetached(m.checkoutsDir()) // legacy per-commit checkouts (pre-slot-pool)
+	checkout.RemoveAllDetached(m.cowDir())       // ephemeral per-generation cow_paths layers
+	m.pool.Clean()                               // slot worktrees + `git worktree prune`
 }
 
 // legacyKeyRe matches a cache-entry dir in the old flat layout, where the kind

@@ -56,12 +56,11 @@ watch; (2) add an MCP allow-list the user controls; (3) get real egress control
   "writes nothing to stdout, so the permission flow proceeds unchanged"
   (line 278). It always exits 0. **No hook can currently deny, ask, or rewrite a
   tool call.**
-- **Credentials:** masked = ssh, aws, azure, gnupg, docker, kube, pass, netrc,
-  git-credentials, npmrc, pypirc, shell history, `~/.config`
-  (`internal/sandbox/defaults.go`). But the **agent provider dirs are writable**
-  (`~/.claude`, `~/.claude.json`, `~/.gemini`, `~/.copilot`, `~/.codex`) because
-  the agent authenticates from them, and `~/.config/gh` is **restored read-only**
-  (GitHub OAuth token).
+- **Credentials:** at audit time all agent-provider directories were writable
+  because each agent authenticated from one of them. *(Now fixed: only the
+  selected provider's state is exposed; other providers' credential,
+  configuration, and session directories are absent. Other known credential
+  locations remain masked.)*
 - **Network:** defaults to **enabled** (`ResolveSandboxOptions`,
   `config.go:587`). `AllowedHosts` was parsed from config but **never enforced** at
   audit time — `sandbox.go:36` called it "reserved for a future proxy-based host
@@ -162,6 +161,10 @@ and it can *record* intent (every `PreToolUse` is already logged to
   die-with-parent + namespace isolation on by default.
 - Credential masking list is broad and sensible.
 - Codex's own sandbox is bypassed **deliberately** (it's already inside Hydra's).
+- Codex's separate command classifier can still reject raw recursive `rm` before
+  Hydra's outer sandbox runs it. `$HYDRA_BIN sandbox-remove` provides bounded
+  scratch cleanup under only the head worktree and private `$TMPDIR`; it does not
+  weaken the host boundary or add a blanket `rm` allow rule.
 - The artifacts trust model (branch can't self-grant host access) is a good
   template to copy for MCP.
 - Every hook event is already captured to `status_log.jsonl` — the raw material
@@ -213,6 +216,17 @@ in the loop.
 >   **advisory** mode (proxy via `HTTP(S)_PROXY` — filters every well-behaved
 >   client but a determined process can bypass it), surfaced as a UI warning.
 >   `network.enabled=false` stays the hard off-switch.
+> - **Rec 7 (filesystem scope):** filesystem reads and writes are default-deny.
+>   Linux builds an explicit bubblewrap view; macOS grants the same path
+>   categories through Seatbelt. Known credential masks apply last as a
+>   fail-safe. Shared host cache and tool-installation trees are
+>   read-only by default. Hydra redirects mutable cache/state paths beneath each
+>   sandbox's private temp directory. Trusted config can opt disposable caches
+>   into project-scoped sharing with `[sandbox.cache]`; `GOPATH`, `GOBIN`, mise
+>   installation data, and mise state remain private. Linux still supports
+>   explicit home/absolute `cow_paths` through
+>   overlayfs; macOS rejects those in-place writable requests and supports APFS
+>   clones only when the destination is a distinct private directory.
 >
 > Policy lives in per-agent `[<agent>.policy]` / `[<agent>.sandbox.network]` config,
 > resolved from the trusted project root. The original audit follows unchanged.
@@ -263,10 +277,13 @@ in the loop.
    touched, network/MCP attempts) so the user has visibility into an unattended
    head without reading logs. Cheap, high trust value.
 
-7. **Tighten default writable scope (F5).** Review whether every entry in
-   `Defaults().WritablePaths` needs to be writable by every agent type, and
-   prefer per-head COW (already supported via `cow_paths`) over shared writable
-   caches where a poisoned cache could affect later runs.
+7. **Tighten default filesystem scope (F5).** Shared caches and toolchain
+   installations are read-only by default. Mutable cache/state paths use
+   per-sandbox private storage unless trusted config names a disposable,
+   project-scoped shared cache. Explicit `cow_paths` remain available where the
+   platform can provide a real private destination or overlay. The readable
+   system/toolchain inventory and project-configured `readable_paths` are the
+   only host filesystem inputs exposed to a head.
 
 ### Suggested priority order
 F1 hook-gate → F3 MCP allow-list + UI → F2 egress → F4 read-only policy →
@@ -466,7 +483,7 @@ polls / web via the events Hub" pattern already used for `status.json`:
   approval card: *"Head X wants to use MCP server Y / fetch Z / git push"* with
   **Allow / Deny / Always allow** → calls the new endpoint.
 - Spec-first: add the endpoint + payload to `api/openapi.yaml`, then
-  `mage generate:go` (server stub) and regen the TS client (per CLAUDE.md /
+  `mage generateGo` (server stub) and regen the TS client (per CLAUDE.md /
   memory regen flow).
 
 ### Step 6 — Make the gate tamper-proof (F4)

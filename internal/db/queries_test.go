@@ -18,6 +18,42 @@ func newTestStore(t *testing.T) *Store {
 	return store
 }
 
+func TestClearReviewLinkAlsoDisarmsAutoPush(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.CreateAgent(&Agent{
+		ID: "linked", ProjectPath: "/project", AgentType: "claude",
+		DownstreamBranch: "feat/linked", ReviewURL: "https://forge/review/7",
+		ReviewID: "7", ReviewProvider: "github", ReviewTargetBranch: "main",
+		ReviewAdopted: true, ReviewPushURL: "https://forge/fork.git", ReviewCanPush: true,
+		ReviewState: `{\"state\":\"open\"}`, ReviewStateTime: "now",
+		AutoPush: true, AutoPushAt: "now",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ClearReviewLink("linked"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetAgent("linked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("agent disappeared")
+	}
+	if got.ReviewURL != "" || got.ReviewID != "" || got.ReviewProvider != "" || got.ReviewTargetBranch != "" || got.ReviewState != "" || got.ReviewStateTime != "" {
+		t.Errorf("review link was not cleared: %+v", got)
+	}
+	if got.ReviewAdopted || got.ReviewPushURL != "" || got.ReviewCanPush {
+		t.Errorf("adoption state was not cleared: %+v", got)
+	}
+	if got.AutoPush || got.AutoPushAt != "" {
+		t.Errorf("auto push was not disarmed: %+v", got)
+	}
+	if got.DownstreamBranch != "feat/linked" {
+		t.Errorf("downstream branch = %q, want preserved", got.DownstreamBranch)
+	}
+}
+
 func TestBackfillArchivedEndState(t *testing.T) {
 	const root = "/tmp/proj"
 	store := newTestStore(t)

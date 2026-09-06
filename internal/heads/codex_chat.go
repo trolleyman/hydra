@@ -19,13 +19,13 @@ import (
 // startCodexChatController attaches an internal observer to the app-server
 // process, installs it as the session's provider-neutral input driver, and
 // begins the initialize -> thread start/resume -> initial turn handshake.
-func startCodexChatController(reg *session.Registry, store *db.Store, projectRoot, id, worktree, model, conversationID, initialPrompt string) error {
+func startCodexChatController(reg *session.Registry, store *db.Store, projectRoot, id, worktree, model, effort, conversationID, initialPrompt string) error {
 	att, err := reg.Attach(id, 0, 0)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
 	controller := codexstream.New(codexstream.Options{
-		CWD: worktree, Model: model, ConversationID: conversationID, InitialPrompt: initialPrompt,
+		CWD: worktree, Model: model, Effort: effort, ConversationID: conversationID, InitialPrompt: initialPrompt,
 		Send: func(line []byte) error { return errtrace.Wrap(reg.Write(id, line)) },
 		OnConversation: func(threadID string) {
 			if store == nil {

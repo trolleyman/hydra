@@ -13,7 +13,7 @@
 import { useThemeStore } from './theme'
 import { fontStores, fontSizeStores } from './fontPrefs'
 import { FONT_ROLES, FONT_ROLE_SPEC } from './fonts'
-import { usePasteMarkersStore, useAutoPairStore, useSpellcheckStore } from './composerPrefs'
+import { usePasteMarkersStore, useEnterSendsStore, useAutoPairStore, useSpellcheckStore } from './composerPrefs'
 import {
   useChatStreamStore,
   useChatStepsStore,
@@ -35,6 +35,7 @@ const PREF_STORES = [
   ...Object.values(fontStores),
   ...Object.values(fontSizeStores),
   usePasteMarkersStore,
+  useEnterSendsStore,
   useAutoPairStore,
   useSpellcheckStore,
   useChatStreamStore,
@@ -70,6 +71,7 @@ function simple<T>(label: string, get: () => T, set: (v: T) => void, fallback: T
 export function browserPrefs(): Pref[] {
   const theme = useThemeStore.getState()
   const paste = usePasteMarkersStore.getState()
+  const enter = useEnterSendsStore.getState()
   const pair = useAutoPairStore.getState()
   const spell = useSpellcheckStore.getState()
   const stream = useChatStreamStore.getState()
@@ -101,6 +103,7 @@ export function browserPrefs(): Pref[] {
       return simple(`the ${FONT_ROLE_SPEC[role].label.toLowerCase()} size`, () => store.step, store.setStep, 0, 'fonts')
     }),
     simple('paste markers', () => paste.enabled, paste.setEnabled, true),
+    simple('Enter sends', () => enter.enabled, enter.setEnabled, true),
     simple('auto-close pairs', () => pair.enabled, pair.setEnabled, true),
     simple('spellcheck', () => spell.enabled, spell.setEnabled, false),
     simple('smooth streaming', () => stream.smooth, stream.setSmooth, true),

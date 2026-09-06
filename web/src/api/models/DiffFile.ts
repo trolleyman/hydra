@@ -30,7 +30,7 @@ export type DiffFile = {
      */
     expanded?: boolean;
     /**
-     * Total number of lines in the whole file on the head side (the old side for a deletion), when the server knows it. A windowed file carries only fragments, so this is the one thing the client cannot derive from the hunks - and without it the expander below the last hunk cannot say how many lines it hides. Absent when the file was never read in full (its change count exceeded max_full_changes, or the full-context read failed), in which case that expander stays a bare chevron.
+     * Total number of lines in the whole file on the head side (the old side for a deletion), when the server knows it. A windowed file carries only fragments, so this is the one thing the client cannot derive from the hunks - and without it the expander below the last hunk cannot say how many lines it hides. Absent when the file was never read in full (its change count exceeded max_full_changes, or the full-context read failed), in which case that expander stays a directional action without a Show all action.
      */
     total_lines?: number;
     /**

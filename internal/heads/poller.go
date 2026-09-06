@@ -104,9 +104,9 @@ const graceUnread = 5 * time.Second
 
 // SettleFunc is called by the poller the moment a head transitions into a
 // resting status (finished / waiting / needs_input) - a definitive "the agent
-// stopped editing" signal. The daemon wires it to the artifact prefetcher so a
-// head's screenshots are pre-generated at once instead of waiting for the slower
-// worktree-settle sweep. It must not block the poller (the caller runs it in its
+// stopped editing" signal. The daemon wires it to the background runner kickoff
+// so settled-policy tests and artifacts start at once instead of waiting for the
+// slower periodic sweeps. It must not block the poller (the caller runs it in its
 // own goroutine); a nil func disables the hook.
 type SettleFunc func(projectRoot, headID string)
 
@@ -124,7 +124,7 @@ const pollInterval = 5 * time.Second
 // on demand when the fsnotify watcher signals a status.json change. roots returns
 // the set of project roots to poll; it is re-evaluated every cycle so projects
 // added/removed at runtime are picked up. onSettle (may be nil) is invoked on
-// transitions into a resting status so background artifact generation can start
+// transitions into a resting status so settled-policy background work can start
 // immediately.
 func RunJSONStatusPoller(ctx context.Context, store *db.Store, roots func() []string, hub *events.Hub, onSettle SettleFunc) {
 	ticker := time.NewTicker(pollInterval)
@@ -437,12 +437,12 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			}
 
 			// A genuine transition into a resting status means the agent has stopped
-			// editing, so its worktree is a stable target: kick off background
-			// artifact generation now instead of waiting for the slower
-			// worktree-settle sweep. Gated on statusChanged so a running agent's
+			// editing, so its worktree is a stable target: kick off settled-policy
+			// background work now instead of waiting for the slower periodic sweeps.
+			// Gated on statusChanged so a running agent's
 			// per-tool-call status rewrites (which only advance the timestamp) don't
-			// re-fire it; redundant fires are cheap anyway (the artifact manager
-			// dedups by worktree version).
+			// re-fire it; redundant fires are cheap anyway (the managers dedup by
+			// version).
 			if onSettle != nil && statusChanged &&
 				(agentStatus == "finished" || agentStatus == "waiting" || agentStatus == "needs_input") {
 				onSettle(projectRoot, a.ID)

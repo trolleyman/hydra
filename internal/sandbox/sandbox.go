@@ -1,5 +1,5 @@
 // Package sandbox launches agent processes inside an OS-level sandbox that
-// confines filesystem writes to an allow-list and masks credential locations,
+// confines filesystem reads and writes to allow-lists and masks credential locations,
 // mirroring the approach used by Codex (https://developers.openai.com/codex/concepts/sandboxing).
 //
 // The concrete mechanism is platform-specific: bubblewrap (bwrap) on Linux,
@@ -9,11 +9,16 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 
 	"braces.dev/errtrace"
 )
@@ -122,8 +127,8 @@ type NetworkPolicy struct {
 	// false, every host is reachable (subject to Enabled). Derived from Mode.
 	FilterHosts bool
 	// Mode is the resolved egress posture (off/unrestricted/advisory/hard). It
-	// decides whether startEgress attempts the hard pasta+nft boundary; hard
-	// fails closed (no network) when that boundary can't be built.
+	// decides whether startEgress attempts the platform hard boundary; hard fails
+	// closed (no network) when that boundary cannot be built.
 	Mode NetworkMode
 	// AllowedHosts is the user's outbound host allow-list, unioned on top of
 	// DefaultAllowedHosts and enforced by the egress proxy when FilterHosts is true
@@ -133,13 +138,18 @@ type NetworkPolicy struct {
 	// matching BlockedHosts is denied even if it is otherwise allowed.
 	BlockedHosts []string
 	// AllowedLoopbackPorts lists host-loopback TCP ports the sandbox may reach
-	// even in hard mode, where the pasta netns otherwise cuts off the host's
-	// 127.0.0.1 entirely (pasta splices in-namespace connections to
-	// 127.0.0.1:<port> through to the host's loopback). Lets a head talk to a
-	// host-local daemon that hardcodes loopback, e.g. adb's server on 5037.
+	// even in hard mode. Linux splices them through pasta; Darwin emits narrow
+	// Seatbelt rules. Lets a head talk to a host-local daemon that hardcodes
+	// loopback, e.g. adb's server on 5037.
 	// Irrelevant outside hard mode: off has no network, and the other modes share
 	// the host's loopback anyway.
 	AllowedLoopbackPorts []int
+	// HardProxyPort is the host-loopback filtering proxy port a Darwin Seatbelt
+	// profile permits in hard mode. It is runtime state, never user config.
+	HardProxyPort int
+	// HardInboundPort is a one-shot runner service port that may bind beyond
+	// loopback on Darwin. It is runtime state, never user config.
+	HardInboundPort int
 }
 
 // DefaultAllowedHosts is the built-in egress allow-list applied whenever host
@@ -268,6 +278,14 @@ type ROOverlay struct {
 	Upper string // per-head host dir merged on top, mirroring Dir's layout
 }
 
+// SharedCache describes one project-scoped cache. Env redirects a tool's cache
+// variable to the backing directory; Path exposes it at a worktree-relative
+// path. Config validation requires exactly one of the two fields.
+type SharedCache struct {
+	Env  string `toml:"env" json:"env,omitempty"`
+	Path string `toml:"path" json:"path,omitempty"`
+}
+
 // Options describes a sandbox launch request. Paths use the host's real
 // filesystem layout; "~" and "$VAR" are expanded against Home/the environment.
 type Options struct {
@@ -291,25 +309,41 @@ type Options struct {
 	// Home is the HOME directory the agent should see.
 	Home string
 
-	// TmpDir is a host-backed scratch directory bound over /tmp inside the
-	// sandbox (Linux only). When set, the agent's temp files - Claude's
+	// TmpDir is a host-backed, per-head scratch directory. Linux binds it over
+	// /tmp; Darwin exposes its real path through TMPDIR/TMP/TEMP and denies shared
+	// host temp roots. When set, the agent's temp files - Claude's
 	// scratchpad, test-framework extractions, build junk - are isolated per
 	// head and reclaimed when the head is torn down, instead of accumulating on
 	// the host's shared /tmp. Empty leaves /tmp as the fresh tmpfs from the base
-	// args (used by tests and one-off sandboxes). Ignored on macOS, where /tmp
-	// stays host-shared via the static profile.
+	// Linux args or preserves the platform default (used by tests and one-off
+	// sandboxes).
 	TmpDir string
 
-	// WritablePaths, MaskedPaths and RestoreRO come from config + baked-in
-	// defaults (see DefaultSandboxConfig). Masks are applied before restores.
+	// CacheRoot contains project-scoped cache directories, one child per key in
+	// Caches. They are deliberately shared between heads in the same project;
+	// unlike writable host caches, this cannot modify the user's tool state.
+	CacheRoot string
+	Caches    map[string]SharedCache
+	// MaterializeCachePaths creates worktree-relative path cache symlinks. It is
+	// false for runners that must not change their working directory. A read-only
+	// project directory also suppresses materialization through WorkingDirReadOnly.
+	MaterializeCachePaths bool
+
+	// WritablePaths, ReadablePaths, and MaskedPaths come from config + baked-in
+	// defaults (see DefaultSandboxConfig). Masks are applied last and can only
+	// narrow the two allow-lists.
 	WritablePaths []string
+	ReadablePaths []string
 	MaskedPaths   []string
-	RestoreRO     []string
 
 	Network NetworkPolicy
 
 	// Binds are extra host->sandbox mounts (per-head config seeding).
 	Binds []Bind
+	// ImmutablePaths are real host paths exposed read-only to the sandbox. Darwin
+	// uses these for staged runtime and seed inputs because Seatbelt has no bind
+	// mounts; Linux normally enforces the same property through read-only Binds.
+	ImmutablePaths []string
 	// TmpfsDirs are directories overlaid with a fresh writable tmpfs inside the
 	// sandbox (applied before Binds), so per-head files can be bind-mounted into
 	// otherwise read-only locations like $HOME/.hydra.
@@ -324,8 +358,17 @@ type Options struct {
 
 	// Env is the environment for the sandboxed process.
 	Env []string
+	// InheritedEnv names values explicitly copied from the daemon by trusted
+	// project config. Application-specific entries override RuntimeEnv's private
+	// defaults; Hydra-managed identity, temp-root, provider, and proxy variables
+	// are rejected by config validation before reaching this point.
+	InheritedEnv []string
 	// Argv is the command to run inside the sandbox (e.g. claude --resume).
 	Argv []string
+	// HydraBinPath is the executable path visible to this sandbox. Linux uses the
+	// fixed bind target HydraBinPath; Darwin uses a staged, build-addressed host
+	// path protected by ImmutablePaths.
+	HydraBinPath string
 	// StdioPipes runs the process on plain stdin/stdout pipes instead of a PTY
 	// (stderr folds into the daemon log). Used by chat-mode heads, whose stdout
 	// is a JSONL protocol stream that must not pass through a
@@ -366,6 +409,18 @@ type Options struct {
 	// host access). Used only for the user-opted-in "regular shell"; never for
 	// agents. All other sandbox fields are ignored when set.
 	NoSandbox bool
+}
+
+// envPathDirs returns the last PATH value from an explicit process
+// environment. Sandbox backends admit these directories read-only so a trusted
+// PATH entry stays usable without exposing its parent tree.
+func envPathDirs(env []string) []string {
+	for i := len(env) - 1; i >= 0; i-- {
+		if value, ok := strings.CutPrefix(env[i], "PATH="); ok {
+			return filepath.SplitList(value)
+		}
+	}
+	return nil
 }
 
 // StrictShellPreamble makes a bash `-c` script fail-fast: errexit (`set -e`, so a
@@ -426,22 +481,23 @@ func interpIsBash(interp []string) bool {
 const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script failed (exit %s) - agent not started; fix or clear pre_spawn_script, then relaunch\n" "$hydra_ec" >&2' EXIT`
 
 // PreSpawnEnvFileName is the basename of the file the pre-spawn wrapper persists
-// the resolved $HYDRA_ENV to, inside the per-head /tmp (Options.TmpDir, mounted at
-// /tmp in the sandbox). When a launch persists it, the daemon reads it back from
-// the host side of that same dir to inject the identical vars into the head's
-// sibling sandboxed bash shells - so a "+"-tab shell sees the same environment the
-// pre_spawn_script set up for the agent, without re-running the script.
+// the resolved $HYDRA_ENV to, inside Options.TmpDir at the platform-visible temp
+// path. When a launch persists it, the daemon reads it back from the host side of
+// that same dir to inject the identical vars into the head's sibling sandboxed
+// bash shells - so a "+"-tab shell sees the same environment the pre_spawn_script
+// set up for the agent, without re-running the script.
 const PreSpawnEnvFileName = "hydra-pre-spawn.env"
 
 // SandboxPreSpawnEnvFile returns the sandbox-visible path the pre-spawn wrapper
-// persists resolved env vars to (the per-head TmpDir is bind-mounted at /tmp), or
-// "" when there is no host-backed TmpDir to persist into - in which case the
-// wrapper falls back to an ephemeral temp file and nothing is shared with shells.
+// persists resolved env vars to, or "" when there is no host-backed TmpDir to
+// persist into - in which case the wrapper falls back to an ephemeral temp file
+// and nothing is shared with shells.
 func SandboxPreSpawnEnvFile(tmpDir string) string {
+	tmpDir = SandboxTempDir(tmpDir)
 	if tmpDir == "" {
 		return ""
 	}
-	return "/tmp/" + PreSpawnEnvFileName
+	return filepath.Join(tmpDir, PreSpawnEnvFileName)
 }
 
 // HostPreSpawnEnvFile returns the host path of that same persisted file, for the
@@ -451,6 +507,324 @@ func HostPreSpawnEnvFile(tmpDir string) string {
 		return ""
 	}
 	return filepath.Join(tmpDir, PreSpawnEnvFileName)
+}
+
+// RuntimeEnv returns env with platform-visible private temporary, cache, and
+// state directories. These are private defaults because pointing a sandbox at
+// shared writable compiler caches or tool-manager state creates a persistence
+// channel into later heads and host builds. Trusted config may explicitly
+// inherit an application-specific value, sandbox.cache may replace one with a
+// project cache, and pre_spawn_script may deliberately override one afterward.
+func RuntimeEnv(env []string, hostTmpDir string, inherited ...string) []string {
+	tmpDir := SandboxTempDir(hostTmpDir)
+	if tmpDir == "" {
+		return env
+	}
+	inheritedSet := make(map[string]bool, len(inherited))
+	for _, name := range inherited {
+		inheritedSet[strings.ToUpper(name)] = true
+	}
+	private := []struct {
+		key   string
+		value string
+	}{
+		{"TMPDIR", tmpDir},
+		{"TMP", tmpDir},
+		{"TEMP", tmpDir},
+		{"XDG_CACHE_HOME", filepath.Join(tmpDir, "cache")},
+		{"XDG_STATE_HOME", filepath.Join(tmpDir, "state")},
+		{"GOCACHE", filepath.Join(tmpDir, "cache", "go-build")},
+		{"GOMODCACHE", filepath.Join(tmpDir, "go", "pkg", "mod")},
+		{"GOPATH", filepath.Join(tmpDir, "go")},
+		{"GOBIN", filepath.Join(tmpDir, "go", "bin")},
+		{"MAGEFILE_CACHE", filepath.Join(tmpDir, "cache", "mage")},
+		{"npm_config_cache", filepath.Join(tmpDir, "cache", "npm")},
+		{"AUBE_CACHE_DIR", filepath.Join(tmpDir, "cache", "aube")},
+		{"AUBE_STORE_DIR", filepath.Join(tmpDir, "cache", "aube-store")},
+		{"PLAYWRIGHT_BROWSERS_PATH", filepath.Join(tmpDir, "cache", "playwright")},
+		{"MISE_CACHE_DIR", filepath.Join(tmpDir, "cache", "mise")},
+		{"MISE_DATA_DIR", filepath.Join(tmpDir, "data", "mise")},
+		{"MISE_STATE_DIR", filepath.Join(tmpDir, "state", "mise")},
+	}
+	for _, item := range private {
+		if inheritedSet[strings.ToUpper(item.key)] && hasEnvKey(env, item.key) {
+			continue
+		}
+		prefix := item.key + "="
+		filtered := make([]string, 0, len(env)+1)
+		for _, entry := range env {
+			if !strings.HasPrefix(entry, prefix) {
+				filtered = append(filtered, entry)
+			}
+		}
+		env = append(filtered, prefix+item.value)
+	}
+	// `go install` writes commands to GOBIN. Keep the effective private or
+	// explicitly inherited output useful by putting it first on PATH.
+	goBin := filepath.Join(tmpDir, "go", "bin")
+	if inheritedSet["GOBIN"] && hasEnvKey(env, "GOBIN") {
+		goBin = lookupEnvValue(env, "GOBIN")
+	}
+	pathValue := lookupEnvValue(env, "PATH")
+	if pathValue == "" {
+		pathValue = goBin
+	} else if goBin != "" && !slices.Contains(filepath.SplitList(pathValue), goBin) {
+		pathValue = goBin + string(os.PathListSeparator) + pathValue
+	}
+	env = setEnvValue(env, "PATH", pathValue)
+	// Tool installations remain private, but mise may resolve already-installed
+	// host tools through its supported read-only shared-install search path.
+	if home := lookupEnvValue(env, "HOME"); home != "" && !(inheritedSet["MISE_SHARED_INSTALL_DIRS"] && hasEnvKey(env, "MISE_SHARED_INSTALL_DIRS")) {
+		env = setEnvValue(env, "MISE_SHARED_INSTALL_DIRS", filepath.Join(home, ".local", "share", "mise", "installs"))
+	}
+	return env
+}
+
+// PrepareSharedCaches creates project-owned cache backing directories and any
+// requested worktree links. It mutates opts.WritablePaths so platform policy
+// builders expose the cache directories read-write.
+var sharedCacheMu sync.Mutex
+
+func PrepareSharedCaches(opts *Options) error {
+	if opts.CacheRoot == "" || len(opts.Caches) == 0 {
+		return nil
+	}
+	sharedCacheMu.Lock()
+	defer sharedCacheMu.Unlock()
+
+	keys := make([]string, 0, len(opts.Caches))
+	for key := range opts.Caches {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	cacheEnvs := make(map[string]string)
+	cachePaths := make(map[string]string)
+	for _, key := range keys {
+		entry := opts.Caches[key]
+		if key == "" || key == "." || key == ".." || filepath.Base(key) != key || strings.ContainsAny(key, `/\\`) {
+			return errtrace.Errorf("invalid shared cache key %q", key)
+		}
+		if (entry.Env == "") == (entry.Path == "") {
+			return errtrace.Errorf("shared cache %q must set exactly one of env or path", key)
+		}
+		if entry.Env != "" {
+			env := strings.ToUpper(entry.Env)
+			if previous, exists := cacheEnvs[env]; exists {
+				return errtrace.Errorf("shared caches %q and %q redirect the same environment variable %q", previous, key, entry.Env)
+			}
+			cacheEnvs[env] = key
+		}
+		if entry.Path != "" {
+			clean := filepath.Clean(entry.Path)
+			if filepath.IsAbs(entry.Path) || strings.Contains(entry.Path, `\`) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return errtrace.Errorf("shared cache %q path must stay inside the worktree", key)
+			}
+			for previousPath, previousKey := range cachePaths {
+				if cachePathsOverlap(clean, previousPath) {
+					return errtrace.Errorf("shared caches %q and %q use overlapping worktree paths %q and %q", previousKey, key, previousPath, entry.Path)
+				}
+			}
+			cachePaths[clean] = key
+		}
+	}
+
+	// Validate the complete map before creating any backing directory or link.
+	// This keeps a bad multi-cache configuration from partially changing the
+	// worktree before its conflict is discovered.
+	for _, key := range keys {
+		entry := opts.Caches[key]
+		backing := filepath.Join(opts.CacheRoot, key)
+		if err := os.MkdirAll(backing, 0o755); err != nil {
+			return errtrace.Wrap(fmt.Errorf("create shared cache %q: %w", key, err))
+		}
+		opts.WritablePaths = append(opts.WritablePaths, backing)
+		if entry.Path == "" || !opts.MaterializeCachePaths || opts.WorkingDirReadOnly {
+			continue
+		}
+		target := filepath.FromSlash(entry.Path)
+		if err := ensureCacheLink(opts.WorktreePath, target, backing, opts.CacheRoot); err != nil {
+			return errtrace.Wrap(fmt.Errorf("materialize shared cache %q: %w", key, err))
+		}
+	}
+	return nil
+}
+
+func cachePathsOverlap(a, b string) bool {
+	if a == b {
+		return true
+	}
+	separator := string(filepath.Separator)
+	return strings.HasPrefix(a, b+separator) || strings.HasPrefix(b, a+separator)
+}
+
+// SharedCacheEnv applies env-backed cache entries after RuntimeEnv, so explicit
+// project cache configuration overrides Hydra's private per-run defaults.
+func SharedCacheEnv(env []string, root string, caches map[string]SharedCache) []string {
+	if root == "" {
+		return env
+	}
+	keys := make([]string, 0, len(caches))
+	for key := range caches {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		entry := caches[key]
+		if entry.Env != "" {
+			env = setEnvValue(env, entry.Env, filepath.Join(root, key))
+		}
+	}
+	return env
+}
+
+func ensureCacheLink(worktree, target, backing, cacheRoot string) error {
+	root, err := os.OpenRoot(worktree)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
+
+	if err := checkCacheLinkParents(root, target, false); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := checkCachePathIgnored(worktree, target); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	if info, err := root.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			got, readErr := root.Readlink(target)
+			if readErr != nil {
+				return errtrace.Wrap(readErr)
+			}
+			resolved := got
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(worktree, filepath.Dir(target), resolved)
+			}
+			resolved = filepath.Clean(resolved)
+			if resolved == filepath.Clean(backing) {
+				return nil
+			}
+			if !isCacheBacking(resolved, cacheRoot) {
+				return errtrace.Errorf("%s already exists and is not a Hydra cache link", filepath.Join(worktree, target))
+			}
+			if err := root.Remove(target); err != nil {
+				return errtrace.Wrap(err)
+			}
+		} else {
+			return errtrace.Errorf("%s already exists; path caches require an absent path or Hydra's existing symlink", filepath.Join(worktree, target))
+		}
+	} else if !os.IsNotExist(err) {
+		return errtrace.Wrap(err)
+	}
+	if err := checkCacheLinkParents(root, target, true); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(root.Symlink(backing, target))
+}
+
+// checkCacheLinkParents walks each parent relative to an anchored os.Root. It
+// rejects symlinks even when they happen to resolve back inside the worktree:
+// the configured path names the directory tree itself, not an alias into it.
+func checkCacheLinkParents(root *os.Root, target string, create bool) error {
+	parent := filepath.Dir(target)
+	if parent == "." {
+		return nil
+	}
+	current := ""
+	for _, part := range strings.Split(parent, string(filepath.Separator)) {
+		if current == "" {
+			current = part
+		} else {
+			current = filepath.Join(current, part)
+		}
+		info, err := root.Lstat(current)
+		if os.IsNotExist(err) && create {
+			if err := root.Mkdir(current, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+				return errtrace.Wrap(err)
+			}
+			info, err = root.Lstat(current)
+		}
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errtrace.Errorf("cache path parent %s is a symlink", filepath.Join(root.Name(), current))
+		}
+		if !info.IsDir() {
+			return errtrace.Errorf("cache path parent %s is not a directory", filepath.Join(root.Name(), current))
+		}
+	}
+	return nil
+}
+
+func checkCachePathIgnored(worktree, target string) error {
+	output, err := exec.Command("git", "-C", worktree, "check-ignore", "--quiet", "--", filepath.ToSlash(target)).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return errtrace.Errorf("%s is not ignored by Git; add %q without a trailing slash to a Git ignore file before using it as a path cache", filepath.Join(worktree, target), filepath.ToSlash(target))
+	}
+	if detail := strings.TrimSpace(string(output)); detail != "" {
+		return errtrace.Errorf("check whether cache path %s is ignored by Git: %s", filepath.Join(worktree, target), detail)
+	}
+	return errtrace.Wrap(fmt.Errorf("check whether cache path %s is ignored by Git: %w", filepath.Join(worktree, target), err))
+}
+
+func isCacheBacking(target, cacheRoot string) bool {
+	rel, err := filepath.Rel(filepath.Clean(cacheRoot), filepath.Clean(target))
+	return err == nil && rel != "." && rel != ".." && filepath.Base(rel) == rel
+}
+
+func lookupEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimPrefix(env[i], prefix)
+		}
+	}
+	return ""
+}
+
+func hasEnvKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	prefix := key + "="
+	filtered := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return append(filtered, prefix+value)
+}
+
+func withoutEnvKeys(env []string, keys ...string) []string {
+	blocked := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		blocked[key] = true
+	}
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if !blocked[key] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // preSpawnEnvSetup points $HYDRA_ENV at a writable file before the user's script
@@ -576,7 +950,7 @@ func rawSpec(opts Options) (*Spec, error) {
 	return &Spec{
 		Path:    opts.Argv[0],
 		Args:    opts.Argv,
-		Env:     opts.Env,
+		Env:     SharedCacheEnv(opts.Env, opts.CacheRoot, opts.Caches),
 		Dir:     opts.WorktreePath,
 		Cleanup: func() {},
 	}, nil
@@ -602,7 +976,7 @@ type Spec struct {
 }
 
 // ExpandPath expands a leading "~" (to home) and any $VARS in p against the
-// given HOME, exactly as the sandbox path lists (writable/masked/restore) are
+// given HOME, exactly as the sandbox path lists (writable/readable/masked) are
 // expanded. Exported so callers building mounts (see heads) can resolve
 // home/absolute config entries the same way. A result that is still relative is
 // returned unchanged.

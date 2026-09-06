@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,6 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/egress"
-	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -32,6 +32,13 @@ type ShellCommandResult struct {
 	DurationMs int64 `json:"duration_ms"`
 	TimedOut   bool  `json:"timed_out,omitempty"`
 	Stopped    bool  `json:"stopped,omitempty"`
+}
+
+// ShellCommandPolicy carries the per-head restrictions that are persisted in
+// the database rather than derived solely from the project config.
+type ShellCommandPolicy struct {
+	WorkingDirReadOnly bool
+	GitIsolation       string
 }
 
 // ShellCommandTimeout bounds a chat `!command`. A user-typed inspection command
@@ -57,7 +64,7 @@ const shellCommandMaxOutput = 64 * 1024
 // arrives (for live streaming to the UI). Because Stdout and Stderr point at the
 // same writer, os/exec funnels both through one copy goroutine, so onChunk is
 // invoked serially and in order - no interleaving races.
-func RunShellCommand(ctx context.Context, projectRoot, worktree, command string, onChunk func(string)) (ShellCommandResult, error) {
+func RunShellCommand(ctx context.Context, projectRoot, worktree, sessionID string, agentType sandbox.AgentType, policy ShellCommandPolicy, command string, onChunk func(string)) (ShellCommandResult, error) {
 	res := ShellCommandResult{Command: command, ExitCode: -1}
 	if strings.TrimSpace(command) == "" {
 		return res, errtrace.Errorf("empty command")
@@ -69,7 +76,7 @@ func RunShellCommand(ctx context.Context, projectRoot, worktree, command string,
 	runCtx, cancel := context.WithTimeout(ctx, ShellCommandTimeout)
 	defer cancel()
 
-	launch, cleanup, err := buildShellCommandSpec(projectRoot, worktree, command)
+	launch, cleanup, err := buildShellCommandSpec(projectRoot, worktree, sessionID, agentType, policy, command)
 	if err != nil {
 		return res, errtrace.Wrap(err)
 	}
@@ -156,38 +163,34 @@ func (c *capBuffer) String() string { return c.buf.String() }
 // Returns the spec plus a cleanup closure (bwrap tmp + egress session + cow
 // layer) the caller must defer. Mirrors tests.buildCommandSpec / the artifacts
 // runner, minus their per-feature env contract.
-func buildShellCommandSpec(projectRoot, worktree, command string) (*sandbox.Spec, func(), error) {
+func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sandbox.AgentType, policy ShellCommandPolicy, command string) (*sandbox.Spec, func(), error) {
 	home, _ := os.UserHomeDir()
-
-	env := make([]string, 0, len(os.Environ())+4)
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if key != "TMPDIR" && key != "TMP" && key != "TEMP" {
-			env = append(env, entry)
-		}
+	cfg, _ := config.Load(projectRoot)
+	if err := paths.EnsureHydraLocalIgnored(paths.GetUploadsDirFromProjectRoot(projectRoot)); err != nil {
+		return nil, func() {}, errtrace.Wrap(fmt.Errorf("prepare uploads: %w", err))
 	}
-	if home != "" {
-		env = append(env, "HOME="+home)
-	}
-	env = append(env, "TMPDIR=/tmp", "TMP=/tmp", "TEMP=/tmp")
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktree)...)
+	env := agentEnv(agentType, cfg.ResolveInheritedEnv(string(agentType)), home, "", readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
+	env = append(env, sandbox.MiseEnv(projectRoot, worktree)...)
+	env = append(env, readPreSpawnEnv(sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, sessionID)))...)
 
 	opts := sandbox.Options{
-		AgentType:    sandbox.AgentTypeBash,
-		WorktreePath: worktree,
-		Home:         home,
-		Env:          env,
-		Argv:         []string{"bash", "-c", command},
+		AgentType:          sandbox.AgentTypeBash,
+		WorktreePath:       worktree,
+		WorkingDirReadOnly: policy.WorkingDirReadOnly,
+		Home:               home,
+		Env:                env,
+		InheritedEnv:       cfg.ResolveInheritedEnv(string(agentType)),
+		Argv:               []string{"bash", "-c", command},
 	}
 
-	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
-	if gcd, err := git.GetCommonDir(projectRoot); err == nil {
-		opts.GitCommonDir = gcd
-	}
+	writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions(string(agentType))
+	cfg.ApplySharedCaches(&opts, projectRoot, string(agentType), true)
+	gitIsolation := resolveGitIsolation(cfg, string(agentType), policy.GitIsolation)
+	opts.GitCommonDir = commonDirForSandbox(projectRoot, gitIsolation)
+	opts.GitIsolation = gitIsolation
 	opts.WritablePaths = writable
-	opts.MaskedPaths = sandbox.ResolveMaskedPaths(projectRoot, worktree, masked)
-	opts.RestoreRO = restore
+	opts.ReadablePaths = headReadablePaths(projectRoot, readable)
+	opts.MaskedPaths = resolvedSandboxMasks(projectRoot, worktree, sessionID, masked)
 
 	var cowLayerDir string
 	if len(cow) > 0 {

@@ -26,6 +26,8 @@
 // directory`). It is exported on its own rather than folded into the pass above,
 // because recognising one needs the script that ran it - see the comment there.
 import type { OutputSpan } from './outputSpan'
+import { langFromPath } from './fileKind'
+import { highlightTree, treeToLineSpans } from './prismHtml'
 
 const DIM = 'text-stone-400 dark:text-stone-500'
 const PASS = 'text-green-600 dark:text-green-400'
@@ -79,6 +81,140 @@ const CROSS = /^(\s*)([✗✘×])(\s.*)$/
 // same red landmark as a compiler's severity instead of leaving the whole line
 // as undifferentiated prose.
 const BASH_FAILURE = /^(\s*(?:\/[\w./+-]+\/)?(?:bash|sh|zsh):\s+line\s+\d+:\s+)([^:]+)(:\s+)(command not found|No such file or directory)(.*)$/i
+
+// Vitest and Jest print a small structured report around each failed case:
+// a ruled heading, the failed case's file and suite path, an exception, stack
+// frames, then a numbered excerpt from the source file. The stack frames already
+// fit the generic location shapes above; these patterns cover the report's
+// surrounding structure and let the excerpt go through its file grammar.
+const FAILED_TESTS_HEADING = /^(\u23af+\s+)(Failed Tests)(\s+\d+)(\s+\u23af+)$/
+const FAILED_CASE = /^(\s*)(FAIL)(\s{2,})(\S+\.[A-Za-z][\w]*)(\s+>\s+)(.*)$/
+const FAILURE_SEPARATOR = /^(\u23af+)(\[\d+\/\d+\])(\u23af*)$/
+const EXCEPTION = /^([A-Za-z_$][\w$]*(?:Error|Exception))(:)(\s*)(.*)$/
+const SOURCE_LINE = /^(\s*)(\d+)(\|)( ?)(.*)$/
+const SOURCE_POINTER = /^(\s*)(\|)(\s*)(\^+)(.*)$/
+const OUTPUT_PATH = /([\w./~@+-]+\.[A-Za-z][\w]*)(?::\d+(?::\d+)?)?/
+
+function hierarchySpans(text: string): OutputSpan[] {
+  const spans: OutputSpan[] = []
+  let at = 0
+  for (const separator of text.matchAll(/\s+>\s+/g)) {
+    spans.push({ text: text.slice(at, separator.index), cls: '' })
+    spans.push({ text: separator[0], cls: DIM })
+    at = separator.index + separator[0].length
+  }
+  spans.push({ text: text.slice(at), cls: '' })
+  return spans.filter((span) => span.text !== '')
+}
+
+function pointerSpans(pointer: RegExpExecArray): OutputSpan[] {
+  return [
+    { text: pointer[1] + pointer[2] + pointer[3], cls: DIM },
+    { text: pointer[4], cls: FAIL },
+    { text: pointer[5], cls: '' },
+  ].filter((span) => span.text !== '')
+}
+
+// failureDetailSpans returns only the lines whose meaning depends on the whole
+// failure report. Keeping it separate from lineSpans means a lone sentence in
+// ordinary command output never gets mistaken for a test-runner construct.
+function failureDetailSpans(lines: string[]): Map<number, OutputSpan[]> {
+  const detailed = new Map<number, OutputSpan[]>()
+  const report = lines.some((line) => FAILED_TESTS_HEADING.test(line) || FAILED_CASE.test(line))
+  if (!report) return detailed
+
+  let sourcePath = ''
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const heading = FAILED_TESTS_HEADING.exec(line)
+    if (heading) {
+      detailed.set(i, [
+        { text: heading[1], cls: DIM },
+        { text: heading[2] + heading[3], cls: FAIL },
+        { text: heading[4], cls: DIM },
+      ])
+      continue
+    }
+
+    const failed = FAILED_CASE.exec(line)
+    if (failed) {
+      sourcePath = failed[4]
+      detailed.set(i, [
+        { text: failed[1], cls: '' },
+        { text: failed[2], cls: FAIL },
+        { text: failed[3], cls: '' },
+        { text: failed[4], cls: DIM },
+        { text: failed[5], cls: DIM },
+        ...hierarchySpans(failed[6]),
+      ])
+      continue
+    }
+
+    const separator = FAILURE_SEPARATOR.exec(line)
+    if (separator) {
+      detailed.set(i, [
+        { text: separator[1], cls: DIM },
+        { text: separator[2], cls: LOC },
+        { text: separator[3], cls: DIM },
+      ])
+      continue
+    }
+
+    const exception = EXCEPTION.exec(line)
+    if (exception) {
+      detailed.set(i, [
+        { text: exception[1], cls: FAIL },
+        { text: exception[2], cls: DIM },
+        { text: exception[3] + exception[4], cls: '' },
+      ])
+      continue
+    }
+
+    const sourceLine = SOURCE_LINE.exec(line)
+    if (!sourceLine) {
+      // A stack frame between the case title and excerpt is the most precise
+      // source-language hint, while the case title remains the fallback. Only
+      // inspect non-source rows: a string such as `github.com` inside the TSX
+      // excerpt is code, not a new filename or language hint.
+      const path = OUTPUT_PATH.exec(line)?.[1]
+      if (path) sourcePath = path
+      const pointer = SOURCE_POINTER.exec(line)
+      if (pointer) detailed.set(i, pointerSpans(pointer))
+      continue
+    }
+
+    // Highlight one complete excerpt at a time so JSX tags, block comments and
+    // other multiline constructs keep their state across the numbered rows.
+    const excerpt: Array<{ index: number; match: RegExpExecArray }> = []
+    let end = i
+    while (end < lines.length) {
+      const source = SOURCE_LINE.exec(lines[end])
+      if (source) {
+        excerpt.push({ index: end, match: source })
+        end++
+        continue
+      }
+      const pointer = SOURCE_POINTER.exec(lines[end])
+      if (pointer) {
+        detailed.set(end, pointerSpans(pointer))
+        end++
+        continue
+      }
+      break
+    }
+    const language = langFromPath(sourcePath) || 'plaintext'
+    const tree = highlightTree(excerpt.map(({ match }) => match[5]).join('\n'), language)
+    const highlighted = tree ? treeToLineSpans(tree) : null
+    excerpt.forEach(({ index, match }, excerptIndex) => {
+      detailed.set(index, [
+        { text: match[1] + match[2] + match[3] + match[4], cls: DIM },
+        ...(highlighted?.[excerptIndex] ?? [{ text: match[5], cls: '' }]),
+      ].filter((span) => span.text !== ''))
+    })
+    i = end - 1
+  }
+  return detailed
+}
 
 function severitySpans(message: string): OutputSpan[] {
   const m = SEVERITY.exec(message)
@@ -190,8 +326,9 @@ function lineSpans(line: string): OutputSpan[] | null {
 // which case it is not build output and the caller renders it as it was.
 export function buildOutputSpans(lines: string[]): OutputSpan[][] | null {
   let recognised = 0
-  const out = lines.map((line) => {
-    const spans = lineSpans(line)
+  const detailed = failureDetailSpans(lines)
+  const out = lines.map((line, index) => {
+    const spans = detailed.get(index) ?? lineSpans(line)
     if (spans) recognised++
     return (spans ?? [{ text: line, cls: '' }]).filter((s) => s.text !== '')
   })

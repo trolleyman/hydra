@@ -392,6 +392,22 @@ func TestReadStateIsExplicitAndPerNumber(t *testing.T) {
 	}
 }
 
+func TestSuggestionAppliedTracksExactVersion(t *testing.T) {
+	root := t.TempDir()
+	if SuggestionApplied(root, "h", "note-1", "version-1") {
+		t.Fatal("new suggestion should not be applied")
+	}
+	if err := MarkSuggestionApplied(root, "h", "note-1", "version-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !SuggestionApplied(root, "h", "note-1", "version-1") {
+		t.Fatal("recorded suggestion version should be applied")
+	}
+	if SuggestionApplied(root, "h", "note-1", "version-2") {
+		t.Fatal("an edited suggestion should be offered again")
+	}
+}
+
 // uploadPath writes a file into the project's uploads dir and returns its
 // absolute path - what the uploads endpoint hands the browser, and the only kind
 // of path an attachment is allowed to be.

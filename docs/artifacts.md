@@ -43,8 +43,17 @@ rewritten to `script` on the next config save.
 | `name`        | yes      | Unique label, also used as the cache directory. |
 | `script`      | yes      | Shell script, run via `bash -c` in the checkout directory. Multi-line `'''` block; the older `command` key still parses and is migrated on save. |
 | `timeout_sec` | no       | Max seconds the command may run (`0` = built-in default). |
-| `auto_run`    | no       | When missing generations start: `"always"` (default), `"settled"` (wait while the agent is working), or `"never"` (Refresh only). Cached artifacts still display in every mode. |
+| `auto_run`    | no       | Selects when a missing generation starts. See the table below. |
 | `unsafe_host` | no       | Run on the host with **no sandbox** — full access to your machine and credentials. Only for audited, self-contained commands you trust against every ref you compare. Honored only when the trusted live config authorizes that exact command, so a branch cannot grant itself host access. Default `false`. |
+
+| Mode | Automatic behavior | When viewed |
+| ---- | ------------------ | ----------- |
+| `"always"` (default) | Hydra may start a missing generation proactively. | A missing generation starts. |
+| `"settled"` | A missing generation starts when the agent transitions out of active work. | No generation starts; Hydra only reads the cache. |
+| `"never"` | No generation starts automatically. | No generation starts; Hydra only reads the cache. |
+
+Refresh and explicit retry requests start a generation in every mode. Cached
+artifacts remain visible in every mode.
 
 By default the command runs **inside the OS sandbox** (the same confinement
 agents get). The checkout, the output directory, the dev caches and the git
@@ -63,6 +72,11 @@ The command is given:
 Results are cached per commit under
 `<state-dir>/projects/<project-id>/artifacts/out/<name>/<version-key>`, so
 re-viewing a diff is free.
+
+Commit-side generations reuse a bounded pool of warm detached worktrees. On
+daemon startup, stale slot, legacy checkout, and copy-on-write directories are
+renamed out of their live paths atomically, then recursively reclaimed in the
+background. Large dependency trees therefore do not delay the HTTP listener.
 
 ## Streaming outputs (`::hydra:artifact::`)
 

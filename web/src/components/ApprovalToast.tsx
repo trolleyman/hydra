@@ -1,5 +1,5 @@
 import React, { Fragment } from 'react'
-import { Server, SquareTerminal, Globe, Network, Shield, Check, X, TriangleAlert } from 'lucide-react'
+import { Server, SquareTerminal, Globe, Network, Shield, Check, X, TriangleAlert, FolderOpen } from 'lucide-react'
 import type { ApprovalToastData, ToastAction } from '../stores/toastStore'
 import { IconButton } from './IconButton'
 import { HostName, UrlText } from './HostName'
@@ -111,6 +111,8 @@ function kindVisual(data: ApprovalToastData): {
       // views of ONE request, and a user who answers it in either place should
       // not have to work out that they are looking at the same thing.
       return { Icon: TriangleAlert, iconWrap: TILE_TONE.red, title: 'Run on host', badge: { text: 'outside sandbox', tone: 'red' }, surface: HOST_SURFACE }
+    case 'filesystem_read':
+      return { Icon: FolderOpen, iconWrap: TILE_TONE.teal, title: 'Allow host path', badge: { text: 'Read only', tone: 'teal' } }
     default:
       return { Icon: SquareTerminal, iconWrap: TILE_TONE.neutral, title: 'Run command', badge: { text: 'Shell', tone: 'gray' } }
   }
@@ -138,6 +140,8 @@ const BodyLine: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
       // The command itself is shown in the mono Preview box below (it can be long),
       // so the body line just states the ask.
       return <>An agent wants to run this command <strong>on the host, outside its sandbox</strong>:</>
+    case 'filesystem_read':
+      return <>An agent wants to mount this host path read-only inside its sandbox:</>
     default:
       return <>An agent wants to run <ChipClause><Chip>{data.target}</Chip>.</ChipClause></>
   }
@@ -224,6 +228,13 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
     const html = highlightBash(split)
     if (html != null) return <pre className={COMMAND_BOX} dangerouslySetInnerHTML={{ __html: html }} />
     return <pre className={COMMAND_BOX}>{split}</pre>
+  }
+  if (data.kind === 'filesystem_read') {
+    return (
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-xs break-all text-gray-600 dark:text-gray-300">
+        {data.target}
+      </div>
+    )
   }
   return null
 }
@@ -392,6 +403,11 @@ export const ApprovalCard: React.FC<{
           {data.kind === 'host_command' && (
             <Caption icon={<TriangleAlert className="w-3 h-3" />}>
               This runs <strong className="font-semibold text-gray-700 dark:text-gray-300">outside</strong> the sandbox with your full user access, just this once. Only allow if you understand exactly what the command does - the agent should reach for this only when nothing else works.
+            </Caption>
+          )}
+          {data.kind === 'filesystem_read' && (
+            <Caption icon={<TriangleAlert className="w-3 h-3" />}>
+              Hydra will restart this head&rsquo;s sandbox to apply the mount. Allow once lasts until the head is killed; Always allow also adds the path to this agent type&rsquo;s readable paths.
             </Caption>
           )}
         </div>

@@ -239,7 +239,7 @@ Keep `internal/sandbox` free of any `internal/config` import - config resolves
 - `api/openapi.yaml`: add a `ResourceLimits` object schema and a top-level
   `resources` field on `ConfigResponse` (next to `artifact_concurrency` /
   `test_concurrency`, the existing top-level-scalar precedent).
-- Regenerate: `mage generate:go` (`go generate ./internal/api/`) for the Go
+- Regenerate: `mage generateGo` (`go generate ./internal/api/`) for the Go
   server types, then the openapi-typescript-codegen step from `web/` for the TS
   client (per CLAUDE.md). Produces `web/src/api/models/ResourceLimits.ts` and a
   field on `ConfigResponse.ts`.

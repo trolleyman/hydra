@@ -154,10 +154,11 @@ function isOperand(word: string): boolean {
   return word !== '' && !word.startsWith('-')
 }
 
-// parseGitBlob reads `git show <rev>:<path>`, which is the odd one out among git
-// commands: it prints a FILE - the blob at that revision, byte for byte - and
-// not a report about the repository. So it is a read of `<path>`, and wants that
-// file's language and line numbers rather than lib/gitOutput's colours.
+// parseGitBlob reads `git show <rev>:<path>` and the index spellings
+// `git show :<path>` / `git show :<stage>:<path>`. They are the odd ones out
+// among git commands: each prints a FILE byte for byte rather than a report
+// about the repository. So each is a read of `<path>`, and wants that file's
+// language and line numbers rather than lib/gitOutput's colours.
 //
 // The revision itself is dropped. It says which VERSION was printed, which the
 // command line above the content already shows, and the one thing the renderer
@@ -175,8 +176,14 @@ function parseGitBlob(words: string[]): string | null {
   // Exactly one operand, and no flags: a `--stat` or a second revision would
   // make this something other than one file's contents.
   if (args.length !== 1 || !isOperand(args[0])) return null
-  const at = args[0].indexOf(':')
-  const path = at < 0 ? '' : args[0].slice(at + 1)
+  const spec = args[0]
+  // An unmerged index has stage 1 (base), 2 (ours) and 3 (theirs), while stage
+  // 0 is the ordinary index. The stage selects the blob but is not part of its
+  // path; leaving `3:` attached still found `.go` by accident, but put the
+  // revision machinery in the file header and tooltip.
+  const staged = /^:[0-3]:(.+)$/.exec(spec)
+  const at = spec.indexOf(':')
+  const path = staged?.[1] ?? (at < 0 ? '' : spec.slice(at + 1))
   // `git show :file` (the index) is a blob too; `git show rev:` is not a file.
   return path === '' || path.startsWith('-') ? null : path
 }

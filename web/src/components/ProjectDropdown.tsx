@@ -206,6 +206,12 @@ function ProjectRow({
           size={14}
           className={swapIcon ? 'opacity-0' : ''}
         />
+        {!swapIcon && (
+          <ProjectAttentionDot
+            project={p}
+            className="absolute -right-0.5 -bottom-0.5 ring-2 ring-white dark:ring-gray-800"
+          />
+        )}
         {swapIcon && <ReorderControl project={p} reorder={reorder} />}
       </span>
       <div className={`min-w-0 flex-1 ${dim}`}>
@@ -246,11 +252,8 @@ function ProjectRow({
             </button>
           </form>
         ) : (
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex items-center min-w-0">
             <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</span>
-            {/* Needs-input/unread notification dot, right of the name so "this
-                project wants you" reads before the tally. */}
-            <ProjectAttentionDot project={p} />
           </div>
         )}
         {renameError && <p className="text-3xs text-red-500 mt-1 leading-snug">{renameError}</p>}
@@ -645,12 +648,12 @@ export const ProjectDropdown = memo(function ProjectDropdown({
           {otherProjectsNeedsInput > 0 ? (
             <span
               aria-label="an agent in another project needs your input"
-              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900"
+              className="absolute -bottom-1 -right-1 w-1.5 h-1.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900"
             />
           ) : otherProjectsUnread > 0 ? (
             <span
               aria-label="updates waiting in other projects"
-              className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-sky-400 ring-2 ring-white dark:ring-gray-900"
+              className="absolute -bottom-1 -right-1 w-1.5 h-1.5 rounded-full bg-sky-400 ring-2 ring-white dark:ring-gray-900"
             />
           ) : null}
         </span>

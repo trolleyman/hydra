@@ -110,10 +110,13 @@ type Discussion struct {
 type Thread struct {
 	// ID identifies the thread for replies. GitHub: the root review comment's
 	// numeric id (what the replies endpoint takes). GitLab: the discussion id.
-	ID       string
-	Path     string
-	Line     int
-	Resolved bool
+	ID   string
+	Path string
+	Line int
+	// StartLine is the first new-side line covered by a multi-line comment.
+	// Zero means the comment covers only Line.
+	StartLine int
+	Resolved  bool
 	// Outdated marks a thread whose anchor line no longer exists in the diff
 	// (GitHub reports this; GitLab position simply goes null).
 	Outdated bool
@@ -133,6 +136,22 @@ type Note struct {
 	Body      string
 	URL       string
 	CreatedAt string // RFC3339, as reported by the forge
+	// DiffHunk is GitHub's source context for this note. It lets suggestion
+	// application verify that the anchored lines have not changed underneath it.
+	DiffHunk string
+	// Suggestion is GitLab's structured suggestion payload. GitHub carries the
+	// replacement in Body instead, with source context in DiffHunk.
+	Suggestion *Suggestion
+}
+
+// Suggestion is the provider's structured replacement metadata when available.
+type Suggestion struct {
+	FromLine    int
+	ToLine      int
+	FromContent string
+	ToContent   string
+	Appliable   bool
+	Applied     bool
 }
 
 // NewLineComment starts a new review thread on a line of the MR's diff.
@@ -172,6 +191,8 @@ type Provider interface {
 	Status(ctx context.Context, repoDir, remote, id string) (Status, error)
 	// Merge merges (or arms auto-merge for) the MR identified by id.
 	Merge(ctx context.Context, repoDir, remote, id string, o MergeOptions) error
+	// Close closes the MR/PR identified by id without deleting its source branch.
+	Close(ctx context.Context, repoDir, remote, id string) error
 	// Threads returns the MR's review conversations (resolved ones included, so
 	// the caller decides what to show), each anchored to a file/line where the
 	// forge reports one.

@@ -114,6 +114,13 @@ go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
 ./hydra-desktop -project /path/to/project
 ```
 
+For Linux desktop performance investigation, add `--devtools` to enable the
+WebKit Web Inspector and its Timelines recorder. Add
+`--compositing-indicators` to draw accelerated-layer borders and repaint
+counters. The same options work with `mage runDesktopLocal` through
+`HYDRA_DESKTOP_DEVTOOLS=1` and
+`HYDRA_DESKTOP_COMPOSITING_INDICATORS=1`.
+
 For normal development, build or build-and-run the native app for the current
 operating system:
 

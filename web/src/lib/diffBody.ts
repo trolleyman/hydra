@@ -10,6 +10,7 @@
 import type { DiffFile, DiffHunk, DiffLine } from '../api'
 import { isImagePath } from './imageDiff'
 import type { BodyShape, ExpanderShape, SbsPair } from './diffMetrics'
+import { DEFAULT_DIFF_CONTEXT_LINES } from './diffPrefs'
 
 export interface SideBySideLine {
   oldLineNum: number | null
@@ -96,7 +97,7 @@ export function leadingGap(hunk: DiffHunk): number {
 // trailingGap is the one that needs help. Nothing in a windowed diff says where
 // the file ENDS, so it takes the file's total_lines - which the server fills in
 // from the full read it already does - and returns null when that is absent, the
-// signal to render the expander as a bare chevron with no count. Null and 0 are
+// signal to render only the directional action without Show all. Null and 0 are
 // therefore quite different answers: 0 means the last hunk provably reaches EOF
 // and the expander should not be there at all.
 export function trailingGap(hunk: DiffHunk, totalLines: number | undefined): number | null {
@@ -124,18 +125,14 @@ export function trailingContext(hunk: DiffHunk): number {
 // nothing below it to expand into and no expander to draw. total_lines settles
 // it exactly; without one it falls back to trailingContext's inference, which is
 // right whenever the file has more trailing context than the last hunk shows and
-// wrong (an extra chevron that expands to nothing) when it has exactly as much.
+// wrong (an extra action that expands to nothing) when it has exactly as much.
 export function atFileEnd(hunk: DiffHunk, totalLines: number | undefined, currentContext: number): boolean {
   const tail = trailingGap(hunk, totalLines)
   return tail != null ? tail === 0 : trailingContext(hunk) < currentContext
 }
 
-// Default surrounding-context lines shown around each change (mirrors the git
-// `-U3` the diff is first fetched with).
-export const CTX = 3
-
 // An unchanged run that would hide this few lines behind an expander isn't worth
-// collapsing - a "··· 1 line ···" toggle saves no vertical space and just adds a
+// collapsing - a "Show all 1 line" toggle saves no vertical space and just adds a
 // click - so show those lines inline instead.
 export const MIN_COLLAPSE_GAP = 1
 
@@ -275,12 +272,16 @@ function findContextLine(lines: DiffLine[], from: number): DiffLine | undefined 
 // buildSegments turns a fully-fetched file (every line as a diff line) plus the
 // user's per-region reveal state into a flat list of render segments: runs of
 // visible lines interleaved with collapsed-region expanders. Each unchanged run
-// between (or around) changes shows `CTX` lines next to the change by default
+// between (or around) changes shows `contextLines` next to the change by default
 // and collapses the rest behind an expander; expanders that would hide nothing
 // (short gaps, the file's true top/bottom once fully revealed) are omitted, so
 // e.g. a 1-line gap simply renders the line and the top expander vanishes at
 // line 1 / the bottom expander at EOF.
-export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderSeg[] {
+export function buildSegments(
+  fullLines: DiffLine[],
+  reveal: RevealMap,
+  contextLines: number = DEFAULT_DIFF_CONTEXT_LINES,
+): RenderSeg[] {
   const n = fullLines.length
   const runs: { change: boolean; s: number; e: number }[] = []
   let i = 0
@@ -303,8 +304,8 @@ export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderS
     const isTrail = ri === runs.length - 1
     const id = regionKey(fullLines[run.s])
     const ov = reveal.get(id)
-    const requestedTop = ov?.top ?? (isLead ? 0 : CTX)
-    const requestedBot = ov?.bot ?? (isTrail ? 0 : CTX)
+    const requestedTop = ov?.top ?? (isLead ? 0 : contextLines)
+    const requestedBot = ov?.bot ?? (isTrail ? 0 : contextLines)
     // During the expander's exit, preserve the already-visible lines on the
     // opposite side instead of merging the entire run into the growing side.
     // Otherwise that small opposite segment unmounts immediately and creates a
@@ -394,11 +395,11 @@ export function bodyShape(file: DiffFile, sideBySide: boolean, isHidden: boolean
   const runs: DiffLine[][] = []
   const expanders: ExpanderShape[] = []
   if (whole) {
-    for (const seg of buildSegments(all, NO_REVEAL)) {
-      // A gap sits between two changes and offers both directions; the file's
-      // leading/trailing edges only offer one.
+    for (const seg of buildSegments(all, NO_REVEAL, currentContext)) {
+      // A gap offers up, down and show-all; a file edge offers its one direction
+      // plus show-all.
       if (seg.kind === 'lines') runs.push(seg.lines!)
-      else expanders.push({ buttons: seg.kind === 'gap' ? 2 : 1, hidden: seg.hidden! })
+      else expanders.push({ buttons: seg.kind === 'gap' ? 3 : 2, hidden: seg.hidden! })
     }
   } else {
     hunks.forEach((hunk, i) => {
@@ -409,11 +410,14 @@ export function bodyShape(file: DiffFile, sideBySide: boolean, isHidden: boolean
       const gap = isFirst ? 0 : computeGap(hunks[i - 1], hunk)
       // The windowed path's leading expander counts what it hides from the hunk's
       // own start line; the trailing one can only do so when the file's length
-      // came with the diff, and is a bare chevron (hidden: null) otherwise.
-      if (isFirst && !atTopOfFile) expanders.push({ buttons: 1, hidden: leadingGap(hunk) || null })
-      if (!isFirst && gap > 0) expanders.push({ buttons: 2, hidden: gap })
+      // came with the diff, and has no Show all action (hidden: null) otherwise.
+      if (isFirst && !atTopOfFile) expanders.push({ buttons: 2, hidden: leadingGap(hunk) || null })
+      if (!isFirst && gap > 0) expanders.push({ buttons: 3, hidden: gap })
       runs.push(hunk.lines)
-      if (isLast && !atEndOfFile) expanders.push({ buttons: 1, hidden: trailingGap(hunk, file.total_lines) })
+      if (isLast && !atEndOfFile) {
+        const hidden = trailingGap(hunk, file.total_lines)
+        expanders.push({ buttons: hidden == null ? 1 : 2, hidden })
+      }
     })
   }
 

@@ -48,11 +48,11 @@ import (
 type QueuedMessage struct {
 	ID      string          `json:"id"`
 	Content json.RawMessage `json:"content"`
-	// Origin is why this message exists when the user did not type it (see
-	// api.ChatUserMessagePayload.origin). Empty for anything typed in the composer.
-	// Carried through the queue so a message that waits for a turn boundary is
-	// still marked as automated when it finally lands.
-	Origin string `json:"origin,omitempty"`
+	// Provenance is carried through the queue so a message that waits for a turn
+	// boundary keeps the same attribution when it becomes durable.
+	Origin        api.MessageOrigin `json:"origin,omitempty"`
+	Reason        api.MessageReason `json:"reason,omitempty"`
+	SourceAgentID string            `json:"source_agent_id,omitempty"`
 }
 
 // ChatQueue is one head's queue. All methods are safe for concurrent use.
@@ -343,14 +343,14 @@ func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) bool
 func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, queued bool) bool {
 	if queued {
 		m.queue(projectRoot, id).Enqueue(msg)
-		m.emit(id, queuedMessage(msg.ID, "queued", msg.Content, msg.Origin))
+		m.emit(id, queuedMessage(msg, "queued"))
 		m.kickIfResting(projectRoot, id)
 		return true
 	}
 	if !m.writeToStdin(id, msg.Content) {
 		return false
 	}
-	m.emit(id, userMessage(msg.ID, msg.Content, nil, msg.Origin))
+	m.emit(id, userMessage(msg, nil))
 	return true
 }
 
@@ -374,7 +374,7 @@ func (m *ChatQueueManager) SubmitShellResult(projectRoot, id, msgID string, cont
 		// A `!command` result is not typed either, but it is not a Hydra
 		// notification: the user ran the command TO feed the agent, and the card
 		// already says what it was. Origin stays empty so it renders as theirs.
-		m.emit(id, userMessage(msgID, content, shell, ""))
+		m.emit(id, userMessage(QueuedMessage{ID: msgID, Content: content}, shell))
 	}
 }
 
@@ -496,7 +496,7 @@ func (m *ChatQueueManager) drainAll(projectRoot, id string) {
 			return
 		}
 		if m.writeToStdin(id, msg.Content) {
-			m.emit(id, userMessage(msg.ID, msg.Content, nil, msg.Origin))
+			m.emit(id, userMessage(msg, nil))
 		}
 	}
 }
@@ -519,9 +519,10 @@ func (m *ChatQueueManager) OnTurnStep(id string) {
 // projection until it drains, at which point it becomes a durable user_message
 // carrying the same client id - which is what lets the browser reconcile its
 // pending bubble instead of rendering a second one.
-func queuedMessage(id, status string, content json.RawMessage, origin string) chat.QueuedMessage {
+func queuedMessage(message QueuedMessage, status string) chat.QueuedMessage {
 	queued := chat.QueuedMessage{}
-	queued.Id, queued.Status, queued.Content, queued.Origin = id, status, content, origin
+	queued.Id, queued.Status, queued.Content = message.ID, status, message.Content
+	queued.Origin, queued.Reason, queued.SourceAgentId = message.Origin, message.Reason, message.SourceAgentID
 	return queued
 }
 
@@ -534,8 +535,9 @@ func queueMessageRemoved(id string) chat.QueueMessageRemoved {
 // userMessage is the durable turn a drained (or directly sent) message becomes.
 // shell is set only for a composer "!command", whose sandboxed result rides
 // along so the chat renders a shell card rather than a bubble.
-func userMessage(id string, content json.RawMessage, shell *api.ChatShellResult, origin string) chat.UserMessage {
+func userMessage(message QueuedMessage, shell *api.ChatShellResult) chat.UserMessage {
 	msg := chat.UserMessage{}
-	msg.Id, msg.Content, msg.Shell, msg.Origin = id, content, shell, origin
+	msg.Id, msg.Content, msg.Shell = message.ID, message.Content, shell
+	msg.Origin, msg.Reason, msg.SourceAgentId = message.Origin, message.Reason, message.SourceAgentID
 	return msg
 }

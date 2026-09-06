@@ -20,6 +20,7 @@ type SendFunc func([]byte) error
 type Options struct {
 	CWD            string
 	Model          string
+	Effort         string
 	ConversationID string
 	InitialPrompt  string
 	Send           SendFunc
@@ -50,7 +51,11 @@ type Controller struct {
 	modelListID     uint64
 	threadRequestID uint64
 	readRequestID   uint64
+	revertRequestID uint64
+	rollbackID      uint64
+	recoveryInput   json.RawMessage
 	model           string
+	effort          string
 }
 
 type pendingRequest struct {
@@ -60,7 +65,7 @@ type pendingRequest struct {
 }
 
 func New(opts Options) *Controller {
-	return &Controller{opts: opts, threadID: opts.ConversationID, initialPrompt: opts.InitialPrompt, model: opts.Model, requests: map[string]pendingRequest{}}
+	return &Controller{opts: opts, threadID: opts.ConversationID, initialPrompt: opts.InitialPrompt, model: opts.Model, effort: opts.Effort, requests: map[string]pendingRequest{}}
 }
 
 func (c *Controller) nextID() uint64 { return c.seq.Add(1) }
@@ -118,6 +123,7 @@ func (c *Controller) OnLine(line []byte) {
 	}
 	c.mu.Lock()
 	initializeID, modelListID, threadRequestID, readRequestID := c.initializeID, c.modelListID, c.threadRequestID, c.readRequestID
+	revertRequestID, rollbackID := c.revertRequestID, c.rollbackID
 	c.mu.Unlock()
 	numericID, _ := strconv.ParseUint(string(msg.ID), 10, 64)
 	if msg.Error != nil {
@@ -126,6 +132,14 @@ func (c *Controller) OnLine(line []byte) {
 		// model-selection behavior rather than failing the whole chat handshake.
 		if numericID != 0 && numericID == modelListID {
 			c.startThread(c.opts.Model)
+			return
+		}
+		// thread/revert is the current recovery operation, but older app-server
+		// versions only expose the deprecated thread/rollback equivalent. Fall
+		// back when revert is unavailable (or rejects a legacy-history thread)
+		// instead of leaving the resumed head stuck on its broken final turn.
+		if numericID != 0 && numericID == revertRequestID {
+			c.rollbackBrokenTurn()
 			return
 		}
 		c.fail(fmt.Errorf("codex app-server error %d: %s", msg.Error.Code, msg.Error.Message))
@@ -192,11 +206,13 @@ func (c *Controller) OnLine(line []byte) {
 		c.mu.Unlock()
 		c.drainPending()
 	case msg.Method == "" && numericID != 0 && numericID == readRequestID:
-		c.emitThreadHistory(msg.Result)
-		c.mu.Lock()
-		c.threadReady = true
-		c.mu.Unlock()
-		c.drainPending()
+		if broken := c.emitThreadHistory(msg.Result); broken != nil {
+			c.recoverBrokenTurn(*broken)
+			return
+		}
+		c.finishResume()
+	case msg.Method == "" && numericID != 0 && (numericID == revertRequestID || numericID == rollbackID):
+		c.finishResume()
 	case msg.Method == "turn/started":
 		var params struct {
 			Turn struct {
@@ -357,7 +373,10 @@ func firstQuestion(raw json.RawMessage) string {
 // use this helper so they always show the same authored description.
 func CommandDescription(command string) string {
 	script := strings.TrimSpace(command)
-	for _, launcher := range []string{"bash -lc ", "bash -c ", "/bin/bash -lc ", "/bin/bash -c ", "/usr/bin/bash -lc ", "/usr/bin/bash -c "} {
+	for _, launcher := range []string{
+		"bash -lc ", "bash -c ", "/bin/bash -lc ", "/bin/bash -c ", "/usr/bin/bash -lc ", "/usr/bin/bash -c ",
+		"zsh -lc ", "zsh -c ", "/bin/zsh -lc ", "/bin/zsh -c ", "/usr/bin/zsh -lc ", "/usr/bin/zsh -c ",
+	} {
 		if strings.HasPrefix(script, launcher) {
 			script = strings.TrimSpace(strings.TrimPrefix(script, launcher))
 			if len(script) >= 2 && (script[0] == '\'' || script[0] == '"') && script[len(script)-1] == script[0] {
@@ -531,26 +550,143 @@ func (c *Controller) drainPending() {
 	}
 }
 
-func (c *Controller) emitThreadHistory(raw json.RawMessage) {
-	if c.opts.OnHistoryLine == nil {
-		return
-	}
+type historyItem struct {
+	Type    string          `json:"type"`
+	Status  string          `json:"status"`
+	Content json.RawMessage `json:"content"`
+}
+
+type historyTurn struct {
+	ID     string            `json:"id"`
+	Status string            `json:"status"`
+	Items  []json.RawMessage `json:"items"`
+}
+
+type brokenTurn struct {
+	id        string
+	input     json.RawMessage
+	paginated bool
+}
+
+// emitThreadHistory imports the settled prefix of a resumed thread. If its
+// final turn was cut off during an executable tool call, that turn is excluded
+// and returned for repair: replaying it into a new model request would otherwise
+// retain a function call with no output and dead unified-exec process ids.
+func (c *Controller) emitThreadHistory(raw json.RawMessage) *brokenTurn {
 	var result struct {
 		Thread struct {
-			Turns []struct {
-				Items []json.RawMessage `json:"items"`
-			} `json:"turns"`
+			HistoryMode string        `json:"historyMode"`
+			Turns       []historyTurn `json:"turns"`
 		} `json:"thread"`
 	}
 	if json.Unmarshal(raw, &result) != nil {
-		return
+		return nil
 	}
-	for _, turn := range result.Thread.Turns {
+	turns := result.Thread.Turns
+	var broken *brokenTurn
+	if len(turns) > 0 && interruptedToolTurn(turns[len(turns)-1]) {
+		last := turns[len(turns)-1]
+		broken = &brokenTurn{id: last.ID, input: turnUserInput(last), paginated: result.Thread.HistoryMode == "paginated"}
+		turns = turns[:len(turns)-1]
+	}
+	if c.opts.OnHistoryLine == nil {
+		return broken
+	}
+	for _, turn := range turns {
 		for _, item := range turn.Items {
 			line, _ := json.Marshal(map[string]any{"method": "item/completed", "params": map[string]any{"item": json.RawMessage(item)}})
 			c.opts.OnHistoryLine(line)
 		}
 	}
+	return broken
+}
+
+func interruptedToolTurn(turn historyTurn) bool {
+	if turn.Status == "inProgress" {
+		return true
+	}
+	for _, raw := range turn.Items {
+		var item historyItem
+		if json.Unmarshal(raw, &item) != nil || item.Status != "inProgress" {
+			continue
+		}
+		switch item.Type {
+		case "commandExecution", "command_execution", "fileChange", "file_change", "mcpToolCall", "dynamicToolCall", "collabToolCall", "collabAgentToolCall", "imageGeneration":
+			return true
+		}
+	}
+	return false
+}
+
+func turnUserInput(turn historyTurn) json.RawMessage {
+	var contents []json.RawMessage
+	for _, raw := range turn.Items {
+		var item historyItem
+		if json.Unmarshal(raw, &item) == nil && (item.Type == "userMessage" || item.Type == "user_message") && len(item.Content) > 0 {
+			contents = append(contents, item.Content)
+		}
+	}
+	return combineContent(contents...)
+}
+
+func combineContent(contents ...json.RawMessage) json.RawMessage {
+	var combined []json.RawMessage
+	for _, content := range contents {
+		var blocks []json.RawMessage
+		if len(content) == 0 || json.Unmarshal(content, &blocks) != nil {
+			continue
+		}
+		combined = append(combined, blocks...)
+	}
+	if len(combined) == 0 {
+		return nil
+	}
+	return mustJSON(combined)
+}
+
+func (c *Controller) recoverBrokenTurn(turn brokenTurn) {
+	c.mu.Lock()
+	c.recoveryInput = combineContent(c.recoveryInput, turn.input)
+	threadID := c.threadID
+	c.mu.Unlock()
+
+	if turn.paginated {
+		id, err := c.send("thread/revert", map[string]any{"threadId": threadID, "beforeTurnId": turn.id})
+		if err != nil {
+			c.fail(err)
+			return
+		}
+		c.mu.Lock()
+		c.revertRequestID = id
+		c.mu.Unlock()
+		return
+	}
+	c.rollbackBrokenTurn()
+}
+
+func (c *Controller) rollbackBrokenTurn() {
+	c.mu.Lock()
+	threadID := c.threadID
+	c.revertRequestID = 0
+	c.mu.Unlock()
+	id, err := c.send("thread/rollback", map[string]any{"threadId": threadID, "numTurns": 1})
+	if err != nil {
+		c.fail(err)
+		return
+	}
+	c.mu.Lock()
+	c.rollbackID = id
+	c.mu.Unlock()
+}
+
+func (c *Controller) finishResume() {
+	c.mu.Lock()
+	c.threadReady = true
+	c.readRequestID = 0
+	c.revertRequestID = 0
+	c.rollbackID = 0
+	c.mu.Unlock()
+	c.drainPending()
 }
 
 func requestKey(id json.RawMessage) string {
@@ -569,6 +705,16 @@ func (c *Controller) SendText(text string) error {
 // turn input. Text is supported directly; unknown blocks become explicit text
 // rather than disappearing silently.
 func (c *Controller) SendUser(content json.RawMessage) error {
+	c.mu.Lock()
+	threadID, turnID, ready, model, effort := c.threadID, c.turnID, c.threadReady, c.model, c.effort
+	if threadID == "" || !ready {
+		c.pending = append(c.pending, append(json.RawMessage(nil), content...))
+		c.mu.Unlock()
+		return nil
+	}
+	content = combineContent(c.recoveryInput, content)
+	c.recoveryInput = nil
+	c.mu.Unlock()
 	var blocks []map[string]any
 	if err := json.Unmarshal(content, &blocks); err != nil {
 		return errtrace.Wrap(err)
@@ -587,14 +733,6 @@ func (c *Controller) SendUser(content json.RawMessage) error {
 	if len(input) == 0 {
 		return errtrace.Wrap(fmt.Errorf("empty Codex turn input"))
 	}
-	c.mu.Lock()
-	threadID, turnID, ready, model := c.threadID, c.turnID, c.threadReady, c.model
-	if threadID == "" || !ready {
-		c.pending = append(c.pending, append(json.RawMessage(nil), content...))
-		c.mu.Unlock()
-		return nil
-	}
-	c.mu.Unlock()
 	if turnID != "" {
 		_, err := c.send("turn/steer", map[string]any{
 			"threadId":       threadID,
@@ -606,6 +744,9 @@ func (c *Controller) SendUser(content json.RawMessage) error {
 	params := map[string]any{"threadId": threadID, "input": input}
 	if model != "" {
 		params["model"] = model
+	}
+	if effort != "" {
+		params["effort"] = effort
 	}
 	_, err := c.send("turn/start", params)
 	return errtrace.Wrap(err)

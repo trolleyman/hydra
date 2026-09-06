@@ -62,11 +62,10 @@ Main-bundle bytes on the wire, and the resulting binary:
 | minified + maps, runtime gzip only | 122 KB | 49.9 MB |
 | **minified + maps, precompressed** | **105 KB brotli / 122 KB gzip** | **~42 MB** |
 
-Because there is one flavour, `HYDRA_DEV_BUILD` does not exist. That removed a
-live trap as much as a branch: heads inherit the daemon's environment, so an
-agent running `mage build` under a `mage dev` daemon silently produced a
-development frontend, and a `mage deploy:service` from such a shell would have
-installed one as prod.
+Because there is one flavour, `HYDRA_DEV_BUILD` does not exist. Its removal also
+eliminates the old failure mode where broad daemon-environment inheritance let
+an agent running `mage build` under a `mage dev` daemon silently produce a
+development frontend, which `mage deploy:service` could then install as prod.
 
 ### Compression
 

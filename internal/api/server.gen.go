@@ -289,6 +289,22 @@ const (
 	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
 )
 
+// Defines values for MessageOrigin.
+const (
+	MessageOriginAgent  MessageOrigin = "agent"
+	MessageOriginButton MessageOrigin = "button"
+	MessageOriginHydra  MessageOrigin = "hydra"
+)
+
+// Defines values for MessageReason.
+const (
+	MessageReasonFixTest        MessageReason = "fix_test"
+	MessageReasonReviewComments MessageReason = "review_comments"
+	MessageReasonReviewMention  MessageReason = "review_mention"
+	MessageReasonReviewThread   MessageReason = "review_thread"
+	MessageReasonTestsFailed    MessageReason = "tests_failed"
+)
+
 // Defines values for MessagesRetractedEventType.
 const (
 	MessagesRetracted MessagesRetractedEventType = "messages_retracted"
@@ -442,6 +458,15 @@ const (
 // Defines values for ShellCwdEventType.
 const (
 	ShellCwd ShellCwdEventType = "shell_cwd"
+)
+
+// Defines values for SpawnAgentRequestEffort.
+const (
+	High   SpawnAgentRequestEffort = "high"
+	Low    SpawnAgentRequestEffort = "low"
+	Max    SpawnAgentRequestEffort = "max"
+	Medium SpawnAgentRequestEffort = "medium"
+	Xhigh  SpawnAgentRequestEffort = "xhigh"
 )
 
 // Defines values for StatusResponseBackendLifetime.
@@ -640,8 +665,11 @@ type AgentConfig struct {
 
 // AgentInputRequest defines model for AgentInputRequest.
 type AgentInputRequest struct {
-	// Origin Why this message exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-	Origin *string `json:"origin,omitempty"`
+	// Origin Who caused a user-shaped message to be sent when it was not typed in the composer.
+	Origin *MessageOrigin `json:"origin,omitempty"`
+
+	// Reason The action or event that caused a non-composer message.
+	Reason *MessageReason `json:"reason,omitempty"`
 
 	// Text Text to send to the agent's stdin (a newline is appended automatically)
 	Text string `json:"text"`
@@ -790,6 +818,16 @@ type AgentTestsChangedEvent struct {
 // AgentTestsChangedEventType defines model for AgentTestsChangedEvent.Type.
 type AgentTestsChangedEventType string
 
+// ApplyReviewSuggestionsRequest defines model for ApplyReviewSuggestionsRequest.
+type ApplyReviewSuggestionsRequest struct {
+	Numbers []int `json:"numbers"`
+}
+
+// ApplyReviewSuggestionsResponse defines model for ApplyReviewSuggestionsResponse.
+type ApplyReviewSuggestionsResponse struct {
+	Applied []int `json:"applied"`
+}
+
 // ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
 type ApprovalDecisionRequest struct {
 	// Command For a host_command approval only: the exact command text the UI displayed and the user approved. The daemon runs THIS text verbatim (never re-reading the head-writable request file), which closes the TOCTOU window where an agent could swap the command after the user saw it. Ignored for every other kind.
@@ -798,7 +836,10 @@ type ApprovalDecisionRequest struct {
 	// Decision The user's verdict for the parked tool call
 	Decision ApprovalDecisionRequestDecision `json:"decision"`
 
-	// Remember When true and decision is allow, persist the server/host to the trusted config's allow-list so future launches don't ask again
+	// Path For a filesystem_read approval only: the canonical host path the UI displayed and the user approved. The daemon grants this echoed path, never the target in the agent-writable request file.
+	Path *string `json:"path,omitempty"`
+
+	// Remember When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again
 	Remember *bool `json:"remember,omitempty"`
 }
 
@@ -818,7 +859,7 @@ type ApprovalRequest struct {
 	// Description The agent's own explanation of what it is asking for and why it needs to happen outside the sandbox (`hydra host-run --why`). Shown above the command in the approval card, so the user judges a stated intent rather than reverse-engineering one from a shell script.
 	Description *string `json:"description"`
 
-	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', or 'host_command' (run a command on the host, outside the sandbox)
+	// Kind What is being approved: 'mcp', 'mcp_tool', 'webfetch', 'egress', 'bash', 'host_command' (run a command on the host, outside the sandbox), or 'filesystem_read' (mount a host path read-only)
 	Kind string `json:"kind"`
 
 	// Reason One-line explanation of why the gate parked the call
@@ -1400,6 +1441,9 @@ type ChatPlanUpdatedPayload struct {
 
 // ChatProjection Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
 type ChatProjection struct {
+	// ApiKeySource Claude's authentication source from system:init. "none" means subscription auth, so turn footers hide the client-estimated API cost. Persisted because system:init can scroll outside the newest history page.
+	ApiKeySource string `json:"api_key_source,omitempty"`
+
 	// Head The Git HEAD the commit reconciler last observed.
 	Head        string                     `json:"head,omitempty"`
 	Imports     map[string]int64           `json:"imports,omitempty"`
@@ -1479,8 +1523,14 @@ type ChatQueuedMessage struct {
 	// Id The client-generated id, used to reconcile the pending bubble.
 	Id string `json:"id"`
 
-	// Origin Why this message exists when the user did not type it.
-	Origin string `json:"origin,omitempty"`
+	// Origin Who caused this message when it was not typed in the composer.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
 }
 
 // ChatQueuedMessagePayload A message the daemon is holding because a turn was running. It lives in the queue projection only; when it drains it becomes a durable user_message carrying the same id.
@@ -1488,9 +1538,15 @@ type ChatQueuedMessagePayload struct {
 	Content json.RawMessage `json:"content,omitempty"`
 	Id      string          `json:"id,omitempty"`
 
-	// Origin Why this message exists when the user did not type it.
-	Origin string `json:"origin,omitempty"`
-	Status string `json:"status,omitempty"`
+	// Origin Who caused this message when it was not typed in the composer.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
+	Status        string `json:"status,omitempty"`
 }
 
 // ChatQueuedState defines model for ChatQueuedState.
@@ -1696,11 +1752,17 @@ type ChatUserMessagePayload struct {
 	// Id The client-generated id, so a queued bubble reconciles to it.
 	Id string `json:"id,omitempty"`
 
-	// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-	Origin string `json:"origin,omitempty"`
+	// Origin Who caused this turn when it was not typed in the composer. Drives the chat's attribution marker; the agent sees only the text.
+	Origin MessageOrigin `json:"origin,omitempty"`
+
+	// Reason Optional context for the button action or Hydra automation.
+	Reason MessageReason `json:"reason,omitempty"`
 
 	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
 	Shell *ChatShellResult `json:"shell,omitempty"`
+
+	// SourceAgentId The sending head when origin is "agent".
+	SourceAgentId string `json:"source_agent_id,omitempty"`
 }
 
 // ClaudeUsageResponse defines model for ClaudeUsageResponse.
@@ -1744,19 +1806,19 @@ type CodexUsageResponse struct {
 	// Error Why usage is unavailable (CLI missing, unsupported authentication, parse failure, ...).
 	Error *string `json:"error"`
 
-	// SessionPercentUsed Percent of the primary Codex rate-limit window used (0-100).
+	// SessionPercentUsed Percent used (0-100) for the shortest Codex rate-limit window shorter than one week, when available across the account's limit groups.
 	SessionPercentUsed *float32 `json:"session_percent_used"`
 
-	// SessionResetText Display label for the primary Codex rate-limit window.
+	// SessionResetText Display label for the selected short Codex rate-limit window.
 	SessionResetText *string `json:"session_reset_text"`
 
-	// SessionResetsAt When the primary Codex rate-limit window resets.
+	// SessionResetsAt When the selected short Codex rate-limit window resets.
 	SessionResetsAt *time.Time `json:"session_resets_at"`
 
-	// WeeklyPercentUsed Percent of the secondary Codex rate-limit window used (0-100), when available.
+	// WeeklyPercentUsed Percent used (0-100) for the shortest week-or-longer Codex window, choosing the most constrained matching limit group.
 	WeeklyPercentUsed *float32 `json:"weekly_percent_used"`
 
-	// WeeklyResetText Display label for the secondary Codex rate-limit window.
+	// WeeklyResetText Display label for the selected week-or-longer Codex rate-limit window.
 	WeeklyResetText *string `json:"weekly_reset_text"`
 }
 
@@ -2051,7 +2113,7 @@ type DiffFile struct {
 	// Path File path (new path for renamed files)
 	Path string `json:"path"`
 
-	// TotalLines Total number of lines in the whole file on the head side (the old side for a deletion), when the server knows it. A windowed file carries only fragments, so this is the one thing the client cannot derive from the hunks - and without it the expander below the last hunk cannot say how many lines it hides. Absent when the file was never read in full (its change count exceeded max_full_changes, or the full-context read failed), in which case that expander stays a bare chevron.
+	// TotalLines Total number of lines in the whole file on the head side (the old side for a deletion), when the server knows it. A windowed file carries only fragments, so this is the one thing the client cannot derive from the hunks - and without it the expander below the last hunk cannot say how many lines it hides. Absent when the file was never read in full (its change count exceeded max_full_changes, or the full-context read failed), in which case that expander stays a directional action without a Show all action.
 	TotalLines *int `json:"total_lines,omitempty"`
 }
 
@@ -2345,6 +2407,12 @@ type MergeConflictError struct {
 
 // MergeConflictErrorError defines model for MergeConflictError.Error.
 type MergeConflictErrorError string
+
+// MessageOrigin Who caused a user-shaped message to be sent when it was not typed in the composer.
+type MessageOrigin string
+
+// MessageReason The action or event that caused a non-composer message.
+type MessageReason string
 
 // MessagesRetractedEvent defines model for MessagesRetractedEvent.
 type MessagesRetractedEvent struct {
@@ -3391,6 +3459,14 @@ type ReviewState struct {
 	UnresolvedDiscussions *int   `json:"unresolved_discussions,omitempty"`
 }
 
+// ReviewSuggestion A replacement proposed by a forge comment for its anchored line range.
+type ReviewSuggestion struct {
+	Applied     bool   `json:"applied"`
+	EndLine     int    `json:"end_line"`
+	Replacement string `json:"replacement"`
+	StartLine   int    `json:"start_line"`
+}
+
 // ReviewThread One review conversation, anchored to a file/line where the forge reports one.
 type ReviewThread struct {
 	// Id Thread handle used for replies (GitHub - the root comment id; GitLab - the discussion id).
@@ -3408,8 +3484,11 @@ type ReviewThread struct {
 	Resolved *bool `json:"resolved,omitempty"`
 
 	// ResolvedLocally Resolved in Hydra only - the forge still shows it open, because Hydra never writes a resolve to a PR.
-	ResolvedLocally *bool   `json:"resolved_locally,omitempty"`
-	Url             *string `json:"url,omitempty"`
+	ResolvedLocally *bool `json:"resolved_locally,omitempty"`
+
+	// StartLine First NEW-side line covered by the comment. Omitted for a single-line comment.
+	StartLine *int    `json:"start_line,omitempty"`
+	Url       *string `json:"url,omitempty"`
 }
 
 // ReviewThreadNote One comment in a review thread. Local notes never reach the forge.
@@ -3428,7 +3507,10 @@ type ReviewThreadNote struct {
 	// Origin "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
 	Origin ReviewThreadNoteOrigin `json:"origin"`
 	Read   *bool                  `json:"read,omitempty"`
-	Url    *string                `json:"url,omitempty"`
+
+	// Suggestion A replacement proposed by a forge comment for its anchored line range.
+	Suggestion *ReviewSuggestion `json:"suggestion,omitempty"`
+	Url        *string           `json:"url,omitempty"`
 }
 
 // ReviewThreadNoteOrigin "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
@@ -3456,10 +3538,27 @@ type ReviewThreadsResponse struct {
 	Threads []ReviewThread `json:"threads"`
 }
 
+// SandboxCacheConfig One project-scoped cache; exactly one of env or path must be set
+type SandboxCacheConfig struct {
+	// Env Environment variable redirected to the cache directory
+	Env *string `json:"env"`
+
+	// Path Worktree-relative path linked to the cache directory
+	Path *string `json:"path"`
+}
+
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
 type SandboxConfig struct {
+	// Cache Project-scoped writable caches shared by matching heads and sandboxed runners. Each key owns a stable directory in Hydra project state; env redirects a cache variable and path links a worktree-relative ignored path.
+	Cache *map[string]SandboxCacheConfig `json:"cache"`
+
 	// CowPaths Paths mounted copy-on-write. The agent reads the real files and may overwrite them, but writes are kept per-head and never touch the source. A worktree-relative entry (pipeline/out) is mirrored from the project root into the worktree; a home/absolute entry (~/.gradle, /opt/cache), resolved against HOME, is overlaid in place and supersedes any default writable bind on it. For large gitignored build dirs or shared tool caches too big to copy. On Linux needs an overlay-capable bwrap.
-	CowPaths    *[]string      `json:"cow_paths"`
+	CowPaths *[]string `json:"cow_paths"`
+
+	// InheritEnv Additional daemon environment variable names passed into heads. Additive across config layers; values are resolved at launch and are never stored. Hydra-owned names, including every HYDRA_* variable, cannot be inherited.
+	InheritEnv *[]string `json:"inherit_env"`
+
+	// MaskedPaths Defense-in-depth denied paths. Additive across config layers and applied after every read/write allowance.
 	MaskedPaths *[]string      `json:"masked_paths"`
 	Network     *NetworkConfig `json:"network,omitempty"`
 
@@ -3467,9 +3566,11 @@ type SandboxConfig struct {
 	PreExitScript *string `json:"pre_exit_script"`
 
 	// PreSpawnScript Bash script run inside the sandbox before every agent launch - both spawn and resume - so it must be idempotent. Not run for bash shells (e.g. `mise trust`)
-	PreSpawnScript *string   `json:"pre_spawn_script"`
-	RestoreRo      *[]string `json:"restore_ro"`
-	WritablePaths  *[]string `json:"writable_paths"`
+	PreSpawnScript *string `json:"pre_spawn_script"`
+
+	// ReadablePaths Extra host paths exposed read-only. Additive across config layers and always narrowed by masked_paths.
+	ReadablePaths *[]string `json:"readable_paths"`
+	WritablePaths *[]string `json:"writable_paths"`
 }
 
 // SandboxedScriptDefinition defines model for SandboxedScriptDefinition.
@@ -3666,6 +3767,9 @@ type SpawnAgentRequest struct {
 	// Cols Initial PTY width (columns), seeded from the spawning browser's last terminal geometry so the agent renders at the right width immediately instead of the 80-column default. When omitted, the server falls back to the project's most recently reported width (else 80).
 	Cols *int `json:"cols,omitempty"`
 
+	// Effort Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+	Effort *SpawnAgentRequestEffort `json:"effort,omitempty"`
+
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
@@ -3693,6 +3797,9 @@ type SpawnAgentRequest struct {
 	// WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
 	WorkspaceKind *WorkspaceKind `json:"workspace_kind,omitempty"`
 }
+
+// SpawnAgentRequestEffort Thinking/reasoning effort for Claude or Codex. Passed through the provider's native launch or structured-chat protocol on a fresh session; empty/omitted inherits the provider and model default.
+type SpawnAgentRequestEffort string
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
@@ -4583,16 +4690,22 @@ type UserMessageEvent struct {
 		// Id The client-generated id, so a queued bubble reconciles to it.
 		Id string `json:"id,omitempty"`
 
-		// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
-		Origin string `json:"origin,omitempty"`
+		// Origin Who caused this turn when it was not typed in the composer. Drives the chat's attribution marker; the agent sees only the text.
+		Origin MessageOrigin `json:"origin,omitempty"`
 
 		// ParentItemId The tool call this belongs under.
 		ParentItemId string `json:"parent_item_id,omitempty"`
 
+		// Reason Optional context for the button action or Hydra automation.
+		Reason MessageReason `json:"reason,omitempty"`
+
 		// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
-		Shell      *ChatShellResult `json:"shell,omitempty"`
-		Sidechain  bool             `json:"sidechain,omitempty"`
-		StopReason string           `json:"stop_reason,omitempty"`
+		Shell     *ChatShellResult `json:"shell,omitempty"`
+		Sidechain bool             `json:"sidechain,omitempty"`
+
+		// SourceAgentId The sending head when origin is "agent".
+		SourceAgentId string `json:"source_agent_id,omitempty"`
+		StopReason    string `json:"stop_reason,omitempty"`
 
 		// Usage Provider token accounting; the shape differs per provider.
 		Usage json.RawMessage `json:"usage,omitempty"`
@@ -4612,6 +4725,26 @@ type UserMessageEvent struct {
 
 // UserMessageEventType defines model for UserMessageEvent.Type.
 type UserMessageEventType string
+
+// ViewedDiffRequest defines model for ViewedDiffRequest.
+type ViewedDiffRequest struct {
+	Context            *int  `json:"context,omitempty"`
+	FullContext        *bool `json:"full_context,omitempty"`
+	IgnoreWhitespace   *bool `json:"ignore_whitespace,omitempty"`
+	IncludeUncommitted *bool `json:"include_uncommitted,omitempty"`
+	MaxFullChanges     *int  `json:"max_full_changes,omitempty"`
+	MaxFullLines       *int  `json:"max_full_lines,omitempty"`
+
+	// ViewedBlobs File path to the blob SHA recorded when that file was marked viewed.
+	ViewedBlobs map[string]string `json:"viewed_blobs"`
+}
+
+// ViewedDiffResponse defines model for ViewedDiffResponse.
+type ViewedDiffResponse struct {
+	// FailedPaths Paths whose saved blob is unavailable or whose delta could not be produced.
+	FailedPaths []string   `json:"failed_paths"`
+	Files       []DiffFile `json:"files"`
+}
 
 // WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
 type WorkspaceKind string
@@ -4671,6 +4804,9 @@ type GetAgentDiffParams struct {
 
 	// Path Only return the diff for this specific file path
 	Path *string `form:"path,omitempty" json:"path,omitempty"`
+
+	// ViewedBlobSha With path, compare the file version previously marked viewed to its current head-side content. This returns only changes made after that review baseline. The blob must still exist in the repository.
+	ViewedBlobSha *string `form:"viewed_blob_sha,omitempty" json:"viewed_blob_sha,omitempty"`
 
 	// Context Number of lines of context to show (defaults to 3)
 	Context *int `form:"context,omitempty" json:"context,omitempty"`
@@ -4900,6 +5036,9 @@ type UpdateAgentJSONRequestBody = UpdateAgentRequest
 // DecideAgentApprovalJSONRequestBody defines body for DecideAgentApproval for application/json ContentType.
 type DecideAgentApprovalJSONRequestBody = ApprovalDecisionRequest
 
+// GetAgentViewedDiffJSONRequestBody defines body for GetAgentViewedDiff for application/json ContentType.
+type GetAgentViewedDiffJSONRequestBody = ViewedDiffRequest
+
 // SetDownstreamBranchJSONRequestBody defines body for SetDownstreamBranch for application/json ContentType.
 type SetDownstreamBranchJSONRequestBody SetDownstreamBranchJSONBody
 
@@ -4923,6 +5062,9 @@ type UpdateReviewCommentJSONRequestBody = UpdateReviewCommentBody
 
 // ResolveReviewCommentJSONRequestBody defines body for ResolveReviewComment for application/json ContentType.
 type ResolveReviewCommentJSONRequestBody = ResolveReviewCommentBody
+
+// ApplyReviewSuggestionsJSONRequestBody defines body for ApplyReviewSuggestions for application/json ContentType.
+type ApplyReviewSuggestionsJSONRequestBody = ApplyReviewSuggestionsRequest
 
 // CreateReviewCommentJSONRequestBody defines body for CreateReviewComment for application/json ContentType.
 type CreateReviewCommentJSONRequestBody = NewReviewCommentRequest
@@ -7270,6 +7412,9 @@ type ServerInterface interface {
 	// Get the list of changed files for an agent's branch
 	// (GET /api/projects/{project_id}/agents/{agent_id}/diff-files)
 	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentDiffFilesParams)
+	// Get changes made after files were marked viewed
+	// (POST /api/projects/{project_id}/agents/{agent_id}/diff/viewed)
+	GetAgentViewedDiff(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{agent_id}/downstream-branch)
 	SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -7306,6 +7451,9 @@ type ServerInterface interface {
 	// Arm automatic publishing - auto-open after tests / auto-push linked heads
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
 	ArmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmAutoPushParams)
+	// Close a head's linked MR/PR and detach it from the head
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/close)
+	CloseReview(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -7348,6 +7496,9 @@ type ServerInterface interface {
 	// Resolve (or reopen) a review comment by its number
 	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve)
 	ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int)
+	// Apply one or more review suggestions to a head's worktree
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply)
+	ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// The review threads on this head's MR, for the diff viewer
 	// (GET /api/projects/{project_id}/agents/{agent_id}/review/threads)
 	GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -8034,6 +8185,14 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// ------------- Optional query parameter "viewed_blob_sha" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "viewed_blob_sha", r.URL.Query(), &params.ViewedBlobSha)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "viewed_blob_sha", Err: err})
+		return
+	}
+
 	// ------------- Optional query parameter "context" -------------
 
 	err = runtime.BindQueryParameter("form", true, false, "context", r.URL.Query(), &params.Context)
@@ -8129,6 +8288,40 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAgentDiffFiles(w, r, projectId, agentId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentViewedDiff operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentViewedDiff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentViewedDiff(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8651,6 +8844,40 @@ func (siw *ServerInterfaceWrapper) ArmAutoPush(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// CloseReview operation middleware
+func (siw *ServerInterfaceWrapper) CloseReview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CloseReview(w, r, projectId, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PullFromMr operation middleware
 func (siw *ServerInterfaceWrapper) PullFromMr(w http.ResponseWriter, r *http.Request) {
 
@@ -9145,6 +9372,40 @@ func (siw *ServerInterfaceWrapper) ResolveReviewComment(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResolveReviewComment(w, r, projectId, agentId, number)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyReviewSuggestions operation middleware
+func (siw *ServerInterfaceWrapper) ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyReviewSuggestions(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10442,6 +10703,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/commits", wrapper.GetAgentCommits)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff-files", wrapper.GetAgentDiffFiles)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff/viewed", wrapper.GetAgentViewedDiff)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/downstream-branch", wrapper.SetDownstreamBranch)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/generate-title", wrapper.GenerateAgentTitle)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/input", wrapper.SendAgentInput)
@@ -10454,6 +10716,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish", wrapper.PublishAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.DisarmAutoPush)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.ArmAutoPush)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/close", wrapper.CloseReview)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/pull", wrapper.PullFromMr)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/push", wrapper.PushToMr)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/purge", wrapper.PurgeAgent)
@@ -10468,6 +10731,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}", wrapper.DeleteReviewComment)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}", wrapper.UpdateReviewComment)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve", wrapper.ResolveReviewComment)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply", wrapper.ApplyReviewSuggestions)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.GetReviewThreads)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.CreateReviewComment)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply", wrapper.ReplyToReviewThread)
@@ -11179,6 +11443,43 @@ func (response GetAgentDiffFiles500JSONResponse) VisitGetAgentDiffFilesResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetAgentViewedDiffRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+	Body      *GetAgentViewedDiffJSONRequestBody
+}
+
+type GetAgentViewedDiffResponseObject interface {
+	VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error
+}
+
+type GetAgentViewedDiff200JSONResponse ViewedDiffResponse
+
+func (response GetAgentViewedDiff200JSONResponse) VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentViewedDiff404JSONResponse ErrorResponse
+
+func (response GetAgentViewedDiff404JSONResponse) VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentViewedDiff500JSONResponse ErrorResponse
+
+func (response GetAgentViewedDiff500JSONResponse) VisitGetAgentViewedDiffResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SetDownstreamBranchRequestObject struct {
 	ProjectId string `json:"project_id"`
 	AgentId   string `json:"agent_id"`
@@ -11671,6 +11972,51 @@ func (response ArmAutoPush404JSONResponse) VisitArmAutoPushResponse(w http.Respo
 type ArmAutoPush500JSONResponse ErrorResponse
 
 func (response ArmAutoPush500JSONResponse) VisitArmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReviewRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+}
+
+type CloseReviewResponseObject interface {
+	VisitCloseReviewResponse(w http.ResponseWriter) error
+}
+
+type CloseReview200JSONResponse AgentResponse
+
+func (response CloseReview200JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview400JSONResponse ErrorResponse
+
+func (response CloseReview400JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview404JSONResponse ErrorResponse
+
+func (response CloseReview404JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CloseReview500JSONResponse ErrorResponse
+
+func (response CloseReview500JSONResponse) VisitCloseReviewResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -12225,6 +12571,43 @@ func (response ResolveReviewComment400JSONResponse) VisitResolveReviewCommentRes
 type ResolveReviewComment404JSONResponse ErrorResponse
 
 func (response ResolveReviewComment404JSONResponse) VisitResolveReviewCommentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ApplyReviewSuggestionsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+	Body      *ApplyReviewSuggestionsJSONRequestBody
+}
+
+type ApplyReviewSuggestionsResponseObject interface {
+	VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error
+}
+
+type ApplyReviewSuggestions200JSONResponse ApplyReviewSuggestionsResponse
+
+func (response ApplyReviewSuggestions200JSONResponse) VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ApplyReviewSuggestions400JSONResponse ErrorResponse
+
+func (response ApplyReviewSuggestions400JSONResponse) VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ApplyReviewSuggestions404JSONResponse ErrorResponse
+
+func (response ApplyReviewSuggestions404JSONResponse) VisitApplyReviewSuggestionsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
@@ -13465,6 +13848,9 @@ type StrictServerInterface interface {
 	// Get the list of changed files for an agent's branch
 	// (GET /api/projects/{project_id}/agents/{agent_id}/diff-files)
 	GetAgentDiffFiles(ctx context.Context, request GetAgentDiffFilesRequestObject) (GetAgentDiffFilesResponseObject, error)
+	// Get changes made after files were marked viewed
+	// (POST /api/projects/{project_id}/agents/{agent_id}/diff/viewed)
+	GetAgentViewedDiff(ctx context.Context, request GetAgentViewedDiffRequestObject) (GetAgentViewedDiffResponseObject, error)
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{agent_id}/downstream-branch)
 	SetDownstreamBranch(ctx context.Context, request SetDownstreamBranchRequestObject) (SetDownstreamBranchResponseObject, error)
@@ -13501,6 +13887,9 @@ type StrictServerInterface interface {
 	// Arm automatic publishing - auto-open after tests / auto-push linked heads
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
 	ArmAutoPush(ctx context.Context, request ArmAutoPushRequestObject) (ArmAutoPushResponseObject, error)
+	// Close a head's linked MR/PR and detach it from the head
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/close)
+	CloseReview(ctx context.Context, request CloseReviewRequestObject) (CloseReviewResponseObject, error)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(ctx context.Context, request PullFromMrRequestObject) (PullFromMrResponseObject, error)
@@ -13543,6 +13932,9 @@ type StrictServerInterface interface {
 	// Resolve (or reopen) a review comment by its number
 	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve)
 	ResolveReviewComment(ctx context.Context, request ResolveReviewCommentRequestObject) (ResolveReviewCommentResponseObject, error)
+	// Apply one or more review suggestions to a head's worktree
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/suggestions/apply)
+	ApplyReviewSuggestions(ctx context.Context, request ApplyReviewSuggestionsRequestObject) (ApplyReviewSuggestionsResponseObject, error)
 	// The review threads on this head's MR, for the diff viewer
 	// (GET /api/projects/{project_id}/agents/{agent_id}/review/threads)
 	GetReviewThreads(ctx context.Context, request GetReviewThreadsRequestObject) (GetReviewThreadsResponseObject, error)
@@ -14192,6 +14584,40 @@ func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// GetAgentViewedDiff operation middleware
+func (sh *strictHandler) GetAgentViewedDiff(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request GetAgentViewedDiffRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	var body GetAgentViewedDiffJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentViewedDiff(ctx, request.(GetAgentViewedDiffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentViewedDiff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentViewedDiffResponseObject); ok {
+		if err := validResponse.VisitGetAgentViewedDiffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SetDownstreamBranch operation middleware
 func (sh *strictHandler) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request SetDownstreamBranchRequestObject
@@ -14537,6 +14963,33 @@ func (sh *strictHandler) ArmAutoPush(w http.ResponseWriter, r *http.Request, pro
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ArmAutoPushResponseObject); ok {
 		if err := validResponse.VisitArmAutoPushResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CloseReview operation middleware
+func (sh *strictHandler) CloseReview(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request CloseReviewRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CloseReview(ctx, request.(CloseReviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CloseReview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CloseReviewResponseObject); ok {
+		if err := validResponse.VisitCloseReviewResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -14953,6 +15406,40 @@ func (sh *strictHandler) ResolveReviewComment(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ResolveReviewCommentResponseObject); ok {
 		if err := validResponse.VisitResolveReviewCommentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyReviewSuggestions operation middleware
+func (sh *strictHandler) ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request ApplyReviewSuggestionsRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	var body ApplyReviewSuggestionsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyReviewSuggestions(ctx, request.(ApplyReviewSuggestionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyReviewSuggestions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyReviewSuggestionsResponseObject); ok {
+		if err := validResponse.VisitApplyReviewSuggestionsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -421,6 +421,7 @@ type SpawnHeadOptions struct {
 	Prompt     string            // prompt
 	AgentType  sandbox.AgentType // empty = "claude"
 	Model      string            // model alias for the CLI's --model flag; empty = CLI default
+	Effort     string            // thinking/reasoning effort; empty = provider/model default
 	BaseBranch string            // empty = repository default branch
 	// Adopt, when set, spawns this head ON an existing PR/MR instead of branching
 	// from BaseBranch: the worktree is created from the already-fetched PR head
@@ -739,7 +740,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	setStatus(api.Starting)
 
 	// Build the sandbox launch options.
-	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
+	writable, readable, masked, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(opts.AgentType))
 	// Pre-spawn is per-launch sandbox setup, not a once-per-head constructor: it
 	// runs on every agent launch - spawn and resume alike (see ResumeHead) - so a
 	// configured script must be idempotent.
@@ -750,7 +751,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	// Resolve <run-mode> from the live chat/terminal mode at launch (the stored
 	// PrePrompt keeps the placeholder so a mode toggle is re-resolved on resume).
+	tmpDir := ensureHeadTmpDir(projectRoot, opts.ID)
 	launchPrePrompt := strings.ReplaceAll(opts.PrePrompt, "<run-mode>", config.RunModeLine(opts.ChatMode))
+	launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
 
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)), gitIso)
 	if err != nil {
@@ -758,14 +761,14 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "", seed.MCPConfigPath)
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.Effort, opts.ChatMode, "", seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
 	}
 
-	env := append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	env := append(agentEnv(opts.AgentType, cfg.ResolveInheritedEnv(string(opts.AgentType)), home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
+	env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
 	// Chat mode has no TUI to render; force the classic (non-fullscreen)
 	// renderer env regardless of config.
@@ -777,27 +780,33 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
-		AgentType:          opts.AgentType,
-		WorktreePath:       worktreePath,
-		WorkingDirReadOnly: projectDirectory && opts.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
-		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
-		GitIsolation:       gitIso,
-		Home:               home,
-		TmpDir:             ensureHeadTmpDir(projectRoot, opts.ID),
-		WritablePaths:      append(writable, seed.WritablePaths...),
-		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:          restore,
-		Network:            net,
-		Binds:              seed.Binds,
-		ROOverlays:         seed.ROOverlays,
-		CowMounts:          cowMounts,
-		Env:                env,
-		Argv:               argv,
-		StdioPipes:         opts.ChatMode,
-		PreSpawnScript:     preSpawn,
-		EgressWrap:         egressWrap,
-		HardenGUI:          true,
-		Seccomp:            true,
+		AgentType:             opts.AgentType,
+		WorktreePath:          worktreePath,
+		WorkingDirReadOnly:    projectDirectory && opts.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+		GitCommonDir:          commonDirForSandbox(projectRoot, gitIso),
+		GitIsolation:          gitIso,
+		Home:                  home,
+		TmpDir:                tmpDir,
+		CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"),
+		Caches:                cfg.ResolveSharedCaches(string(opts.AgentType)),
+		MaterializeCachePaths: true,
+		WritablePaths:         append(writable, seed.WritablePaths...),
+		ReadablePaths:         headReadablePaths(projectRoot, readable),
+		MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, opts.ID, masked),
+		Network:               net,
+		Binds:                 seed.Binds,
+		ImmutablePaths:        seed.ImmutablePaths,
+		ROOverlays:            seed.ROOverlays,
+		CowMounts:             cowMounts,
+		Env:                   env,
+		InheritedEnv:          cfg.ResolveInheritedEnv(string(opts.AgentType)),
+		Argv:                  argv,
+		HydraBinPath:          seed.HydraBinPath,
+		StdioPipes:            opts.ChatMode,
+		PreSpawnScript:        preSpawn,
+		EgressWrap:            egressWrap,
+		HardenGUI:             true,
+		Seccomp:               true,
 	})
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start session: %w", err))
@@ -810,7 +819,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// conversation the chat view reconstructs. The pipe buffers it while the
 	// CLI boots.
 	if opts.ChatMode && opts.AgentType == sandbox.AgentTypeCodex {
-		if err := startCodexChatController(reg, store, projectRoot, opts.ID, worktreePath, opts.Model, "", opts.Prompt); err != nil {
+		if err := startCodexChatController(reg, store, projectRoot, opts.ID, worktreePath, opts.Model, opts.Effort, "", opts.Prompt); err != nil {
 			spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start Codex chat controller: %w", err))
 			return nil, errtrace.Wrap(err)
 		}
@@ -1111,11 +1120,22 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		return "", errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
 	home := currentUser.HomeDir
-	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
-	// The shell shares the head's worktree; report it as a bash session since
-	// the pre-spawn config it runs is the bash agent's.
-	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	cfg, _ := config.Load(projectRoot)
+	var env []string
+	if sandboxed {
+		env = agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
+		env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
+		// The shell shares the head's worktree; report it as a bash session since
+		// the pre-spawn config it runs is the bash agent's.
+		env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	} else {
+		// A Regular shell is explicitly outside Hydra's sandbox and keeps the
+		// daemon's host environment. Environment isolation is part of the sandboxed
+		// head boundary, not a change to this user-opted-in escape hatch.
+		env = append([]string(nil), os.Environ()...)
+		env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
+		env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	}
 	// Env vars the head's pre_spawn_script set for the agent (via $HYDRA_ENV, see
 	// nshost.startAgentSession) - injected here so a sandboxed shell sharing the
 	// head's worktree sees the same environment the agent works in, WITHOUT
@@ -1139,7 +1159,12 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			// and never reaches the proxy (so no approval prompt fires). Inject the
 			// same HTTP_PROXY the agent got. The supervisor is live here, so its proxy
 			// is running; nil in unrestricted/off modes, where the shell needs none.
-			shellEnv := append(append([]string(nil), env...), preSpawnEnv...)
+			tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
+			shellEnv := sandbox.RuntimeEnv(append([]string(nil), env...), tmpDir, cfg.ResolveInheritedEnv(string(head.AgentType))...)
+			shellEnv = sandbox.SharedCacheEnv(shellEnv, filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
+			// Persisted pre-spawn values are trusted project policy and intentionally
+			// override Hydra's private cache defaults, just as they do for the agent.
+			shellEnv = append(shellEnv, preSpawnEnv...)
 			shellEnv = append(shellEnv, EgressProxyEnvFor(head.ID)...)
 			sp, err := host.client.Spawn(nshost.SpawnRequest{
 				Argv: []string{"/bin/bash"},
@@ -1160,14 +1185,14 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 
 	var sb sandbox.Options
 	if sandboxed {
-		cfg, _ := config.Load(projectRoot)
 		// The pre-spawn script is intentionally NOT re-run for bash shells: it is a
 		// once-per-head agent-spawn hook, and these interactive shells open
 		// repeatedly over a head's life. Running it here also made a failing
 		// script (e.g. a bashism error) abort the shell before /bin/bash ever
 		// exec'd, closing the terminal instantly. Its resolved env vars are still
 		// shared with the shell though (preSpawnEnv, below), just not by re-running it.
-		writable, masked, restore, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
+		writable, readable, masked, cowPaths, net, _ := cfg.ResolveSandboxOptions("bash")
+		writable = append(writable, sandbox.ProviderWritablePaths(head.AgentType)...)
 		// Bash is an interactive shell, not an agent - no system prompt to inject,
 		// and no PreToolUse gate (it has no hook system); the empty policy disables it.
 		// The bash shell shares the head's worktree, so it inherits the head's
@@ -1193,23 +1218,30 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// network, matching the agent's fail-closed behaviour.
 		egressEnv, egressWrap := startEgressKeyed(projectRoot, shellID, head.ID, sandbox.AgentTypeBash, &net)
 		sb = sandbox.Options{
-			AgentType:     sandbox.AgentTypeBash,
-			WorktreePath:  worktreePath,
-			GitCommonDir:  commonDirForSandbox(projectRoot, shellGitIso),
-			GitIsolation:  shellGitIso,
-			Home:          home,
-			TmpDir:        ensureHeadTmpDir(projectRoot, head.ID),
-			WritablePaths: append(writable, seed.WritablePaths...),
-			MaskedPaths:   sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-			RestoreRO:     restore,
-			Network:       net,
-			Binds:         seed.Binds,
-			CowMounts:     cowMounts,
-			Env:           append(append(append(env, seed.Env...), preSpawnEnv...), egressEnv...),
-			Argv:          []string{"/bin/bash"},
-			EgressWrap:    egressWrap,
-			HardenGUI:     true,
-			Seccomp:       true,
+			AgentType:             sandbox.AgentTypeBash,
+			WorktreePath:          worktreePath,
+			WorkingDirReadOnly:    head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+			GitCommonDir:          commonDirForSandbox(projectRoot, shellGitIso),
+			GitIsolation:          shellGitIso,
+			Home:                  home,
+			TmpDir:                ensureHeadTmpDir(projectRoot, head.ID),
+			CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"),
+			Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
+			MaterializeCachePaths: true,
+			WritablePaths:         append(writable, seed.WritablePaths...),
+			ReadablePaths:         headReadablePaths(projectRoot, readable),
+			MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, head.ID, masked),
+			Network:               net,
+			Binds:                 seed.Binds,
+			ImmutablePaths:        seed.ImmutablePaths,
+			CowMounts:             cowMounts,
+			Env:                   append(append(append(env, seed.Env...), preSpawnEnv...), egressEnv...),
+			InheritedEnv:          cfg.ResolveInheritedEnv(string(head.AgentType)),
+			Argv:                  []string{"/bin/bash"},
+			HydraBinPath:          seed.HydraBinPath,
+			EgressWrap:            egressWrap,
+			HardenGUI:             true,
+			Seccomp:               true,
 		}
 	} else {
 		// Regular shell: plain host bash in the worktree, no confinement.
@@ -1353,7 +1385,11 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// only way a pre_spawn_script added (or changed) after a head was created ever
 	// reaches that head. It must therefore be idempotent - it runs on every launch
 	// - and, as on spawn, a non-zero exit gates the launch (here, aborts resume).
-	writable, masked, restore, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	writable, readable, masked, cowPaths, net, preSpawn := cfg.ResolveSandboxOptions(string(head.AgentType))
+	// "Allow once" filesystem approvals live with this head's runtime state. They
+	// are consumed on every resume so an automatic sandbox rebuild (or daemon
+	// restart) keeps the grant, and disappear when the head is killed/archived.
+	readable = append(readable, gate.LoadGrantedReadablePaths(paths.GetApprovalsDirFromProjectRoot(projectRoot, head.ID))...)
 	// If the pre_spawn_script was removed since this head last launched, drop any
 	// env it previously persisted so stale vars stop leaking into its shells (a
 	// script that still runs re-truncates the file itself on every launch).
@@ -1364,7 +1400,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 	// Resolve <run-mode> from the head's current mode: a chat<->terminal toggle
 	// made while the session was down takes effect on this relaunch.
+	tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
 	launchPrePrompt := strings.ReplaceAll(head.PrePrompt, "<run-mode>", config.RunModeLine(head.ChatMode))
+	launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
 	// Re-apply the head's persisted git-isolation override (empty = policy default),
 	// so a resume after a daemon restart keeps the same .git lockdown.
 	gitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
@@ -1389,18 +1427,18 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	resumeSession := ""
 	switch head.AgentType {
 	case sandbox.AgentTypeClaude:
-		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
+		dir := paths.ClaudeProjectDirForSession(projectRoot, head.ID, home, worktreePath)
 		resumeSession = claudestream.LatestSessionID(dir)
 	case sandbox.AgentTypeCodex:
 		resumeSession = head.ConversationID
 	}
-	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession, seed.MCPConfigPath)
+	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", "", head.ChatMode, resumeSession, seed.MCPConfigPath, seed.ClaudeSettingSources)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
 
-	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
+	env = append(env, sandbox.MiseEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	// Chat mode has no TUI to render; force the classic renderer env (see SpawnHead).
 	env = append(env, claudeRenderingEnv(head.AgentType, !head.ChatMode && cfg.ResolveFullscreen(string(head.AgentType)))...)
@@ -1418,33 +1456,39 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
-		AgentType:          head.AgentType,
-		WorktreePath:       worktreePath,
-		WorkingDirReadOnly: head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
-		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
-		GitIsolation:       gitIso,
-		Home:               home,
-		TmpDir:             ensureHeadTmpDir(projectRoot, head.ID),
-		WritablePaths:      append(writable, seed.WritablePaths...),
-		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:          restore,
-		Network:            net,
-		Binds:              seed.Binds,
-		ROOverlays:         seed.ROOverlays,
-		CowMounts:          cowMounts,
-		Env:                env,
-		Argv:               argv,
-		StdioPipes:         head.ChatMode,
-		PreSpawnScript:     preSpawn,
-		EgressWrap:         egressWrap,
-		HardenGUI:          true,
-		Seccomp:            true,
+		AgentType:             head.AgentType,
+		WorktreePath:          worktreePath,
+		WorkingDirReadOnly:    head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+		GitCommonDir:          commonDirForSandbox(projectRoot, gitIso),
+		GitIsolation:          gitIso,
+		Home:                  home,
+		TmpDir:                tmpDir,
+		CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"),
+		Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
+		MaterializeCachePaths: true,
+		WritablePaths:         append(writable, seed.WritablePaths...),
+		ReadablePaths:         headReadablePaths(projectRoot, readable),
+		MaskedPaths:           resolvedSandboxMasks(projectRoot, worktreePath, head.ID, masked),
+		Network:               net,
+		Binds:                 seed.Binds,
+		ImmutablePaths:        seed.ImmutablePaths,
+		ROOverlays:            seed.ROOverlays,
+		CowMounts:             cowMounts,
+		Env:                   env,
+		InheritedEnv:          cfg.ResolveInheritedEnv(string(head.AgentType)),
+		Argv:                  argv,
+		HydraBinPath:          seed.HydraBinPath,
+		StdioPipes:            head.ChatMode,
+		PreSpawnScript:        preSpawn,
+		EgressWrap:            egressWrap,
+		HardenGUI:             true,
+		Seccomp:               true,
 	})
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
 	if head.ChatMode && head.AgentType == sandbox.AgentTypeCodex {
-		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, head.Model, head.ConversationID, ""); err != nil {
+		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, head.Model, "", head.ConversationID, ""); err != nil {
 			// startAgentSession has already registered the provider process. Do not
 			// leave a driverless chat session looking live: a later attach would
 			// succeed but could neither replay nor accept messages.
@@ -1798,6 +1842,7 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		RemoveAgentRuntimeFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
 		removeHeadTmpDir(head.ProjectPath, head.ID)
+		removeSeedInputs(head.ProjectPath, head.ID)
 		// The review slot's own detached checkout is reclaimed by the
 		// KillReviewSession call above, which runs whether or not the kill failed -
 		// a worktree is a real git registration and outlives the process either way.
@@ -1857,8 +1902,11 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	runCtx, cancel := context.WithTimeout(ctx, preExitTimeout)
 	defer cancel()
 
-	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
-	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
+	writable, readable, masked, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
+	tmpDir := ensureHeadTmpDir(head.ProjectPath, head.ID)
+	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseEnv(head.ProjectPath, worktree)...)
+	env = sandbox.RuntimeEnv(env, tmpDir, cfg.ResolveInheritedEnv(string(head.AgentType))...)
+	env = sandbox.SharedCacheEnv(env, filepath.Join(paths.GetCacheDirFromProjectRoot(head.ProjectPath), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)
 
@@ -1878,19 +1926,24 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	}
 
 	spec, err := sandbox.BuildSpec(sandbox.Options{
-		AgentType:     sandbox.AgentTypeBash,
-		WorktreePath:  worktree,
-		GitCommonDir:  commonDirForSandbox(head.ProjectPath, resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)),
-		Home:          home,
-		TmpDir:        ensureHeadTmpDir(head.ProjectPath, head.ID),
-		WritablePaths: writable,
-		MaskedPaths:   sandbox.ResolveMaskedPaths(head.ProjectPath, worktree, masked),
-		RestoreRO:     restore,
-		Network:       net,
-		Env:           env,
-		Argv:          []string{"bash", "-c", sandbox.StrictScript(script)},
-		HardenGUI:     true,
-		Seccomp:       true,
+		AgentType:             sandbox.AgentTypeBash,
+		WorktreePath:          worktree,
+		WorkingDirReadOnly:    head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
+		GitCommonDir:          commonDirForSandbox(head.ProjectPath, resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)),
+		Home:                  home,
+		TmpDir:                tmpDir,
+		CacheRoot:             filepath.Join(paths.GetCacheDirFromProjectRoot(head.ProjectPath), "sandbox"),
+		Caches:                cfg.ResolveSharedCaches(string(head.AgentType)),
+		MaterializeCachePaths: true,
+		WritablePaths:         writable,
+		ReadablePaths:         headReadablePaths(head.ProjectPath, readable),
+		MaskedPaths:           resolvedSandboxMasks(head.ProjectPath, worktree, head.ID, masked),
+		Network:               net,
+		Env:                   env,
+		InheritedEnv:          cfg.ResolveInheritedEnv(string(head.AgentType)),
+		Argv:                  []string{"bash", "-c", sandbox.StrictScript(script)},
+		HardenGUI:             true,
+		Seccomp:               true,
 	})
 	if err != nil {
 		log.Printf("warn: pre_exit_script for %s: build sandbox: %v", head.ID, err)
@@ -1952,6 +2005,12 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 	if head.ProjectPath != "" {
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
+		removeHeadTmpDir(head.ProjectPath, head.ID)
+		removeHeadTmpDir(head.ProjectPath, ReviewSessionID(head.ID))
+		removeSeedInputs(head.ProjectPath, head.ID)
+		removeSeedInputs(head.ProjectPath, ReviewSessionID(head.ID))
+		removeProviderState(head.ProjectPath, head.ID)
+		removeProviderState(head.ProjectPath, ReviewSessionID(head.ID))
 		removeClaudeSessionDir(head)
 		// The review slot's checkout, its own transcript dir (keyed by that
 		// checkout's path, so removeClaudeSessionDir above does not reach it) and
@@ -1995,7 +2054,7 @@ func removeClaudeSessionDir(head Head) {
 	if slug == "" {
 		return
 	}
-	dir := filepath.Join(u.HomeDir, ".claude", "projects", slug)
+	dir := paths.ClaudeProjectDirForSession(head.ProjectPath, head.ID, u.HomeDir, worktree)
 	if err := os.RemoveAll(dir); err != nil {
 		log.Printf("warn: heads: purge remove claude session dir %s for %s: %v", dir, head.ID, err)
 	} else {

@@ -7,6 +7,7 @@
 // the agent the user actually uses rather than a hardcoded default.
 
 import { readLocal, StorageKeys } from './storage'
+import type { SpawnAgentRequest } from '../api/models/SpawnAgentRequest'
 
 // The agent types offerable from the web UI. `bash` is deliberately absent - it
 // is a shell, not something you hand a task to.
@@ -19,6 +20,18 @@ const AGENT_TYPE_IDS: AgentTypeOption[] = ['claude', 'gemini', 'copilot', 'codex
 export function readModelMap(): Record<string, string> {
   try {
     const raw = readLocal(StorageKeys.defaultModel)
+    const parsed = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+// The remembered thinking-effort map mirrors the model map. Keeping the value
+// per provider prevents a Claude choice from leaking into a later Codex spawn.
+export function readEffortMap(): Record<string, string> {
+  try {
+    const raw = readLocal(StorageKeys.defaultEffort)
     const parsed = raw ? JSON.parse(raw) : null
     return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
   } catch {
@@ -44,12 +57,16 @@ export function readDefaultChatMode(): boolean {
 // should inherit the server's default) so a caller can spread it straight into a
 // SpawnAgentRequest. chat_mode is only sent for the agent types that support it -
 // the server rejects it for the others.
-export function spawnDefaultFields(): { agent_type: string; model?: string; chat_mode?: boolean } {
+export function spawnDefaultFields(): { agent_type: string; model?: string; effort?: SpawnAgentRequest['effort']; chat_mode?: boolean } {
   const agentType = readDefaultAgentType()
   const model = readModelMap()[agentType] ?? ''
+  const effort = readEffortMap()[agentType] ?? ''
   return {
     agent_type: agentType,
     ...(model ? { model } : {}),
+    ...((agentType === 'claude' || agentType === 'codex') && effort
+      ? { effort: effort as NonNullable<SpawnAgentRequest['effort']> }
+      : {}),
     ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: readDefaultChatMode() } : {}),
   }
 }

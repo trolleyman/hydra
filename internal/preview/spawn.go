@@ -442,7 +442,7 @@ func (in *instance) buildSpec(spec config.PreviewScript, childPort int) (*sandbo
 		"HYDRA_PREVIEW_SOURCE="+in.runDir,
 		"HYDRA_PREVIEW_REF="+in.version.SHA,
 	)
-	env = append(env, sandbox.MiseTrustEnv(in.root, in.runDir)...)
+	env = append(env, sandbox.MiseEnv(in.root, in.runDir)...)
 
 	command := spec.Script
 	if spec.IsStrict() {
@@ -462,14 +462,15 @@ func (in *instance) buildSpec(spec config.PreviewScript, childPort int) (*sandbo
 	hardMode := false
 	if !spec.UnsafeHost {
 		cfg, _ := config.Load(in.root)
-		writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
+		cfg.ApplySharedCaches(&opts, in.root, "", true)
+		writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 		hardMode = netPol.Mode == sandbox.NetHard
 		if gcd, err := git.GetCommonDir(in.root); err == nil {
 			opts.GitCommonDir = gcd // ephemeral checkout git metadata lives here
 		}
 		opts.WritablePaths = writable
+		opts.ReadablePaths = readable
 		opts.MaskedPaths = sandbox.ResolveMaskedPaths(in.root, in.runDir, masked)
-		opts.RestoreRO = restore
 		// Per-spawn ephemeral cow layers over shared caches (see the artifacts
 		// twin of this function for the full rationale).
 		if len(cow) > 0 {

@@ -996,7 +996,11 @@ func Test() error {
 	if err := BuildWeb(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := runInDirV("web", webPX(), "playwright", "install", "chromium"); err != nil {
+	browsers := []string{"playwright", "install", "chromium"}
+	if runtime.GOOS == "linux" {
+		browsers = append(browsers, "webkit")
+	}
+	if err := runInDirV("web", webPX(), browsers...); err != nil {
 		return errtrace.Wrap(err)
 	}
 

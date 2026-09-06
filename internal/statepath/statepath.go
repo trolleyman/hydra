@@ -66,6 +66,16 @@ func DatabasePath() (string, error) {
 	return filepath.Join(root, "db.sqlite3"), nil
 }
 
+// RuntimeDir returns the machine/runtime-wide directory for immutable assets
+// shared by heads, such as build-addressed copies of the Hydra executable.
+func RuntimeDir() (string, error) {
+	root, err := Root()
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return filepath.Join(root, "runtime"), nil
+}
+
 // RuntimeIsolationKey returns a stable identifier for an explicitly selected
 // state root. Production, where HYDRA_STATE_DIR is unset, uses the unnamespaced
 // runtime. Development checkouts use their state root to isolate IPC and scope

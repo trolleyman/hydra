@@ -93,7 +93,8 @@ func simUser(id, text string) simNorm {
 
 func simAgentUser(id, source, text string) simNorm {
 	return simNorm{typ: "user_message", payload: map[string]any{
-		"id": id, "uuid": id, "content": simTextContent(text), "origin": "agent:" + source,
+		"id": id, "uuid": id, "content": simTextContent(text),
+		"origin": "agent", "source_agent_id": source,
 	}}
 }
 
@@ -565,12 +566,12 @@ var simChatEvents = []simNorm{
 	// than anonymous terminal text - see web/src/lib/fileViewCommand.ts.
 	simTool("toolu_sim_sed", "Bash", simRaw(`{"command":"sed -n 40,53p internal/chat/claude.go"}`)),
 	simToolOut("toolu_sim_sed", "type claudeMessage struct {\n\tType    string          `json:\"type\"`\n\tSubtype string          `json:\"subtype,omitempty\"`\n\tMessage json.RawMessage `json:\"message,omitempty\"`\n\tUsage   json.RawMessage `json:\"usage,omitempty\"`\n}\n\n// isAPIErrorMessage reports whether an assistant event is the CLI's own\n// \"API Error\" placeholder rather than a model reply.\nfunc isAPIErrorMessage(msg claudeMessage) bool {\n\tif msg.Type != \"assistant\" {\n\t\treturn false\n\t}\n\treturn strings.HasPrefix(text(msg), \"API Error\")"),
-	// Two reads and a numbered search in one call. The typed printf marker makes
-	// the potentially-short read boundary explicit; the UI consumes it into the
-	// same ruled file header it derives automatically from each command and from
-	// the paths carried by rg's rows.
-	simTool("toolu_sim_sed2", "Bash", simRaw(`{"command":"sed -n '1,4p' web/src/lib/lineRange.ts\nprintf '%s\\n' '--- [file] internal/artifacts/backoff.go ---'\nsed -n '9,12p' internal/artifacts/backoff.go\nrg -n 'parseLineRange|sleepBackoff' web/src/lib/lineRange.ts internal/artifacts/backoff.go"}`)),
-	simToolOut("toolu_sim_sed2", "// Line-range selection shared by the repository file view and the diff viewer:\n// a URL hash like #L5 (one line) or #L5-L10 (a range), GitHub-style. start is\n// always <= end.\n\n--- [file] internal/artifacts/backoff.go ---\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\ttime.Sleep(d)\nweb/src/lib/lineRange.ts:10:export function parseLineRange(hash: string): LineRange | null {\nweb/src/lib/lineRange.ts:24:  return parseLineRange(location.hash)\ninternal/artifacts/backoff.go:9:func sleepBackoff(attempt int) {"),
+	// Two reads and a numbered search in one call. The typed printf markers make
+	// the potentially-short read boundary explicit and exercise file, text, and
+	// directory headers together; the UI consumes them into the same sticky,
+	// ruled headers it derives automatically from each command and rg path.
+	simTool("toolu_sim_sed2", "Bash", simRaw(`{"command":"sed -n '1,4p' web/src/lib/lineRange.ts\nprintf '%s\\n' '--- [file] internal/artifacts/backoff.go ---'\nsed -n '9,12p' internal/artifacts/backoff.go\nrg -n 'parseLineRange|sleepBackoff' web/src/lib/lineRange.ts internal/artifacts/backoff.go\nprintf '%s\\n' '--- [text] Sparse match notes ---'\nprintf '%s\\n' 'The inset rule marks omitted source lines.' 'Headers remain visible while their rows scroll.'\nprintf '%s\\n' '--- [dir] web/src ---'\nprintf '%s\\n' 'components/' 'lib/' 'stores/' 'styles/'"}`)),
+	simToolOut("toolu_sim_sed2", "// Line-range selection shared by the repository file view and the diff viewer:\n// a URL hash like #L5 (one line) or #L5-L10 (a range), GitHub-style. start is\n// always <= end.\n\n--- [file] internal/artifacts/backoff.go ---\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\ttime.Sleep(d)\nweb/src/lib/lineRange.ts:10:export function parseLineRange(hash: string): LineRange | null {\nweb/src/lib/lineRange.ts:24:  return parseLineRange(location.hash)\ninternal/artifacts/backoff.go:9:func sleepBackoff(attempt int) {\n--- [text] Sparse match notes ---\nThe inset rule marks omitted source lines.\nHeaders remain visible while their rows scroll.\n--- [dir] web/src ---\ncomponents/\nlib/\nstores/\nstyles/"),
 	// An investigation script: a `cd`, greps, a tail, and the `echo` headings an
 	// agent writes between them. Not a pure read, so the card stays a Bash card -
 	// but its OUTPUT is split back at those headings and each stretch rendered as
@@ -775,6 +776,12 @@ var simChatEvents = []simNorm{
 	// side because it is input to this agent, but carries its own sender marker.
 	simAgentUser("sim-agent-message", "api-tests", "[Message from Hydra agent api-tests (API test coverage); correlation_id=agent-chain-demo; message_id=agent-message-demo; chain=1/6]\n\nThe retry endpoint contract tests are ready in commit 9f24c10. Please cherry-pick it before your final verification."),
 	simSay("msg_sim_agent_reply", "Got it. I will incorporate `9f24c10` and keep the shared correlation id if I need to reply."),
+	// A bounded read, recursive numbered search, then guarded bounded read. The
+	// search pins both surrounding ranges, so the last file keeps real line
+	// numbers. The one-space command prefix reproduces provider indentation and
+	// should disappear from the display without changing relative shell indent.
+	simTool("toolu_sim_guarded_read", "Bash", simRaw(`{"command":"# Inspect tooltip path handling\n sed -n '1,2p' web/src/components/Tooltip.tsx\n rg -n 'FilePathLabel' web/src -g '*.tsx'\n sed -n '1,3p' web/src/components/FilePathLabel.tsx 2>/dev/null || true"}`)),
+	simToolOut("toolu_sim_guarded_read", "import React, { useCallback } from 'react'\nimport { createPortal } from 'react-dom'\nweb/src/components/settings/notifications/channels/desktop/NotificationsSection.tsx:119:          <FilePathLabel path={soundFile} />\nweb/src/components/AgentChat.tsx:3213:          content={<FilePathLabel path={header.label} />}\nimport type { ReactNode } from 'react'\nimport { getFileIcon } from '../lib/fileIcons'\n"),
 	// A standalone reply that is mostly an ordered list - exercises the block
 	// markdown renderer's <ol> styling (list-decimal, pl-5) so the demo proves
 	// 1./2./3. indent with hanging wrapped lines, and a trailing unordered list

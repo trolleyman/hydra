@@ -26,6 +26,11 @@ const lazy = readdirSync('node_modules/refractor/lang')
   .filter((l) => !eager.has(l))
   .sort()
 
+const lazyAliases = Object.fromEntries(await Promise.all(lazy.map(async (name) => {
+  const mod = await import(`refractor/${name}`)
+  return [name, mod.default.aliases ?? []] as const
+})))
+
 const key = (l: string) => (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(l) ? l : JSON.stringify(l))
 const body = lazy.map((l) => `  ${key(l)}: () => import("refractor/${l}"),`).join('\n')
 
@@ -42,5 +47,7 @@ import type { Syntax } from 'refractor/core'
 export const LAZY_LANGUAGES: Record<string, () => Promise<{ default: Syntax }>> = {
 ${body}
 }
+
+export const LAZY_LANGUAGE_ALIASES: Record<string, string[]> = ${JSON.stringify(lazyAliases, null, 2)}
 `)
 console.log(`eager ${eager.size} (incl. aliases and transitive deps), lazy ${lazy.length}`)

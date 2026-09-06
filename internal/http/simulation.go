@@ -1309,6 +1309,10 @@ func (s *SimulationServer) PullFromMr(w http.ResponseWriter, r *http.Request, pr
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
+func (s *SimulationServer) CloseReview(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, simAgentByID(id))
+}
+
 func (s *SimulationServer) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	var body api.SetDownstreamBranchJSONBody
 	_ = json.NewDecoder(r.Body).Decode(&body)
@@ -1418,7 +1422,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "701", Number: ptr(3), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
+				{Id: "701", Number: ptr(3), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "This import can use the narrower package.\n\n```suggestion\n\"context\"\n```", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"), Suggestion: &api.ReviewSuggestion{StartLine: 5, EndLine: 5, Replacement: "\"context\"", Applied: false}},
 			},
 		},
 		{
@@ -1426,7 +1430,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_702"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "702", Number: ptr(4), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
+				{Id: "702", Number: ptr(4), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "This field name can be more explicit.\n\n```suggestion\n\tWorktreePath *string\n```", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z"), Suggestion: &api.ReviewSuggestion{StartLine: 45, EndLine: 45, Replacement: "\tWorktreePath *string", Applied: false}},
 				{Id: "703", Number: ptr(5), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
 				// Unread: an agent's reply is news, and this is what the unread dot and
 				// the next-unread jump are for.
@@ -1517,6 +1521,30 @@ func (s *SimulationServer) ReplyToReviewThread(w http.ResponseWriter, r *http.Re
 	}
 	simThreadMu.Unlock()
 	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
+func (s *SimulationServer) ApplyReviewSuggestions(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.ApplyReviewSuggestionsRequest
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simThreads(id) // seed
+	wanted := make(map[int]bool, len(body.Numbers))
+	for _, number := range body.Numbers {
+		wanted[number] = true
+	}
+	applied := []int{}
+	simThreadMu.Lock()
+	for ti := range simThreadsByHead[id] {
+		for ni := range simThreadsByHead[id][ti].Notes {
+			note := &simThreadsByHead[id][ti].Notes[ni]
+			if note.Number == nil || note.Suggestion == nil || note.Suggestion.Applied || !wanted[*note.Number] {
+				continue
+			}
+			note.Suggestion.Applied = true
+			applied = append(applied, *note.Number)
+		}
+	}
+	simThreadMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, api.ApplyReviewSuggestionsResponse{Applied: applied})
 }
 
 // Hydra-native review comments (docs/review-agent.md), in memory for the run.
@@ -2864,6 +2892,21 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					api.DiffLine{Type: api.Addition, Content: "See https://example.com/internal/app/services/auth/providers/oauth/google/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/client.go", NewLineNum: ptr(4)},
 					api.DiffLine{Type: api.Context, Content: "", OldLineNum: ptr(2), NewLineNum: ptr(5)},
 				),
+				simFile("Cargo.lock", api.DiffFileChangeTypeModified, 2, 2,
+					"@@ -8,2 +8,2 @@", 8, 8,
+					api.DiffLine{Type: api.Deletion, Content: "version = \"1.2.3\"", OldLineNum: ptr(8)},
+					api.DiffLine{Type: api.Deletion, Content: "checksum = \"old-checksum\"", OldLineNum: ptr(9)},
+					api.DiffLine{Type: api.Addition, Content: "version = \"1.2.4\"", NewLineNum: ptr(8)},
+					api.DiffLine{Type: api.Addition, Content: "checksum = \"new-checksum\"", NewLineNum: ptr(9)},
+				),
+				simFile("deploy/policy.jsonnet", api.DiffFileChangeTypeAdded, 5, 0,
+					"@@ -0,0 +1,5 @@", 0, 1,
+					api.DiffLine{Type: api.Addition, Content: "local environment = 'staging';", NewLineNum: ptr(1)},
+					api.DiffLine{Type: api.Addition, Content: "{", NewLineNum: ptr(2)},
+					api.DiffLine{Type: api.Addition, Content: "  environment: environment,", NewLineNum: ptr(3)},
+					api.DiffLine{Type: api.Addition, Content: "  replicas: if environment == 'production' then 4 else 2,", NewLineNum: ptr(4)},
+					api.DiffLine{Type: api.Addition, Content: "}", NewLineNum: ptr(5)},
+				),
 				simFile("docs/architecture/diagrams/overview.md", api.DiffFileChangeTypeAdded, 2, 0,
 					"@@ -0,0 +1,2 @@", 0, 1,
 					api.DiffLine{Type: api.Addition, Content: "# Architecture overview", NewLineNum: ptr(1)},
@@ -2942,8 +2985,8 @@ func simContext(params api.GetAgentDiffParams) int {
 // simApplyContext renders a fixture diff at the requested context. For a
 // full_context request it reconstructs each file as a single contiguous
 // whole-file hunk (mirroring `git diff -U<huge>` in production) so the diff
-// viewer drives its full-content reveal model - compact, with "··· N lines ···"
-// collapses and no fabricated edge arrows. Otherwise it just widens each hunk's
+// viewer drives its full-content reveal model - compact, with labelled
+// Up/Down/Show all controls and no fabricated edge actions. Otherwise it just widens each hunk's
 // surrounding context (network-expand on demand).
 // The cap is the caller's max_full_lines, so the simulation reproduces both
 // sides of the real server's behaviour: the bulk request (6000) leaves a change
@@ -3066,6 +3109,10 @@ func synthContextLine(ext string, oldN, newN int) api.DiffLine {
 		OldLineNum: ptr(oldN),
 		NewLineNum: ptr(newN),
 	}
+}
+
+func (s *SimulationServer) GetAgentViewedDiff(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, api.ViewedDiffResponse{Files: []api.DiffFile{}, FailedPaths: []string{}})
 }
 
 func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
@@ -3935,7 +3982,7 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 		{
 			// A full-context ("expanded") file so the diff viewer's context model
 			// kicks in: a single change mid-file with the surrounding lines
-			// collapsed behind ⌄/⌃ expanders ("··· N lines ···").
+			// collapsed behind the labelled Up/Down/Show all controls.
 			Path:       "internal/heads/heads.go",
 			ChangeType: api.DiffFileChangeTypeModified,
 			Additions:  1,
@@ -4447,8 +4494,15 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	// shadowed by a redundant "Inherited:" echo of its own value.
 	if params.Scope == nil || *params.Scope != api.GetConfigParamsScopeUser {
 		resp.Defaults.Sandbox = &api.SandboxConfig{
+			InheritEnv:     ptr([]string{"ANDROID_HOME", "SSH_AUTH_SOCK"}),
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
+			Cache: ptr(map[string]api.SandboxCacheConfig{
+				"go_build":       {Env: ptr("GOCACHE")},
+				"go_modules":     {Env: ptr("GOMODCACHE")},
+				"npm":            {Env: ptr("npm_config_cache")},
+				"mise_downloads": {Env: ptr("MISE_CACHE_DIR")},
+			}),
 			// Hard egress mode with extra allow-listed hosts + a blocked host -
 			// drives the settings network screenshot (mode dropdown + allowed/blocked
 			// host editors populated).
@@ -4839,6 +4893,8 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"assistant_message", map[string]any{"message_id": "sim-codex-seed", "text": "This reply began before you attached and finished after."}},
 		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "status": "in_progress", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "_raw": map[string]any{"id": "sim-codex-bash", "item_type": "command_execution", "command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "status": "in_progress"}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
+		{"tool_started", map[string]any{"id": "sim-codex-vitest", "name": "Bash", "status": "in_progress", "input": map[string]any{"command": "npm exec vitest run web/src/components/settings/ConfigForm.list-editors.test.tsx", "description": "Run the list editor tests"}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-vitest", "name": "Bash", "status": "failed", "output": " RUN  v4.1.11 /repo\n\n\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\n\n FAIL  web/src/components/settings/ConfigForm.list-editors.test.tsx > settings list editors > inserts a blank path row after the current row on Enter\nReferenceError: document is not defined\n \u276f render web/node_modules/@testing-library/react/dist/pure.js:256:5\n \u276f web/src/components/settings/ConfigForm.list-editors.test.tsx:8:5\n      6|   it('inserts a blank path row after the current row on Enter', () => {\n      7|     const onChange = vi.fn()\n      8|     render(<PathListEditor paths={['registry.npmjs.org']} onChange={onChange} />)\n       |     ^\n      9|   })\n\n\u23af\u23af\u23af\u23af[1/1]\u23af\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)"}},
 		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "status": "in_progress", "input": map[string]any{"changes": []any{
 			map[string]any{"path": "docs/chat-mode.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Chat mode\n+# Chat mode internals\n"},
 			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
@@ -4918,9 +4974,11 @@ func handleSimCodexChatWS(conn *safeConn) {
 
 // simQueuedMsg is one held message in the sim's stand-in chat queue.
 type simQueuedMsg struct {
-	ID      string          `json:"id"`
-	Content json.RawMessage `json:"content"`
-	Origin  string          `json:"origin,omitempty"`
+	ID            string            `json:"id"`
+	Content       json.RawMessage   `json:"content"`
+	Origin        api.MessageOrigin `json:"origin,omitempty"`
+	Reason        api.MessageReason `json:"reason,omitempty"`
+	SourceAgentID string            `json:"source_agent_id,omitempty"`
 }
 
 // The sim's cross-connection chat message queue: a process-lifetime stand-in for
@@ -4970,7 +5028,9 @@ func sendSimQueueFrame(conn *safeConn, id string) {
 	// shape the schema forbids - an empty queue is [], never null.
 	msgs := make([]api.ChatQueuedMessage, 0, len(simQueueList(id)))
 	for _, m := range simQueueList(id) {
-		msgs = append(msgs, api.ChatQueuedMessage{Id: m.ID, Content: m.Content, Origin: m.Origin})
+		msgs = append(msgs, api.ChatQueuedMessage{
+			Id: m.ID, Content: m.Content, Origin: m.Origin, Reason: m.Reason, SourceAgentId: m.SourceAgentID,
+		})
 	}
 	writeFrame(conn, api.ChatQueueFrame{Type: api.Queue, Messages: msgs})
 }
@@ -5164,6 +5224,7 @@ var simApprovalOptions = []simApprovalOption{
 	{"MCP server", "The first call to a whole MCP server.", "mcp"},
 	{"Web fetch", "An outbound fetch - allowing trusts the host for the session.", "webfetch"},
 	{"Egress host", "A connection the proxy is holding: the host is on no list.", "egress"},
+	{"Host path", "An existing host file or directory mounted read-only after a sandbox restart.", "filesystem_read"},
 	{"Unrecognized tool", "A tool Hydra's gate has no rule for.", "tool"},
 }
 
@@ -5201,6 +5262,12 @@ func simApprovalRequest(kind string) (api.ApprovalRequest, bool) {
 		req.Target = "telemetry.example.com"
 		req.Reason = ptr("the connection is held at the egress proxy: the host is on neither list")
 		req.Summary = "wants to connect to \"telemetry.example.com\""
+	case "filesystem_read":
+		req.Tool = "mcp__hydra__request_read_access"
+		req.Target = "/opt/acme-sdk/include"
+		req.Reason = ptr("the path is outside the sandbox's readable allow-list")
+		req.Description = ptr("I need the installed SDK headers to compile the project's native extension.")
+		req.Summary = "wants read access to host path \"/opt/acme-sdk/include\""
 	case "tool":
 		req.Tool = "weather__forecast"
 		req.Target = "weather__forecast"
@@ -5552,7 +5619,12 @@ var simHistoryTables = []struct {
 func simHistoryEvents() []simNorm {
 	var out []simNorm
 	add := func(events ...simNorm) { out = append(out, events...) }
-	add(simConversationStarted("claude-opus-4-8", nil).set("conversation_id", "sim-history"))
+	// This fixture represents API-key auth so its finished turns exercise the
+	// billable cost footer; the other Claude simulations stay on subscription
+	// auth and keep hiding the client-side estimate.
+	add(simConversationStarted("claude-opus-4-8", nil).
+		set("conversation_id", "sim-history").
+		set("api_key_source", "ANTHROPIC_API_KEY"))
 	add(simUser("sim-history-prompt", simAgentHistoryPrompt))
 
 	for i, t := range simHistoryTables {

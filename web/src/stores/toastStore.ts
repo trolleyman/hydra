@@ -31,7 +31,8 @@ export interface ToastAccent {
 export interface ApprovalToastData {
   // What is being approved: mcp (whole server), mcp_tool (one tool), webfetch,
   // egress, bash, tool (a tool the gate doesn't recognize), or host_command (run
-  // a command on the host, outside the sandbox).
+  // a command on the host, outside the sandbox), or filesystem_read (mount one
+  // host file or directory read-only).
   kind: string
   // The server name / "server__tool" / host / command the approval is about (for
   // host_command, the full command text, shown verbatim in the card).

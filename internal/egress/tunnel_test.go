@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -78,7 +79,10 @@ func TestProxyTunnelsConnectBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &http.Client{Transport: &http.Transport{
+	// An outer sandbox can allow the test's loopback proxy but deny the proxy's
+	// upstream connection. Bound that failure so a routine suite cannot wait for
+	// the package-wide go test timeout.
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
 		Proxy:           http.ProxyURL(proxyURL),
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}}

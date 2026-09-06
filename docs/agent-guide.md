@@ -24,9 +24,12 @@ Use `mage` for development tasks.
 
 1.  **Backend**: Go 1.22+ is used. Follow standard Go idioms.
 2.  **Frontend**: React + TypeScript + Vite. Uses `npm` (or `aube`, if on PATH) for
-    package management against `web/package-lock.json`. Build scripts under
-    `web/scripts/` and `web/e2e/` run directly with `node` (Node 24+ strips the TS
-    types), not a separate TS runner.
+    package management against `web/package-lock.json`. Package lifecycle scripts
+    intentionally spell nested calls as `npm run`: npm executes them directly,
+    while aube transparently redirects them to itself, keeping every script usable
+    through either package manager. Build scripts under `web/scripts/` and
+    `web/e2e/` run directly with `node` (Node 24+ strips the TS types), not a
+    separate TS runner.
 
     **Expected `aube install` warnings (all benign - do not "fix" them):**
     - `WARN_AUBE_GVS_INCOMPATIBLE` for `vite`: vite can't use aube's global
@@ -36,19 +39,20 @@ Use `mage` for development tasks.
       their postinstall build scripts by default. Both ship prebuilt binaries and
       work fine without them; run `aube approve-builds` only if you deliberately
       want to enable them.
-3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
+3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generateGo` to update server stubs.
 
 ### Commits and verification
 
-When a logical change is coherent and the agent is confident in it, it commits
-promptly and runs focused tests against the committed tip. This allows Hydra's
-per-commit checks to begin without waiting for an additional agent turn. An
-agent tests before committing when confidence is low or a change is risky.
+When a logical change is coherent, run the smallest test that covers it and
+commit promptly. A Go package or named test and a Vitest file are the normal
+iteration units; do not repeatedly run a repository-wide suite after each
+commit.
 
-Run `mage tidy` before a Go commit. Run the relevant Go tests after the commit,
-and finish Go work with `go test ./...`. Run `cd web && aube run lint` after a
-web commit; put any corrections in a follow-up commit. Before final handoff,
-run `mage build` for the complete change set.
+Run `mage tidy` before a Go commit. Run relevant Go package tests while
+iterating, then run `go test ./...` once after the complete Go change. For web
+work, run targeted Vitest and ESLint checks while iterating, then run `cd web &&
+aube run lint` once after the complete web change. Before final handoff, run
+`mage build` once for the complete change set.
 
 ### Keyed frontend collections
 
@@ -61,20 +65,38 @@ duplicating synchronized array-and-map state. Keep `.find` for predicate searche
 such as "the current branch" or "the first non-empty line", where there is no
 stable lookup key.
 
-### Composer textarea layers
+### Markdown composers
 
-`HighlightedTextarea` places a transparent native textarea over a visible
-markdown backdrop. Their box metrics and scroll offsets stay identical: any
-caret-editing path that changes the textarea scroll position also synchronizes
-the backdrop immediately. Otherwise a visible word can sit over different
-source text, so clicking or double-clicking it edits the wrong range.
+`MarkdownComposer` is the shared Tiptap/ProseMirror editor used by spawn forms,
+chat, review replies, image notes, and question notes. Markdown remains the
+controlled value and persisted source of truth; the editor parses it into a
+structured live document and serializes transactions back to Markdown. Keep
+editor-only state such as the selection and attachment nodes inside that live
+document instead of adding a second persisted format.
+
+Editable and sent content share the `.rich-text-surface` presentation rules.
+Structured references and attachments are atomic inline nodes: their caret can
+sit only before or after the node, while the serialized Markdown remains a
+normal link/reference. A composer surface fills its host card, so blank-space
+clicks focus the document at its end.
 
 Generic clipboard images use `image1`, `image2`, and so on within the current
 attachment list. Upload queues reserve each filename synchronously, before a
 React render, because desktop clipboard events can arrive back-to-back in one
 batched turn.
 
+The chat composer sends with Enter by default. Its browser-local "Enter sends"
+setting gives Enter back to multiline editing; in that mode Cmd/Ctrl+Enter sends.
+Shift+Enter always adds a newline in either mode.
+
 ## Conventions
+
+### No compatibility layers by default
+
+Hydra has a single user, and its client and server update together. Replace old
+behavior outright instead of adding backward-compatibility shims, legacy aliases,
+deprecation paths, or dual-format handling. Add compatibility behavior only when
+the user explicitly asks for it.
 
 ### ASCII punctuation only
 
@@ -101,21 +123,31 @@ line. When the code-line-number preference hides the command gutter, output keep
 its own intrinsic width.
 
 Source-aware output groups each file beneath its shared, sans-serif file-path
-label. A header
-has an inset rule immediately above and below it, with no outer vertical margin;
-file and directory labels use the shared path tooltip treatments. Search results
-are grouped by each path their output names. A nonconsecutive jump between
-matches in the same file gets one inset rule at the omitted-line boundary. The
-structural header and its rules
-carry `data-copy-skip`, leaving copied source free of presentation chrome.
+label. Every text, file, and directory header wraps at the panel edge like an
+ordinary output line and sticks to the top of the output scroller until the next
+header replaces it. A header has an inset rule
+immediately above and below its padded label, with no outer vertical margin; file
+and directory labels use the shared path tooltip treatments. Search results are
+grouped by each path their output names. A nonconsecutive jump between matches in
+one file gets one full-width rule across the gutter and source at the omitted-line
+boundary. The structural header and its rules carry `data-copy-skip`, leaving
+copied source free of presentation chrome.
 
-Agents introduce a boundary the command cannot otherwise prove by printing one
-static marker: `printf '%s\n' '--- [text] <text> ---'`, `--- [file] <path> ---`,
-or `--- [dir] <path> ---`. The value is displayed exactly as written. A constant
-`echo` is accepted, but `printf` is the canonical cross-shell spelling. The
-parser correlates the marker with that constant-printing command; a marker-shaped
-line read from a file is source, and an ambiguous duplicate typed marker is left
-as ordinary output rather than guessed.
+Agents label output sections by printing one static marker:
+`echo '--- <text> ---'`, `echo '--- [file] <path> ---'`, or
+`echo '--- [dir] <path> ---'`. The untyped form is a text heading; the
+older explicit `[text]` form remains accepted for existing transcripts. In a
+Bash call with several file or directory sections, the marker goes immediately
+before every section-producing command, including the first: it introduces the
+output that follows rather than terminating the output above it. This includes
+bounded reads of different files because `sed` does not name its source and a
+range may stop early at EOF. File and directory marker values are exact paths,
+without annotations such as `(continued)`. The parser correlates the marker with
+that constant-printing command; a marker-shaped line read from a file is source,
+and an ambiguous duplicate marker is left as ordinary output rather than
+guessed. Output that identifies every section itself needs no redundant marker;
+this includes `rg -n`, unified `git diff`, and adjacent bounded ranges of the
+same file.
 
 ### Test status wording: three layers, three vocabularies
 
@@ -156,6 +188,11 @@ content uses `align="left"`. `InfoTooltip` is the preset for the `i` trigger nex
 to a section heading. Diff file-list entries show their full paths with the
 shared `FilePathLabel` treatment, while directory entries use
 `DirectoryTooltip`.
+
+Source-output file headers reveal their full path only when the visible label
+wraps or clips. That tooltip keeps its vertical placement tied to the header and
+points horizontally at the cursor, so a long wrapping path does not open a box
+far away from the text being inspected.
 
 Every tooltip can be entered: the short grace period between leaving the trigger
 and entering the box keeps it open so text can be selected and links clicked.
@@ -443,7 +480,9 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `internal/egress`, MCP stripping, the `--dangerously-skip-permissions` posture)
   -> [docs/security-audit.md](security-audit.md) (the original sandbox audit;
   its three main recommendations - gate, MCP allow-list, filtering egress proxy -
-  are now BUILT for Claude)
+  are now BUILT for Claude). Changes to which daemon environment variables a
+  head receives are covered by
+  [docs/head-environment-isolation.md](head-environment-isolation.md).
 - **User-checkoutable head branches** (the `hydra/<id>` vs `hydra-wt/<id>`
   branch-split + ff-only mirror design) ->
   [docs/user-branch-mirror.md](user-branch-mirror.md) (proposed, unbuilt

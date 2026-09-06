@@ -1535,11 +1535,26 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 	if c.Sandbox != nil {
 		out.Sandbox = &api.SandboxConfig{
 			WritablePaths:  &c.Sandbox.WritablePaths,
+			ReadablePaths:  &c.Sandbox.ReadablePaths,
 			MaskedPaths:    &c.Sandbox.MaskedPaths,
-			RestoreRo:      &c.Sandbox.RestoreRO,
 			CowPaths:       &c.Sandbox.CowPaths,
+			InheritEnv:     &c.Sandbox.InheritEnv,
 			PreSpawnScript: c.Sandbox.PreSpawnScript,
 			PreExitScript:  c.Sandbox.PreExitScript,
+		}
+		if c.Sandbox.Cache != nil {
+			cache := make(map[string]api.SandboxCacheConfig, len(c.Sandbox.Cache))
+			for key, entry := range c.Sandbox.Cache {
+				apiEntry := api.SandboxCacheConfig{}
+				if entry.Env != "" {
+					apiEntry.Env = &entry.Env
+				}
+				if entry.Path != "" {
+					apiEntry.Path = &entry.Path
+				}
+				cache[key] = apiEntry
+			}
+			out.Sandbox.Cache = &cache
 		}
 		if c.Sandbox.Network != nil {
 			n := c.Sandbox.Network
@@ -1581,17 +1596,33 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 	out := config.AgentConfig{PrePrompt: a.PrePrompt, Fullscreen: a.Fullscreen}
 	if a.Sandbox != nil {
 		sb := &config.SandboxConfig{}
+		if a.Sandbox.Cache != nil {
+			sb.Cache = make(map[string]sandbox.SharedCache, len(*a.Sandbox.Cache))
+			for key, entry := range *a.Sandbox.Cache {
+				cache := sandbox.SharedCache{}
+				if entry.Env != nil {
+					cache.Env = *entry.Env
+				}
+				if entry.Path != nil {
+					cache.Path = *entry.Path
+				}
+				sb.Cache[key] = cache
+			}
+		}
 		if a.Sandbox.WritablePaths != nil {
 			sb.WritablePaths = *a.Sandbox.WritablePaths
+		}
+		if a.Sandbox.ReadablePaths != nil {
+			sb.ReadablePaths = *a.Sandbox.ReadablePaths
 		}
 		if a.Sandbox.MaskedPaths != nil {
 			sb.MaskedPaths = *a.Sandbox.MaskedPaths
 		}
-		if a.Sandbox.RestoreRo != nil {
-			sb.RestoreRO = *a.Sandbox.RestoreRo
-		}
 		if a.Sandbox.CowPaths != nil {
 			sb.CowPaths = *a.Sandbox.CowPaths
+		}
+		if a.Sandbox.InheritEnv != nil {
+			sb.InheritEnv = *a.Sandbox.InheritEnv
 		}
 		if a.Sandbox.PreSpawnScript != nil && *a.Sandbox.PreSpawnScript != "" {
 			sb.PreSpawnScript = a.Sandbox.PreSpawnScript
@@ -1842,6 +1873,22 @@ func spawnTermSize(rows, cols *int) (uint16, uint16) {
 	return clamp(rows), clamp(cols)
 }
 
+func spawnEffort(agentType sandbox.AgentType, value *api.SpawnAgentRequestEffort) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	effort := strings.TrimSpace(string(*value))
+	switch effort {
+	case string(api.Low), string(api.Medium), string(api.High), string(api.Xhigh), string(api.Max):
+	default:
+		return "", errtrace.Wrap(fmt.Errorf("unknown effort %q; supported: low, medium, high, xhigh, max", effort))
+	}
+	if agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeCodex {
+		return "", errtrace.Wrap(fmt.Errorf("effort is only supported for claude and codex agents"))
+	}
+	return effort, nil
+}
+
 func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestObject) (api.SpawnAgentResponseObject, error) {
 	if request.Body == nil {
 		return api.SpawnAgent400JSONResponse{
@@ -1905,6 +1952,14 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	var model string
 	if request.Body.Model != nil {
 		model = strings.TrimSpace(*request.Body.Model)
+	}
+	effort, err := spawnEffort(agentType, request.Body.Effort)
+	if err != nil {
+		return api.SpawnAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: err.Error(),
+		}, nil
 	}
 
 	// Chat mode defaults on for the agent types that support it (claude, codex);
@@ -2010,6 +2065,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		Prompt:         prompt,
 		AgentType:      agentType,
 		Model:          model,
+		Effort:         effort,
 		BaseBranch:     baseBranch,
 		Adopt:          adopt,
 		Ephemeral:      ephemeral,
@@ -3288,6 +3344,107 @@ func apiDiffFiles(diffFiles []git.DiffFile) []api.DiffFile {
 	return apiFiles
 }
 
+func viewedBlobDiff(diffRoot, baseline, current, path string, ignoreWhitespace bool, contextLines int, fullContext bool, maxFullChanges, maxFullLines int) ([]git.DiffFile, error) {
+	diffContext := contextLines
+	if fullContext {
+		diffContext = fullFileContext
+	}
+	diffFiles, err := git.GetBlobDiff(diffRoot, baseline, current, path, ignoreWhitespace, diffContext)
+	if err != nil || !fullContext || len(diffFiles) != 1 {
+		return diffFiles, errtrace.Wrap(err)
+	}
+	lines := 0
+	for _, hunk := range diffFiles[0].Hunks {
+		lines += len(hunk.Lines)
+	}
+	if diffFiles[0].Additions+diffFiles[0].Deletions <= maxFullChanges && lines <= maxFullLines {
+		diffFiles[0].Expanded = true
+		diffFiles[0].TotalLines = diffFiles[0].LastLineNum()
+		return diffFiles, nil
+	}
+	return errtrace.Wrap2(git.GetBlobDiff(diffRoot, baseline, current, path, ignoreWhitespace, contextLines))
+}
+
+func (s *Server) GetAgentViewedDiff(ctx context.Context, request api.GetAgentViewedDiffRequestObject) (api.GetAgentViewedDiffResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.GetAgentViewedDiff404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
+	}
+	if request.Body == nil {
+		return nil, errtrace.Errorf("viewed diff request body is required")
+	}
+
+	headRef := "HEAD"
+	if !head.UsesProjectDirectory() {
+		if head.Branch == nil {
+			return api.GetAgentViewedDiff200JSONResponse{Files: []api.DiffFile{}, FailedPaths: []string{}}, nil
+		}
+		headRef = *head.Branch
+		if resolved, ok := resolveDefaultAgentHead(projectRoot, head.Worktree, headRef); ok {
+			headRef = resolved
+		} else {
+			return api.GetAgentViewedDiff200JSONResponse{Files: []api.DiffFile{}, FailedPaths: []string{}}, nil
+		}
+	}
+	diffRoot := projectRoot
+	includeUncommitted := request.Body.IncludeUncommitted != nil && *request.Body.IncludeUncommitted
+	if includeUncommitted && head.WorkingDir() != "" {
+		diffRoot = head.WorkingDir()
+		headRef = ""
+	}
+
+	paths := make([]string, 0, len(request.Body.ViewedBlobs))
+	failed := make([]string, 0)
+	for path := range request.Body.ViewedBlobs {
+		clean := filepath.Clean(path)
+		if path == "" || filepath.IsAbs(path) || clean != path || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			failed = append(failed, path)
+			continue
+		}
+		paths = append(paths, clean)
+	}
+	sort.Strings(paths)
+	sort.Strings(failed)
+	currentBlobs := git.HeadBlobSHAs(diffRoot, headRef, paths)
+	contextLines := pointerValue(request.Body.Context, 3)
+	maxFullChanges := pointerValue(request.Body.MaxFullChanges, 1000)
+	maxFullLines := pointerValue(request.Body.MaxFullLines, 6000)
+	ignoreWhitespace := request.Body.IgnoreWhitespace != nil && *request.Body.IgnoreWhitespace
+	fullContext := request.Body.FullContext != nil && *request.Body.FullContext
+	files := make([]git.DiffFile, 0, len(paths))
+	for _, path := range paths {
+		baseline, current := request.Body.ViewedBlobs[path], currentBlobs[path]
+		if baseline == "" || current == "" {
+			failed = append(failed, path)
+			continue
+		}
+		if baseline == current {
+			continue
+		}
+		delta, err := viewedBlobDiff(diffRoot, baseline, current, path, ignoreWhitespace, contextLines, fullContext, maxFullChanges, maxFullLines)
+		if err != nil {
+			failed = append(failed, path)
+			continue
+		}
+		files = append(files, delta...)
+	}
+	return api.GetAgentViewedDiff200JSONResponse{Files: apiDiffFiles(files), FailedPaths: failed}, nil
+}
+
+func pointerValue(value *int, fallback int) int {
+	if value != nil {
+		return *value
+	}
+	return fallback
+}
+
 func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffRequestObject) (api.GetAgentDiffResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -3356,6 +3513,10 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if request.Params.Path != nil {
 		path = *request.Params.Path
 	}
+	viewedBlobSHA := ""
+	if request.Params.ViewedBlobSha != nil {
+		viewedBlobSHA = *request.Params.ViewedBlobSha
+	}
 
 	contextLines := 3
 	if request.Params.Context != nil {
@@ -3399,14 +3560,26 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		}
 	}
 
-	// full_context expands every eligible file in one response (no per-file
-	// follow-up requests). With a path it expands just that file, which is how
-	// the client promotes a single big file to the full-content reveal model
-	// after the bulk caps left it windowed. Either way a file over the caps comes
-	// back at contextLines, so a declined promotion still answers the widened
-	// windowed request in the same round-trip.
+	// A reviewed-blob request is a one-file follow-up made after the normal diff
+	// tells the client that a previously viewed file changed. Compare that saved
+	// version directly with the latest head-side blob so already-reviewed changes
+	// do not reappear in the file card.
 	var diffFiles []git.DiffFile
-	if fullContext {
+	if viewedBlobSHA != "" {
+		if path == "" {
+			return nil, errtrace.Wrap(fmt.Errorf("viewed_blob_sha requires path"))
+		}
+		currentBlobSHA := git.HeadBlobSHAs(diffRoot, headRef, []string{path})[path]
+		if currentBlobSHA != "" && currentBlobSHA != viewedBlobSHA {
+			diffFiles, err = viewedBlobDiff(diffRoot, viewedBlobSHA, currentBlobSHA, path, ignoreWhitespace, contextLines, fullContext, maxFullChanges, maxFullLines)
+		}
+	} else if fullContext {
+		// full_context expands every eligible file in one response (no per-file
+		// follow-up requests). With a path it expands just that file, which is how
+		// the client promotes a single big file to the full-content reveal model
+		// after the bulk caps left it windowed. Either way a file over the caps comes
+		// back at contextLines, so a declined promotion still answers the widened
+		// windowed request in the same round-trip.
 		var onlyPaths []string
 		if path != "" {
 			onlyPaths = []string{path}
@@ -3420,7 +3593,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	// Append untracked files when including uncommitted changes.
-	if includeUncommitted && workingDir != "" {
+	if viewedBlobSHA == "" && includeUncommitted && workingDir != "" {
 		if untrackedDiffs, err := git.GetUntrackedDiff(workingDir, path, contextLines); err == nil {
 			diffFiles = append(diffFiles, untrackedDiffs...)
 		}
@@ -3677,7 +3850,14 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	switch err := s.sendAgentInput(ctx, projectRoot, request.AgentId, request.Body.Text, derefOr(request.Body.Origin, "")); {
+	switch err := s.sendAgentInput(
+		ctx,
+		projectRoot,
+		request.AgentId,
+		request.Body.Text,
+		derefOr(request.Body.Origin, api.MessageOrigin("")),
+		derefOr(request.Body.Reason, api.MessageReason("")),
+	); {
 	case errors.Is(err, errAgentNotRunning):
 		return api.SendAgentInput404JSONResponse{
 			Code:    404,
@@ -3707,10 +3887,10 @@ var errAgentNotRunning = errors.New("agent not found or not running")
 // handler's request object carries the project ID from the URL. Calling the
 // handler with a root in the ID field type-checks perfectly and then 404s inside
 // resolveProjectRoot ("project not found: /home/callum/code/hydra"), which is
-// exactly how review-comment, review-resolved and test-failure notices all went
+// exactly how review-comment and test-failure notices can go
 // quietly undelivered. The root is the honest signature for those callers; the
 // one ID -> root lookup stays at the HTTP edge where the ID actually comes from.
-func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text, origin string) error {
+func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text string, origin api.MessageOrigin, reason api.MessageReason) error {
 	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -3742,6 +3922,7 @@ func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text, 
 			ID:      id,
 			Content: claudestream.TextUserContent(text),
 			Origin:  origin,
+			Reason:  reason,
 		}, false)
 		return nil
 	}

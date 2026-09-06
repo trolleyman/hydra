@@ -30,9 +30,6 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   Sparkles,
-  SquareDot,
-  SquareMinus,
-  SquarePlus,
   SquareTerminal,
   TriangleAlert,
   Wrench,
@@ -41,7 +38,7 @@ import {
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
 import { Link } from '@tanstack/react-router'
-import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
+import { AgentStatus, MessageOrigin, MessageReason, type ChatEventUnion, type ChatFrame, type ChatQueuedMessage } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
@@ -54,7 +51,7 @@ import { buildOutputSpans, diagnosticSpans } from '../lib/buildOutput'
 import { isJsonOutput } from '../lib/jsonOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
-import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
+import { blamePrefixSpans, gitDiffPath, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
 import type { OutputSpan } from '../lib/outputSpan'
 import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
@@ -67,7 +64,7 @@ import { agentFileUrl, uploadFile, extractFiles, hasFilePayload, isImageFile } f
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
-import { useAutoPairStore, usePasteMarkersStore, useSpellcheckStore } from '../lib/composerPrefs'
+import { useAutoPairStore, useEnterSendsStore, usePasteMarkersStore, useSpellcheckStore } from '../lib/composerPrefs'
 import { fenceEnterEdit } from '../lib/autoPair'
 import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
@@ -87,6 +84,7 @@ import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { CommitCard } from './CommitCard'
 import { ChangeStats } from './ChangeStats'
+import { ChangeTypeIcon } from './ChangeTypeIcon'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -115,8 +113,10 @@ import { useApprovalStore } from '../stores/approvalStore'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
 import { claimOrphanResult, newToolResultLink, stashOrphanCwd, stashOrphanResult } from '../lib/toolResultLink'
 import type { ToolResultLink } from '../lib/toolResultLink'
-import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
-import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
+import { buildEditRows, hasLineNumbers, numberRows, parseEditPatch, type EditHunk, type EditRow } from '../lib/editDiff'
+import { WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
+import { diffCodeHtml } from '../lib/diffCode'
+import { CODE_LEADING, CODE_TEXT, UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS } from '../lib/diffMetrics'
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
 
 const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
@@ -151,6 +151,8 @@ import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
 import { historyThresholdTransition, isVerticalScrollbarPointer } from '../lib/chatScroll'
 import { useFeatureFlagsStore } from '../lib/featureFlags'
+
+const isMacPlatform = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -278,7 +280,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         >
           {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
           <GitMerge className="w-3 h-3 shrink-0" />
-          <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
+          <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{label}</span>
           <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
         </button>
       </Tooltip>
@@ -305,7 +307,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
                   </span>
                   <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className="shrink-0 font-mono">{m.shortSha}</span>
-                   <span className="min-w-0 flex-1 truncate">{m.subject}</span>
+                    <span className="min-w-0 flex-1 whitespace-normal break-words">{m.subject}</span>
                   </span>
                   <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px ml-auto shrink-0" />
                 </div>
@@ -323,6 +325,12 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   )
 }
 
+type MessageProvenance = {
+  origin?: MessageOrigin
+  reason?: MessageReason
+  sourceAgentId?: string
+}
+
 type ChatItem =
   // sending marks a message shown optimistically in-flow (item 26): it appears
   // the instant it's sent - above the thinking/response it triggers - and the
@@ -331,7 +339,7 @@ type ChatItem =
   // suppresses the fade/slide entrance for a message that takes the place of a
   // queued bubble already on screen (item 21) - it was visible, so re-animating
   // it as it settles reads as a flicker.
-  | { kind: 'user'; id: number; text: string; clientId?: string; sending?: boolean; noEntrance?: boolean; origin?: string; flightFrom?: ComposerFlightRect }
+  | ({ kind: 'user'; id: number; text: string; clientId?: string; sending?: boolean; noEntrance?: boolean; flightFrom?: ComposerFlightRect } & MessageProvenance)
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -508,12 +516,11 @@ function subCardLabels(sub: SubagentView, tool?: ToolItem): { label: string; des
 // message sent mid-turn stays here - visibly queued - until the turn ends).
 // clientId is the id sent to the daemon so a queued message can be reconciled
 // against the server's authoritative `queue` frame and targeted by a dequeue.
-interface PendingSend {
+interface PendingSend extends MessageProvenance {
   id: number
   clientId: string
   text: string
   queued: boolean
-  origin?: string
   flightFrom?: ComposerFlightRect
 }
 
@@ -633,10 +640,11 @@ interface ProviderEvent {
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
   // collapsed meta card / a skill card) instead of rendering them as a user turn.
   isMeta?: boolean
-  // Why a user turn exists when the user did not type it (review_comments,
-  // tests_failed, fix_conflicts, ...). Carried from the durable event so the
-  // bubble can be marked as automated - see AUTOMATED_ORIGIN.
-  origin?: string
+  // Who caused a user turn that was not typed, plus the event/action context.
+  // Carried from the durable event so the bubble can show its provenance.
+  origin?: MessageOrigin
+  reason?: MessageReason
+  sourceAgentId?: string
   // A <task-notification> bookkeeping record (a background sub-agent finishing,
   // a background command completing) arrives as a notice carrying its XML here.
   // handleProviderEvent settles the sub off it (see handleTaskNotification).
@@ -865,9 +873,16 @@ export function toProviderEvents(ev: ChatEventUnion, showEmptyReasoning = false)
         }]
       }
       const text = contentText(p.content)
-      // origin rides along so the bubble can say Hydra sent it (see
-      // AUTOMATED_ORIGIN). Absent for anything typed in the composer.
-      return text.trim() ? [{ ...base, type: 'user', origin: p.origin || undefined, message: { content: p.content as ClaudeContentBlock[] | string } }] : []
+      // Provenance rides along so the bubble can say who caused the message and
+      // why. It is absent for anything typed in the composer.
+      return text.trim() ? [{
+        ...base,
+        type: 'user',
+        origin: p.origin,
+        reason: p.reason,
+        sourceAgentId: p.source_agent_id,
+        message: { content: p.content as ClaudeContentBlock[] | string },
+      }] : []
     }
     case 'context_message':
       return [{ ...providerBase(ev, ev.payload), type: 'user', isMeta: true, message: { content: ev.payload.content as ClaudeContentBlock[] | string } }]
@@ -1945,11 +1960,9 @@ const USER_BUBBLE_CLASS =
 const AUTOMATED_BUBBLE_CLASS =
   'max-w-[85%] rounded-2xl rounded-br-md border border-dashed border-sky-300/70 dark:border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/25 px-3.5 py-2 break-words'
 
-// What each origin means, in the words the user needs. The KEY is the machine tag
-// the daemon sends (internal/http/notify.go, and the one-click callers in the diff
-// viewer); the label is short enough to sit above a bubble and the tip says what
-// caused it, because "why is this here?" is the only question this marker exists
-// to answer.
+// The label answers who caused the message; the reason-specific tip answers why.
+// Keeping those as separate protocol fields means the fixed origin enum never has
+// to encode dynamic agent IDs or grow a new value for every button.
 //
 // The test for belonging here is not "did Hydra write the words" but "did the user
 // type it in the composer" - which is why a one-click Fix with agent counts, even
@@ -1960,20 +1973,12 @@ type AutomatedOrigin = {
   settingsFragment?: string
 }
 
-const AUTOMATED_ORIGIN: Record<string, AutomatedOrigin> = {
-  review_comments: {
+const HYDRA_REASON: Partial<Record<MessageReason, AutomatedOrigin>> = {
+  [MessageReason.MessageReasonReviewComments]: {
     label: 'Sent by Hydra',
     why: <>Sent automatically when review comments were published, so the agent knows to read them. It fetches the bodies itself with <code>get_review_comments</code>.</>,
   },
-  // Nothing sends this any more - resolving a comment no longer costs a model
-  // turn (see internal/http/review_comments.go). It stays because a transcript
-  // written before that still carries the origin, and an entry missing from this
-  // map renders the turn as if the user had typed it.
-  review_resolved: {
-    label: 'Sent by Hydra',
-    why: 'Sent automatically when a review comment was resolved while the agent was working. Hydra no longer sends these: a resolved comment simply drops off the list the agent reads.',
-  },
-  tests_failed: {
+  [MessageReason.MessageReasonTestsFailed]: {
     label: 'Sent by Hydra',
     why: <>Sent automatically because this project opted in to waking an idle agent when tests fail.</>,
     settingsFragment: 'test-notifications',
@@ -1981,43 +1986,60 @@ const AUTOMATED_ORIGIN: Record<string, AutomatedOrigin> = {
   // The review slot's own. Nothing else reaches a reviewer unprompted - its
   // checkout follows the head's commits silently, precisely so that a commit
   // never costs a model turn (internal/heads/reviewsync.go).
-  review_mention: {
+  [MessageReason.MessageReasonReviewMention]: {
     label: 'Sent by Hydra',
     why: <>Sent because a review comment mentioned <code>@review</code>, so the reviewer knows it was addressed. It fetches the comment itself with <code>get_review_comments</code>.</>,
   },
-  fix_conflicts: {
-    label: 'Sent from a button',
-    why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
-  },
-  fix_test: {
+}
+
+const BUTTON_REASON: Partial<Record<MessageReason, AutomatedOrigin>> = {
+  [MessageReason.MessageReasonFixTest]: {
     label: 'Sent from a button',
     why: 'You asked the agent to fix a failing test from the tests panel - Hydra wrote the wording and sent it on your behalf.',
   },
-  review_thread: {
+  [MessageReason.MessageReasonReviewThread]: {
     label: 'Sent from a button',
     why: 'You sent a review thread to the agent - Hydra quoted it and wrote the request on your behalf.',
   },
-  unknown: {
-    label: 'Sent by Hydra',
-    why: 'Hydra sent this on your behalf rather than you typing it.',
+  [MessageReason.MessageReasonReviewComments]: {
+    label: 'Sent from a button',
+    why: 'You asked the agent to address review comments - Hydra wrote the wording and sent it on your behalf.',
   },
 }
 
-function automatedOrigin(origin?: string): AutomatedOrigin | null {
+function automatedOrigin(origin?: MessageOrigin, reason?: MessageReason, sourceAgentId?: string): AutomatedOrigin | null {
   if (!origin) return null
-  if (origin.startsWith('agent:')) {
-    const id = origin.slice('agent:'.length)
+  if (origin === MessageOrigin.MessageOriginAgent) {
     return {
-      label: `Sent by agent ${id}`,
-      why: `Hydra agent ${id} sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.`,
+      label: sourceAgentId ? `Sent by agent ${sourceAgentId}` : 'Sent by an agent',
+      why: sourceAgentId
+        ? `Hydra agent ${sourceAgentId} sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.`
+        : "A Hydra agent sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.",
     }
   }
-  return AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown
+  if (origin === MessageOrigin.MessageOriginButton) {
+    return (reason && BUTTON_REASON[reason]) || {
+      label: 'Sent from a button',
+      why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
+    }
+  }
+  if (origin === MessageOrigin.MessageOriginHydra) {
+    return (reason && HYDRA_REASON[reason]) || {
+      label: 'Sent by Hydra',
+      why: 'Hydra sent this on your behalf rather than you typing it.',
+    }
+  }
+  return null
 }
 
 // Quiet code/output panels inside tool cards.
 const PANEL_CLASS =
   'rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a]'
+
+// Tool-card code is denser than a repository diff, but it follows the same Code
+// size preference. Keep its 16px base leading while stepping both dimensions
+// together so a larger code font never collides with the line above it.
+const CHAT_CODE_LEADING = 'leading-[calc(1rem_+_var(--app-font-code-step,_0px))]'
 
 // The send button's terracotta accent.
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
@@ -2156,7 +2178,7 @@ function CodePanel({ code, lang, gutterDigits }: { code: string; lang: string; g
   )
   if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} gutterDigits={gutterDigits} />
 
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   if (marked != null) {
     return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
   }
@@ -2237,7 +2259,7 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
     () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
     [html, ws],
   )
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
   if (marked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
   const plain = stripAnsi(text) || '(no output)'
   const plainMarked = markWhitespaceText(plain, ws)
@@ -2484,7 +2506,7 @@ function ReviewContextPanel({ context, lang }: { context: string; lang: string }
     [rows, lang, ws],
   )
   return (
-    <div className="border-t border-stone-200 dark:border-white/[0.06] bg-white dark:bg-[#20201e] font-mono text-2xs leading-4 max-h-64 overflow-y-auto">
+    <div className={`border-t border-stone-200 dark:border-white/[0.06] bg-white dark:bg-[#20201e] font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-y-auto`}>
       {rows.map((row, i) => (
         <div
           key={i}
@@ -2646,13 +2668,18 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
-        const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
+        const stats = fileChangeCounts(diff, kind)
+        const changeType = kind === 'add' ? 'added' : kind === 'delete' ? 'removed' : 'modified'
         return (
-          <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
+          <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
             {showFileHeaders && (
-              <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-                <FilePathLabel path={path} className="flex-1 font-medium" />
-                <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
+              <div className="flex items-center gap-1.5 border-b border-gray-200 bg-gray-50 px-2.5 py-1.5 dark:border-gray-700 dark:bg-gray-800">
+                <FilePathLabel
+                  path={path}
+                  className="min-w-0 flex-1 font-medium"
+                  trailing={<ChangeTypeIcon type={changeType} />}
+                />
+                <ChangeStats additions={stats.additions} deletions={stats.deletions} className="ml-auto font-medium" />
               </div>
             )}
             {diff && <UnifiedDiffPanel diff={diff} lang={langFromPath(path)} kind={kind} />}
@@ -2663,48 +2690,99 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
   )
 }
 
-function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
-  const rows = useMemo(() => {
-    // Codex uses the same field for two distinct representations: updates are
-    // unified diffs, while add/delete items contain the complete file text.
-    // Only unified-diff mode has a structural prefix to remove. Inferring that
-    // from each line corrupts full files whose content begins with space/+/-.
-    const unified = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(diff)
-    // Plain loop (not flatMap with captured counters): the react-hooks
-    // immutability rule flags reassigning closure-captured `let`s during render.
-    let oldLine = kind === 'delete' ? 1 : 0
-    let newLine = kind === 'add' ? 1 : 0
-    const out: { text: string; added: boolean; removed: boolean; oldNo: string; newNo: string }[] = []
-    for (const line of diff.replace(/\n$/, '').split('\n')) {
-      const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
-      if (hunk) {
-        oldLine = Number(hunk[1])
-        newLine = Number(hunk[2])
-        continue
-      }
-      const hasAddedMarker = unified && line.startsWith('+') && !line.startsWith('+++')
-      const hasRemovedMarker = unified && line.startsWith('-') && !line.startsWith('---')
-      const added = kind === 'add' || hasAddedMarker
-      const removed = kind === 'delete' || hasRemovedMarker
-      const oldNo = added ? '' : String(oldLine++)
-      const newNo = removed ? '' : String(newLine++)
-      out.push({ text: (hasAddedMarker || hasRemovedMarker || (unified && line.startsWith(' '))) ? line.slice(1) : line, added, removed, oldNo, newNo })
+// fileChangeRows normalizes Codex's two `changes[].diff` representations into
+// the EditRow model shared by every compact Edit preview.
+// eslint-disable-next-line react-refresh/only-export-components -- exported for the focused parser test
+export function fileChangeRows(diff: string, kind: string): EditRow[] {
+  // Codex uses the same field for two distinct representations: updates are
+  // unified diffs, while add/delete items contain the complete file text.
+  const body = diff.replace(/\n$/, '')
+  if (kind === 'add') return numberRows(buildEditRows('', body))
+  if (kind === 'delete') return numberRows(buildEditRows(body, ''))
+
+  const hunks: EditHunk[] = []
+  let current: EditHunk | null = null
+  for (const line of body.split('\n')) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+    if (hunk) {
+      current = { oldStart: Number(hunk[1]), newStart: Number(hunk[2]), lines: [] }
+      hunks.push(current)
+      continue
     }
-    return out
-  }, [diff, kind])
-  const ws = useWhitespaceMarks()
-  const highlighted = useMemo(
-    () => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext').map((l) => markWhitespace(l, ws)),
-    [rows, lang, ws],
+    if (current && /^[ +\-\\]/.test(line)) current.lines.push(line)
+  }
+  return hunks.length ? buildEditRows('', '', hunks) : buildEditRows(body, body)
+}
+
+// Counts are derived from the rows the preview actually renders, so malformed
+// or context-only input cannot claim changes the card does not show.
+// eslint-disable-next-line react-refresh/only-export-components -- exported for the focused parser test
+export function fileChangeCounts(diff: string, kind: string): { additions: number; deletions: number } {
+  return fileChangeRows(diff, kind).reduce(
+    (counts, row) => {
+      if (row.type === 'add') counts.additions++
+      if (row.type === 'del') counts.deletions++
+      return counts
+    },
+    { additions: 0, deletions: 0 },
   )
+}
+
+function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; kind: string }) {
+  // Parse into the model ordinary Edit tools use. This gives Codex previews the
+  // repository diff's word pairing rather than a second approximation of it.
+  const rows = useMemo(() => fileChangeRows(diff, kind), [diff, kind])
+  return <DiffPreview rows={rows} lang={lang} />
+}
+
+// DiffPreview is the compact, non-interactive form of the repository's unified
+// diff rows. Codex multi-file edits and ordinary Edit tools both end here; the
+// repository diff shares its syntax/word/whitespace composition and metrics.
+function DiffPreview({ rows, lang, framed = false }: { rows: EditRow[]; lang: string; framed?: boolean }) {
+  const numbered = useMemo(() => hasLineNumbers(rows), [rows])
+  const ws = useWhitespaceMarks()
+  const html = useMemo(() => {
+    const oldSrc: string[] = []
+    const newSrc: string[] = []
+    const pick = rows.map((row) => {
+      if (row.type !== 'add' && row.type !== 'gap') oldSrc.push(row.content)
+      if (row.type !== 'del' && row.type !== 'gap') newSrc.push(row.content)
+      return row.type === 'del' ? oldSrc.length - 1 : newSrc.length - 1
+    })
+    const oldLines = highlightLines(oldSrc.join('\n'), lang || 'plaintext')
+    const newLines = highlightLines(newSrc.join('\n'), lang || 'plaintext')
+    return rows.map((row, i) => row.type === 'gap'
+      ? ''
+      : (row.type === 'del' ? oldLines[pick[i]] : newLines[pick[i]]) ?? '')
+  }, [rows, lang])
+
   return (
-    <div className="bg-white dark:bg-[#20201e] font-mono text-2xs leading-4">
+    <div className={`max-h-64 overflow-auto bg-white dark:bg-gray-900 ${framed ? 'rounded-md border border-gray-200 dark:border-gray-700' : ''}`} data-copy-code>
       {rows.map((row, i) => (
-        <div key={i} className={`grid ${kind === 'add' || kind === 'delete' ? 'grid-cols-[2.25rem_1fr]' : 'grid-cols-[2.25rem_2.25rem_1fr]'} ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
-          {kind !== 'add' && <span data-copy-skip className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>}
-          {kind !== 'delete' && <span data-copy-skip className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>}
-          <span className={`min-w-0 whitespace-pre-wrap break-words px-2 ${row.added ? 'text-emerald-900 dark:text-emerald-200' : row.removed ? 'text-red-900 dark:text-red-200' : 'text-stone-700 dark:text-stone-300'}`} dangerouslySetInnerHTML={{ __html: highlighted[i] ?? '' }} />
-        </div>
+        row.type === 'gap' ? (
+          <div key={i} className={`select-none border-y border-gray-200 px-2 font-mono text-gray-400 dark:border-gray-700 dark:text-gray-600 ${CODE_TEXT} ${CODE_LEADING}`}>...</div>
+        ) : (() => {
+          const isAdd = row.type === 'add'
+          const isDel = row.type === 'del'
+          const bg = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
+          const marker = isAdd ? '+' : isDel ? '-' : ' '
+          const markerCls = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
+          const code = diffCodeHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS, ws)
+          return (
+            <div key={i} data-copy-line className={`${UNIFIED_ROW} ${bg}`}>
+              {numbered && (
+                <div data-copy-skip className={UNIFIED_GUTTER}>
+                  <span className={UNIFIED_LINE_NUM_CLASS}>{row.oldNum ?? ''}</span>
+                  <span className={UNIFIED_LINE_NUM_CLASS}>{row.newNum ?? ''}</span>
+                </div>
+              )}
+              <span className={`${UNIFIED_MARKER} ${markerCls}`}>{marker}</span>
+              {code != null
+                ? <span className={UNIFIED_CODE_CLASS} dangerouslySetInnerHTML={{ __html: code }} />
+                : <span className={UNIFIED_CODE_CLASS}>{row.content}</span>}
+            </div>
+          )
+        })()
       ))}
     </div>
   )
@@ -2729,7 +2807,7 @@ function GutterCodePanel({ nums, code, lang, gutterDigits }: { nums: string[]; c
           on one line. See lib/copyMarkdown. */}
       <div
         data-copy-code
-        className="grid grid-cols-[auto_1fr] text-2xs leading-4 font-mono"
+        className={`grid grid-cols-[auto_1fr] font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING}`}
         style={gutterDigits == null ? undefined : { gridTemplateColumns: `calc(${gutterDigits}ch + 1rem + 1px) minmax(0, 1fr)` }}
       >
         {nums.map((n, i) => (
@@ -2835,6 +2913,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   let run: MatchLine[] = []
   let runLang = ''
   let previous: MatchLine | null = null
+  let separatedFrom: MatchLine | null = null
   let headerPath = ''
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
@@ -2858,16 +2937,21 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
+      separatedFrom ??= previous
       previous = null
-      rows.push({ num: '', html: '', tone: 'plain' })
       continue
+    }
+    const nextPath = line.path || onlyPath
+    if (separatedFrom) {
+      const previousPath = separatedFrom.path || onlyPath
+      if (previousPath && previousPath === nextPath) rows.push(scriptDivider())
+      separatedFrom = null
     }
     const lang = line.path ? langFromPath(line.path) : only
     const discontinuous = previous && !consecutiveMatchLines(previous, line)
     if (lang !== runLang || discontinuous) {
       flush()
       const previousPath = previous?.path || onlyPath
-      const nextPath = line.path || onlyPath
       if (discontinuous && previousPath && previousPath === nextPath) rows.push(scriptDivider())
     }
     runLang = lang
@@ -2970,7 +3054,12 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'git') {
-      for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
+      const highlighted = gitOutputSpans(section.lines)
+      section.lines.forEach((line, i) => {
+        const path = gitDiffPath(line)
+        if (path) add([scriptHeader('file', path)])
+        rows.push({ num: '', html: '', spans: highlighted[i], tone: 'code' })
+      })
       continue
     }
     if (section.kind === 'summary') {
@@ -3128,7 +3217,7 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
           (see lib/copyMarkdown). */}
       <div
         data-copy-code
-        className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}
+        className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING}`}
         style={gutter && gutterDigits != null
           ? { gridTemplateColumns: `calc(${gutterDigits}ch + 1rem + 1px) minmax(0, 1fr)` } as CSSProperties
           : undefined}
@@ -3182,27 +3271,33 @@ function ScriptOutputHeader({ header, gutter }: {
 }) {
   const label = header.kind === 'file'
     ? (
-        <Tooltip content={<FilePathLabel path={header.label} nativeTitle={false} />} align="left">
-          <FilePathLabel path={header.label} nativeTitle={false} className="font-sans" />
+        <Tooltip
+          content={<FilePathLabel path={header.label} nativeTitle={false} wrap />}
+          align="left"
+          className="min-w-0 flex-1"
+          onlyWhenOverflowing
+          anchorX="pointer"
+        >
+          <FilePathLabel path={header.label} nativeTitle={false} wrap className="min-w-0 flex-1 font-sans" />
         </Tooltip>
       )
     : header.kind === 'dir'
       ? (
-          <DirectoryTooltip path={header.label}>
-            <span className="inline-flex min-w-0 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
+          <DirectoryTooltip path={header.label} className="min-w-0 flex-1">
+            <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
               <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
-              <span className="truncate">{header.label}</span>
+              <span className="min-w-0 whitespace-pre-wrap break-words">{header.label}</span>
             </span>
           </DirectoryTooltip>
         )
-      : <span className="text-stone-600 dark:text-stone-300">{header.label}</span>
+      : <span className="min-w-0 whitespace-pre-wrap break-words text-stone-600 dark:text-stone-300">{header.label}</span>
   return (
     <div
       data-copy-skip
-      className={`${gutter ? 'col-span-2' : 'col-span-1'} min-w-0 select-none`}
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} sticky top-0 z-10 min-w-0 select-none bg-[#fdfcf9] dark:bg-[#1d1c1a]`}
     >
       <div className="mx-2.5 border-t border-stone-200 dark:border-white/[0.06]" />
-      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-0.5">{label}</div>
+      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-1">{label}</div>
       <div className="mx-2.5 border-b border-stone-200 dark:border-white/[0.06]" />
     </div>
   )
@@ -3212,7 +3307,7 @@ function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
   return (
     <div
       data-copy-skip
-      className={`${gutter ? 'col-span-2' : 'col-span-1'} mx-2.5 border-t border-stone-200 dark:border-white/[0.06]`}
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} border-t border-stone-200 dark:border-white/[0.06]`}
     />
   )
 }
@@ -3230,78 +3325,14 @@ function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
 // where in the file it sits, and 1..N numbers would be a lie. See lib/editDiff.
 //
 // A "replace all" chip surfaces the replace_all flag.
-const EDIT_NUM_CLASS = 'min-h-4 select-none text-right pr-1.5 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]'
 function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean; hunks?: EditHunk[] | null }) {
   const rows = useMemo(() => buildEditRows(oldStr, newStr, hunks), [oldStr, newStr, hunks])
-  const numbered = useMemo(() => hasLineNumbers(rows), [rows])
-  const ws = useWhitespaceMarks()
-  // Each side is highlighted as ONE run of code, not line by line, so a
-  // multi-line construct (a block comment, a template string) colourises
-  // correctly - and each side is reassembled whole (context lines belong to
-  // both) so neither is highlighted as if the other side's lines were missing.
-  const html = useMemo(() => {
-    const oldSrc: string[] = []
-    const newSrc: string[] = []
-    const pick = rows.map((r) => {
-      if (r.type !== 'add') oldSrc.push(r.content)
-      if (r.type !== 'del') newSrc.push(r.content)
-      return r.type === 'del' ? oldSrc.length - 1 : newSrc.length - 1
-    })
-    const oldLines = highlightLines(oldSrc.join('\n'), lang || 'plaintext')
-    const newLines = highlightLines(newSrc.join('\n'), lang || 'plaintext')
-    return rows.map((r, i) => (r.type === 'del' ? oldLines[pick[i]] : newLines[pick[i]]) ?? '')
-  }, [rows, lang])
   return (
     <div className="space-y-1">
       {replaceAll && (
         <div className="text-3xs font-medium text-amber-600 dark:text-amber-400/90 select-none">replace all</div>
       )}
-      <div className={`${PANEL_CLASS} max-h-64 overflow-auto py-1.5`}>
-        {/* data-copy-code / data-copy-line: grid cells are not block elements,
-            so without them a copy hands over every line run together (see
-            lib/copyMarkdown). The -/+ marker sits INSIDE the copied cell and
-            the line numbers outside it, so what you copy is a diff you can
-            paste, not a column of numbers. */}
-        <div data-copy-code className={`grid ${numbered ? 'grid-cols-[auto_auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}>
-          {rows.map((row, i) => {
-            if (row.type === 'gap') {
-              return (
-                <span key={i} className="col-span-full select-none px-2 text-stone-400 dark:text-stone-600 border-y border-stone-200/70 dark:border-white/[0.06] my-0.5">
-                  ...
-                </span>
-              )
-            }
-            const isAdd = row.type === 'add'
-            const isDel = row.type === 'del'
-            const bg = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
-            const marker = isAdd ? '+' : isDel ? '-' : ' '
-            const markerCls = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-stone-300 dark:text-stone-700'
-            // Whitespace marks last, over the word diff as well as the highlighting.
-            const code = markWhitespace(row.ranges?.length
-              ? renderWordDiffHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
-              : html[i], ws)
-            return (
-              <Fragment key={i}>
-                {numbered && (
-                  <>
-                    {/* Each number column carries its own right-hand rule, so
-                        the old and new sides are separated the same way the
-                        diff viewer's unified gutter separates them (see
-                        UNIFIED_LINE_NUM_CLASS). min-h keeps a blank line one
-                        row tall. */}
-                    <span data-copy-skip className={`${EDIT_NUM_CLASS} pl-2 ${bg}`}>{row.oldNum ?? ''}</span>
-                    <span data-copy-skip className={`${EDIT_NUM_CLASS} pl-1.5 ${bg}`}>{row.newNum ?? ''}</span>
-                  </>
-                )}
-                <span data-copy-line className={`min-w-0 whitespace-pre-wrap break-words pl-1.5 pr-2 text-stone-800 dark:text-stone-200 ${bg}`}>
-                  <span className={`select-none mr-1 ${markerCls}`}>{marker}</span>
-                  <span dangerouslySetInnerHTML={{ __html: code }} />
-                </span>
-              </Fragment>
-            )
-          })}
-        </div>
-      </div>
+      <DiffPreview rows={rows} lang={lang} framed />
     </div>
   )
 }
@@ -3340,7 +3371,7 @@ function parseMemory(raw: string): { reminder: string | null; yaml: string; body
 function MemoryPanel({ text }: { text: string }) {
   const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
   const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
-  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono ${CODE_TEXT} ${CHAT_CODE_LEADING} max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   return (
     <div className="space-y-2">
       {reminder && (
@@ -4052,6 +4083,18 @@ const ToolCard = memo(function ToolCard({
   const changedPaths = isFileChanges
     ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
     : []
+  const fileChangeTotals = isFileChanges
+    ? (input!.changes as unknown[]).reduce<{ additions: number; deletions: number }>((totals, raw) => {
+        if (!raw || typeof raw !== 'object') return totals
+        const change = raw as Record<string, unknown>
+        const kindObj = change.kind && typeof change.kind === 'object' ? change.kind as Record<string, unknown> : null
+        const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
+        const counts = fileChangeCounts(typeof change.diff === 'string' ? change.diff : '', kind)
+        totals.additions += counts.additions
+        totals.deletions += counts.deletions
+        return totals
+      }, { additions: 0, deletions: 0 })
+    : null
   const summary = mem
     ? `memory ${mem}`
     : toolResult
@@ -4181,6 +4224,13 @@ const ToolCard = memo(function ToolCard({
           <span className="shrink-0 self-center text-3xs text-amber-600 dark:text-amber-400/90 animate-pulse">
             {awaitingApproval ? 'needs approval' : 'running'}
           </span>
+        )}
+        {fileChangeTotals && (
+          <ChangeStats
+            additions={fileChangeTotals.additions}
+            deletions={fileChangeTotals.deletions}
+            className="ml-auto font-medium"
+          />
         )}
         {open && (
           <button
@@ -6056,17 +6106,18 @@ const ChatUserMessage = memo(function ChatUserMessage({
   sending,
   dimmed,
   origin,
+  reason,
+  sourceAgentId,
   projectId,
   linkCtx,
   flightFrom,
 }: {
   text: string
   sending?: boolean
-  // Why this turn exists when the user did not type it. The chat could not tell
-  // "you said this" from "Hydra said this for you" - both arrive as a user turn -
-  // which mattered most for the ones that ARE actions you took, one click at a
-  // time: Fix with agent, Resolve with agent. See AUTOMATED_ORIGIN.
-  origin?: string
+  // Provenance for a turn the user did not type in the composer.
+  origin?: MessageOrigin
+  reason?: MessageReason
+  sourceAgentId?: string
   // dimmed renders the muted (opacity-75) bubble without the "Sending..." row -
   // used for a queued message pinned under the transcript, so it shows the same
   // image thumbnails / chips as a finalized turn instead of raw upload paths.
@@ -6086,7 +6137,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   const lightboxItems = attachmentLightboxItems(attachments)
   const inlineAttachmentNames = new Set(Array.from(body.matchAll(/\[([^\]\n]+)\]/g), (match) => match[1]))
   const trailingAttachments = attachments.filter((attachment) => !inlineAttachmentNames.has(attachment.filename))
-  const auto = automatedOrigin(origin)
+  const auto = automatedOrigin(origin, reason, sourceAgentId)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const flewRef = useRef(false)
   useLayoutEffect(() => {
@@ -7336,6 +7387,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
   const composerSpellcheck = useSpellcheckStore((s) => s.enabled)
+  // Enter sends by default. The Browser setting flips unmodified Enter back to
+  // a newline and makes Cmd/Ctrl+Enter the explicit send shortcut.
+  const enterSends = useEnterSendsStore((s) => s.enabled)
+  const sendShortcutKeys = enterSends ? ['Enter'] : isMacPlatform ? ['Cmd', 'Enter'] : ['Ctrl', 'Enter']
   // Whether the composer auto-pairs (a Browser setting, default on). The shared
   // textarea applies the rules itself; this composer needs the flag because it
   // owns Enter (which sends), so the fence-body step is its call to make.
@@ -7455,6 +7510,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems([])
     setChatError(null)
+    setApiKeyReal(false)
     itemTsRef.current = new Map()
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
@@ -8261,17 +8317,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // any queued bubble the server still lists, and add server-queued messages
     // we don't have (on reconnect, local pending was reset, so this restores the
     // whole queue - item 21's survive-navigation guarantee).
-    const reconcileQueue = (messages: { id?: string; content?: unknown; origin?: string }[]) => {
+    const reconcileQueue = (messages: ChatQueuedMessage[]) => {
       const server = messages
-        .filter((m): m is { id: string; content?: unknown; origin?: string } => typeof m.id === 'string')
-        .map((m) => ({ clientId: m.id, text: contentText(m.content), origin: m.origin }))
+        .filter((m) => typeof m.id === 'string')
+        .map((m) => ({
+          clientId: m.id,
+          text: contentText(m.content),
+          origin: m.origin,
+          reason: m.reason,
+          sourceAgentId: m.source_agent_id,
+        }))
       const serverIds = new Set(server.map((s) => s.clientId))
       setPendingSends((prev) => {
         const kept = prev.filter((p) => !p.queued || serverIds.has(p.clientId))
         const keptIds = new Set(kept.map((p) => p.clientId))
         const added = server
           .filter((s) => !keptIds.has(s.clientId))
-          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true, origin: s.origin }))
+          .map((s) => ({ id: sendSeqRef.current++, queued: true, ...s }))
         return [...kept, ...added]
       })
     }
@@ -8315,7 +8377,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '', origin = '') => {
+    const routeUserText = (
+      rawText: string,
+      ts?: number | null,
+      isMeta?: boolean,
+      clientId = '',
+      provenance: MessageProvenance = {},
+    ) => {
       // Machine-injected context (a Skill's SKILL.md body, the resume nudge) rides
       // in a `user` envelope but was never typed - route it to a skill/meta card
       // off the isMeta flag rather than the content-sniffing below. It doesn't
@@ -8449,7 +8517,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      push({ kind: 'user', text, noEntrance: fromQueue, origin: origin || undefined })
+      push({ kind: 'user', text, noEntrance: fromQueue, ...provenance })
     }
 
     const handleProviderEvent = (ev: ProviderEvent) => {
@@ -8588,13 +8656,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
+            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '', {
+              origin: ev.origin,
+              reason: ev.reason,
+              sourceAgentId: ev.sourceAgentId,
+            })
             return
           }
           const editPatch = eventEditPatch(ev, content ?? [])
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
+              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '', {
+                origin: ev.origin,
+                reason: ev.reason,
+                sourceAgentId: ev.sourceAgentId,
+              })
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), editPatch, ev.cwd)
@@ -9063,6 +9139,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'state_snapshot': {
+          // Billing auth is session state, not conversation history. The init
+          // event that announced it may be older than the newest replay page,
+          // so seed cost visibility from the durable projection.
+          if (typeof msg.state?.api_key_source === 'string') {
+            setApiKeyReal(msg.state.api_key_source !== 'none')
+          }
           // Persisted "/" autocomplete list, so old heads whose system:init has
           // scrolled past the replayed history window still populate the popup.
           if (Array.isArray(msg.state?.slash_commands) && msg.state.slash_commands.length) {
@@ -9629,15 +9711,31 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // resumes with a normal step instead of a teleport.
       const dt = Math.min(Math.max(now - followPrevTimeRef.current, 0), 50)
       followPrevTimeRef.current = now
-      const dist = node.scrollHeight - node.clientHeight - node.scrollTop
-      if (dist <= 0.5) {
-        node.scrollTop = node.scrollHeight
+      const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight)
+      const dist = maxScrollTop - node.scrollTop
+      // WebKitGTK can clamp scrollTop to a fractional maximum which remains
+      // more than 0.5px below scrollHeight - clientHeight. Retrying that
+      // unreachable remainder schedules a frame forever and, on WebKitGTK,
+      // repaints the whole window on every attempt. One CSS pixel is below the
+      // visible precision of this easing and gives that engine a firm exit.
+      if (dist <= 1) {
+        node.scrollTop = maxScrollTop
         return
       }
       // Exponential ease-out: frame-rate independent, and it converges on a
       // target that is still moving while tokens stream in. The floor keeps the
       // tail from crawling sub-pixel forever.
-      node.scrollTop += Math.max(dist * (1 - Math.exp(-dt / FOLLOW_TAU_MS)), Math.min(dist, 0.5))
+      const previousTop = node.scrollTop
+      node.scrollTop = Math.min(
+        maxScrollTop,
+        previousTop + Math.max(dist * (1 - Math.exp(-dt / FOLLOW_TAU_MS)), Math.min(dist, 0.5)),
+      )
+      // Also stop when the engine made no observable progress. This covers a
+      // clamped value whose reported maximum differs by more than our epsilon.
+      if (node.scrollTop <= previousTop + 0.01 || maxScrollTop - node.scrollTop <= 1) {
+        node.scrollTop = maxScrollTop
+        return
+      }
       followRafRef.current = requestAnimationFrame(step)
     }
     followRafRef.current = requestAnimationFrame(step)
@@ -10581,10 +10679,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setSlashDismissed(false)
   }
 
-  // Ctrl+Enter / Alt+Enter insert a newline explicitly (plain Enter sends), so
-  // they carry the same markdown list continuation the shared textarea handler
-  // gives Shift+Enter - the box shouldn't behave differently depending on which
-  // newline key you reached for.
+  // Explicit newline shortcuts carry the same markdown list continuation the
+  // shared textarea handler gives an ordinary multiline Enter.
   function insertNewline(ta: HTMLTextAreaElement) {
     const start = ta.selectionStart ?? input.length
     const end = ta.selectionEnd ?? input.length
@@ -10659,12 +10755,29 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       return true
     }
     if (e.key !== 'Enter' || e.isComposing) return false
-    if (e.altKey || (e.ctrlKey && !e.metaKey)) {
+    if (e.altKey) {
       e.preventDefault()
       context.editor.commands.setHardBreak()
       return true
     }
-    if (!e.shiftKey && !e.metaKey) {
+    // Shift+Enter always inserts a hard break. With "Enter sends" off, plain
+    // Enter performs the editor's structural newline; Cmd/Ctrl+Enter is then
+    // the explicit send gesture. Tables retain their own row-navigation handler.
+    if (e.shiftKey) {
+      e.preventDefault()
+      context.editor.commands.setHardBreak()
+      return true
+    }
+    if (!enterSends && !e.metaKey && !e.ctrlKey) {
+      if (context.editor.isActive('table')) return false
+      e.preventDefault()
+      if (context.editor.isActive('codeBlock')) context.editor.commands.insertContent('\n')
+      else if (context.editor.isActive('taskItem')) context.editor.commands.splitListItem('taskItem')
+      else if (context.editor.isActive('listItem')) context.editor.commands.splitListItem('listItem')
+      else context.editor.commands.splitBlock()
+      return true
+    }
+    if (enterSends || e.metaKey || e.ctrlKey) {
       e.preventDefault()
       send()
       return true
@@ -10756,14 +10869,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
       }
-      // Shift+Enter is the browser's native newline; Ctrl+Enter and Alt+Enter
-      // insert one too (item 7) - they'd otherwise do nothing.
-      if (e.altKey || (e.ctrlKey && !e.metaKey)) {
+      // Shift+Enter always inserts a newline. Alt+Enter remains a newline too.
+      // With "Enter sends" off, an unmodified Enter inserts one as well.
+      if (e.shiftKey || e.altKey || (!enterSends && !e.metaKey && !e.ctrlKey)) {
         e.preventDefault()
         insertNewline(e.currentTarget)
         return
       }
-      if (!e.shiftKey && !e.metaKey) {
+      // Enter sends by default, with or without Cmd/Ctrl. When the preference
+      // is off, only Cmd/Ctrl+Enter reaches this branch.
+      if (enterSends || e.metaKey || e.ctrlKey) {
         e.preventDefault()
         send()
       }
@@ -10869,7 +10984,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={item.flightFrom} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} reason={item.reason} sourceAgentId={item.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={item.flightFrom} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -10965,6 +11080,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           <div className="flex justify-center">
             <Tooltip
               align="left"
+              className="min-w-0 max-w-full"
               content={
                 <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
               }
@@ -10974,7 +11090,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 tabIndex={clickable ? 0 : undefined}
                 onClick={clickable ? activate : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-                className={`${COMMIT_PILL} relative max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
+                className={`${COMMIT_PILL} relative min-w-0 max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
               >
                 <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[16px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
                 <span className="relative flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
@@ -10983,7 +11099,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 {/* The sha is monospace and the subject is not, so their line boxes
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
-                <span className="truncate optical-center">{item.subject}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{item.subject}</span>
                 <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
               </div>
             </Tooltip>
@@ -11453,7 +11569,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={p.flightFrom} />
+                  <ChatUserMessage text={p.text} dimmed origin={p.origin} reason={p.reason} sourceAgentId={p.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={p.flightFrom} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
@@ -11701,13 +11817,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   ~0.7px (half the cap-height difference between 10px and 12px)
                   and the buttons centre on the same ink the text does. */}
               <div className="ml-auto flex items-center gap-1.5">
-                {/* Item 6: surface what Enter will do only when it isn't the
-                    obvious thing - i.e. the message will queue, draining into
-                    the running turn at its next step (terminal-style
-                    steering); otherwise show nothing. */}
+                {/* Item 6: surface what the configured send shortcut will do
+                    only when it isn't the obvious thing - i.e. the message will
+                    queue, draining into the running turn at its next step
+                    (terminal-style steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
                   <span className="hidden select-none sm:inline">
-                    <ShortcutHint keys={['Enter']} note="to queue" />
+                    <ShortcutHint keys={sendShortcutKeys} note="to queue" />
                   </span>
                 )}
                 {/* Context-left chip (item 40): how much of the model's window
@@ -11797,7 +11913,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
-                <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: ['Enter'] }} side="top">
+                <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: sendShortcutKeys }} side="top">
                   <button
                     onClick={() => send()}
                     disabled={!canSend}

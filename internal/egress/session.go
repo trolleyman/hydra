@@ -2,7 +2,6 @@ package egress
 
 import (
 	"log"
-	"strconv"
 
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -16,8 +15,9 @@ type Session struct {
 	// Env is the HTTP(S)_PROXY environment to append to the command's env.
 	// Empty when no filtering proxy runs.
 	Env []string
-	// Wrap is the sandbox.Options.EgressWrap for hard mode (pasta netns + nft
-	// lock around the bwrap argv); nil otherwise.
+	// Wrap is the sandbox.Options.EgressWrap for Linux hard mode (pasta netns +
+	// nft lock around the bwrap argv); Darwin enforces hard mode in BuildSpec, so
+	// Wrap remains nil there.
 	Wrap func(bwrapArgv []string, preExec string) []string
 
 	proxy *Proxy
@@ -44,9 +44,9 @@ func (s *Session) Close() {
 //     netPol.Enabled == false.
 //   - unrestricted / unfiltered: no proxy, open host network.
 //   - advisory: filtering proxy on host loopback, enforced via proxy env only.
-//   - hard: pasta netns + nft lock + CONNECT proxy (Wrap non-nil). When the
-//     boundary can't be built (tooling unavailable, proxy failed) it fails
-//     closed (netPol.Enabled set false, like heads) - never degrades.
+//   - hard: platform kernel boundary + CONNECT proxy (pasta+nft Wrap on Linux,
+//     Seatbelt proxy-port policy on Darwin). When the boundary cannot be built
+//     it fails closed (netPol.Enabled set false, like heads) - never degrades.
 //
 // netPol is taken by pointer because a hard-mode failure must flip Enabled
 // off before the caller hands the policy to sandbox.BuildSpec.
@@ -79,15 +79,11 @@ func StartCommandEgress(id string, agentType sandbox.AgentType, netPol *sandbox.
 	port := HostPort(p.Addr())
 
 	if netPol.Mode == sandbox.NetHard {
-		if hm := DetectHardMode(); hm.Available && port != 0 {
-			proxyURL := "http://" + MapAddr + ":" + strconv.Itoa(port)
-			loopbackPorts := netPol.AllowedLoopbackPorts
-			log.Printf("hydra egress[%s]: hard egress boundary active (pasta+nft), %d allow-listed host(s); proxy=%s (host listener %s); inbound forward: %s", id, len(allowed), proxyURL, p.Addr(), InboundPortSpec(inboundPort))
+		if boundary, ok := PrepareHardBoundary(id, port, netPol, inboundPort); ok {
+			log.Printf("hydra egress[%s]: hard egress boundary active (%s), %d allow-listed host(s); proxy=%s (host listener %s); inbound port: %d", id, boundary.Mechanism, len(allowed), boundary.ProxyURL, p.Addr(), inboundPort)
 			return &Session{
-				Env: ProxyEnv(proxyURL),
-				Wrap: func(bwrapArgv []string, preExec string) []string {
-					return HardWrapArgv(hm, port, loopbackPorts, inboundPort, bwrapArgv, preExec, PastaLogFile(id))
-				},
+				Env:   ProxyEnv(boundary.ProxyURL),
+				Wrap:  boundary.Wrap,
 				proxy: p,
 			}
 		}

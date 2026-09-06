@@ -1,14 +1,19 @@
 package gate
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"braces.dev/errtrace"
 )
+
+var readableGrantsMu sync.Mutex
 
 // The "ask" round-trip uses a per-head approval directory that is the agent's
 // real host path made writable inside the sandbox (the same mechanism as
@@ -34,6 +39,12 @@ const (
 	// lives in the per-head approvals dir and is removed with it when the head is
 	// killed (RemoveAgentStatusFiles).
 	grantedHostsFile = "granted-hosts.json"
+	// grantedReadablePathsFile holds exact, host-canonical paths approved for this
+	// head's current lifetime. Unlike network grants, a filesystem grant cannot be
+	// applied live: the daemon reads this overlay while rebuilding the sandbox.
+	// The approvals directory is removed when the head is killed or archived, so
+	// an "allow once" grant does not leak into a later head.
+	grantedReadablePathsFile = "granted-readable-paths.json"
 )
 
 // LoadGrantedHosts returns the hosts granted live for this session (see
@@ -74,13 +85,155 @@ func AddGrantedHost(dir, host string) error {
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, grantedHostsFile), data, 0644))
 }
 
+// LoadGrantedReadablePaths returns host paths approved for this head's current
+// lifetime. A missing or malformed file yields no paths.
+func LoadGrantedReadablePaths(dir string) []string {
+	data, err := os.ReadFile(GrantedReadablePathsPath(dir))
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	if json.Unmarshal(data, &paths) != nil {
+		return nil
+	}
+	return paths
+}
+
+// GrantedReadablePathsPath returns the host-side grant store path. Sandboxes
+// mask this exact file after binding the otherwise writable approval directory,
+// so only the daemon can add capabilities to it.
+func GrantedReadablePathsPath(dir string) string {
+	return filepath.Join(dir, grantedReadablePathsFile)
+}
+
+// EnsureGrantedReadablePathsFile creates the host-only grant store before the
+// sandbox is built, allowing the sandbox policy to mask a concrete file.
+func EnsureGrantedReadablePathsFile(dir string) error {
+	readableGrantsMu.Lock()
+	defer readableGrantsMu.Unlock()
+	return errtrace.Wrap(ensureGrantedReadablePathsFile(dir))
+}
+
+func ensureGrantedReadablePathsFile(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
+	if info, err := root.Lstat(grantedReadablePathsFile); err == nil {
+		if !info.Mode().IsRegular() {
+			return errtrace.Errorf("readable grant store is not a regular file")
+		}
+		file, err := root.OpenFile(grantedReadablePathsFile, os.O_RDWR, 0)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		defer file.Close()
+		return errtrace.Wrap(file.Chmod(0600))
+	} else if !os.IsNotExist(err) {
+		return errtrace.Wrap(err)
+	}
+	file, err := root.OpenFile(grantedReadablePathsFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if _, err := file.Write([]byte("[]\n")); err != nil {
+		_ = file.Close()
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(file.Close())
+}
+
+// AddGrantedReadablePath appends a canonical host path to the current head's
+// live grant overlay, deduplicating with the host platform's path spelling.
+func AddGrantedReadablePath(dir, path string) error {
+	readableGrantsMu.Lock()
+	defer readableGrantsMu.Unlock()
+	if err := ensureGrantedReadablePathsFile(dir); err != nil {
+		return errtrace.Wrap(err)
+	}
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." || path == "" {
+		return nil
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
+	data, err := root.ReadFile(grantedReadablePathsFile)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	var paths []string
+	if err := json.Unmarshal(data, &paths); err != nil {
+		return errtrace.Wrap(err)
+	}
+	for _, existing := range paths {
+		if filepath.Clean(existing) == path {
+			return nil
+		}
+	}
+	paths = append(paths, path)
+	data, err = json.MarshalIndent(paths, "", "  ")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	data = append(data, '\n')
+	tmp, tmpName, err := createRootTemp(root, ".readable-grants-")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Remove(tmpName)
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return errtrace.Wrap(err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return errtrace.Wrap(err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return errtrace.Wrap(err)
+	}
+	if err := tmp.Close(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if info, err := root.Lstat(grantedReadablePathsFile); err != nil || !info.Mode().IsRegular() {
+		return errtrace.Errorf("readable grant store is not a regular file")
+	}
+	return errtrace.Wrap(root.Rename(tmpName, grantedReadablePathsFile))
+}
+
+func createRootTemp(root *os.Root, prefix string) (*os.File, string, error) {
+	for range 100 {
+		var random [8]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, "", errtrace.Wrap(err)
+		}
+		name := prefix + hex.EncodeToString(random[:])
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
+			return file, name, nil
+		}
+		if !os.IsExist(err) {
+			return nil, "", errtrace.Wrap(err)
+		}
+	}
+	return nil, "", errtrace.Errorf("could not allocate temporary grant file")
+}
+
 // Request is one pending approval the gate parked. It is surfaced in the web UI
 // approval card and carries what a remembered approval needs to persist.
 type Request struct {
 	ReqID   string `json:"reqid"`
 	Tool    string `json:"tool"`
-	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | egress | bash | host_command
-	Target  string `json:"target"` // server name / "<server>__<tool>" / host / command text
+	Kind    string `json:"kind"`   // mcp | mcp_tool | webfetch | egress | bash | host_command | filesystem_read
+	Target  string `json:"target"` // server / "<server>__<tool>" / host / command / host path
 	Reason  string `json:"reason"`
 	Summary string `json:"summary"`
 	// RW is the read/write classification of an mcp_tool request ("read"/"write"/""),

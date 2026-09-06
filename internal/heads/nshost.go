@@ -137,7 +137,11 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		// path directly and receives the narrow write grant it needs.
 		hostOpts.WritablePaths = append(append([]string(nil), base.WritablePaths...), sockDir)
 	}
-	hostOpts.Argv = []string{SandboxHydraBinPath, "__sandbox-init", "--socket", sandboxSockPath}
+	hydraBin := hostOpts.HydraBinPath
+	if hydraBin == "" {
+		hydraBin = SandboxHydraBinPath
+	}
+	hostOpts.Argv = []string{hydraBin, "__sandbox-init", "--socket", sandboxSockPath}
 	hostOpts.PreSpawnScript = "" // the supervisor itself runs no pre-spawn hook
 
 	spec, err := sandbox.BuildSpec(hostOpts)
@@ -188,10 +192,15 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 			sandbox.StopScope(scopeUnit) // reap the cgroup; killing systemd-run alone may not
 		}
 		spec.Cleanup()
+		launchErr := err
 		if tail := strings.TrimSpace(errTail.String()); tail != "" {
-			return nil, errtrace.Wrap(fmt.Errorf("%w; supervisor output: %s", err, tail))
+			launchErr = fmt.Errorf("%w; supervisor output: %s", err, tail)
 		}
-		return nil, errtrace.Wrap(err)
+		// Log the same composed failure returned to attach callers. The supervisor's
+		// stderr is also streamed above, but that line alone lacks the socket path
+		// and the launch context that the browser receives.
+		log.Printf("heads: namespace host launch for %s failed: %v", id, launchErr)
+		return nil, errtrace.Wrap(launchErr)
 	}
 
 	unit := ""
@@ -272,7 +281,7 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	// it back and inject the same vars into this head's sibling sandboxed shells
 	// (StartShellSession), which do not re-run the script.
 	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sandbox.SandboxPreSpawnEnvFile(sb.TmpDir), sb.Argv)
-	req := nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes}
+	req := nshost.SpawnRequest{Argv: argv, Env: sandbox.SharedCacheEnv(sandbox.RuntimeEnv(sb.Env, sb.TmpDir, sb.InheritedEnv...), sb.CacheRoot, sb.Caches), Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes}
 	if sb.StdioPipes {
 		req.StderrPrefix = fmt.Sprintf("[%s:%s] ", agentType, id)
 	}

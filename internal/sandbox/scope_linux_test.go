@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -97,5 +98,50 @@ func TestAllPropsCapsSurviveWithoutIOWeight(t *testing.T) {
 	want := []string{"--property=IOWriteBandwidthMax=/srv/proj 100M"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("caps without IOWeight:\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestWrapScopeUsesHostBusWithoutLeakingItToPayload(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/4242")
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/4242/bus")
+
+	oldRun, oldControl, oldEnv := systemdRunPath, systemctlPath, envPath
+	systemdRunPath = "/usr/bin/systemd-run"
+	systemctlPath = "" // keep the test's stale-unit cleanup a no-op
+	envPath = "/usr/bin/env"
+	t.Cleanup(func() {
+		systemdRunPath, systemctlPath, envPath = oldRun, oldControl, oldEnv
+	})
+
+	originalEnv := []string{"HOME=/home/agent", "PATH=/agent/bin", "TOKEN=secret"}
+	spec := &Spec{
+		Path: "/usr/bin/bwrap",
+		Args: []string{"/usr/bin/bwrap", "--", "/bin/agent", "arg"},
+		Env:  append([]string(nil), originalEnv...),
+	}
+	wrapScopeSpec("hydra-test.scope", spec, ScopeLimits{}, ScopeInteractive)
+
+	for _, want := range []string{
+		"XDG_RUNTIME_DIR=/run/user/4242",
+		"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/4242/bus",
+	} {
+		if !slices.Contains(spec.Env, want) {
+			t.Errorf("wrapper environment does not contain %q: %v", want, spec.Env)
+		}
+	}
+
+	separator := slices.Index(spec.Args, "--")
+	if separator < 0 {
+		t.Fatalf("wrapped args have no separator: %v", spec.Args)
+	}
+	wantPayload := append([]string{"/usr/bin/env", "-i"}, originalEnv...)
+	wantPayload = append(wantPayload, "/usr/bin/bwrap", "--", "/bin/agent", "arg")
+	if got := spec.Args[separator+1:]; !reflect.DeepEqual(got, wantPayload) {
+		t.Errorf("payload command:\n got %v\nwant %v", got, wantPayload)
+	}
+	for _, entry := range spec.Args[separator+1:] {
+		if entry == "XDG_RUNTIME_DIR=/run/user/4242" || entry == "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/4242/bus" {
+			t.Errorf("host bus variable leaked into payload command: %q", entry)
+		}
 	}
 }

@@ -38,6 +38,9 @@ type Deps struct {
 	// the user decides (or it times out). It returns whether it was approved and a
 	// human-readable message to relay to the agent.
 	RequestAccess func(name string) (approved bool, message string)
+	// RequestReadAccess asks the user to expose one host file or directory
+	// read-only, then blocks until the user decides. Nil hides the tool.
+	RequestReadAccess func(path, why string) (approved bool, message string)
 	// GetReview returns this head's current MR link + cached forge state (status,
 	// unresolved discussions), or nil when unavailable. Populated from the per-head
 	// review file the MR watcher writes; nil disables the review tools.
@@ -320,6 +323,19 @@ func toolDefs(deps Deps) []map[string]any {
 	if deps.HostRun != nil {
 		defs = append(defs, hostRunToolDef())
 	}
+	if deps.RequestReadAccess != nil {
+		defs = append(defs, map[string]any{
+			"name":        "request_read_access",
+			"description": "Ask the user to expose one existing host file or directory read-only inside your sandbox. Use this only when the default readable paths do not contain something the task needs. Approval rebuilds and resumes the sandbox automatically; Always allow also adds the canonical path to this agent type's readable_paths.",
+			"inputSchema": map[string]any{
+				"type": "object", "required": []string{"path", "why"},
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string", "description": "Absolute host path, or a path beginning with ~/; no globs or environment variables."},
+					"why":  map[string]any{"type": "string", "description": "What you need to read there and how it is required for the current task. Shown to the user."},
+				},
+			},
+		})
+	}
 	if deps.ListAgents != nil {
 		defs = append(defs, map[string]any{
 			"name":        "list_agents",
@@ -543,6 +559,22 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 			return textResult("request_mcp_server requires a non-empty \"name\".", true)
 		}
 		approved, msg := deps.RequestAccess(args.Name)
+		return textResult(msg, !approved)
+	case "request_read_access":
+		if deps.RequestReadAccess == nil {
+			return textResult("request_read_access is not available in this session (no approval channel).", true)
+		}
+		var args struct {
+			Path string `json:"path"`
+			Why  string `json:"why"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		args.Path = strings.TrimSpace(args.Path)
+		args.Why = strings.TrimSpace(args.Why)
+		if args.Path == "" || args.Why == "" {
+			return textResult("request_read_access requires non-empty \"path\" and \"why\" values.", true)
+		}
+		approved, msg := deps.RequestReadAccess(args.Path, args.Why)
 		return textResult(msg, !approved)
 	case "list_agents":
 		if deps.ListAgents == nil {

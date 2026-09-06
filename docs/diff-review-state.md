@@ -1,13 +1,23 @@
 # Plan: per-file "viewed" state for the diff review workflow
 
-Status: **per-file viewed state BUILT (v1, client storage); the "reviewed up to"
-marker and DB-backed storage remain unbuilt.** Build steps 1-2 below are done:
+Status: **per-file viewed state and per-file changes-since-viewed are BUILT (v1,
+client storage); the head-wide "reviewed up to" marker and DB-backed storage
+remain unbuilt.** Build steps 1-2 below are done:
 `git.HeadBlobSHAs` fills `git.DiffFile.HeadBlobSHA` -> `api.DiffFile.head_blob_sha`;
 the client keys `agentViewPrefs.viewedFiles` (path -> last-viewed head blob sha)
 off it, with a "Viewed" checkbox per file card and an `N/M viewed` count in the
 Files header. Steps 3-4 (promote storage to `internal/db`; the `reviewed_up_to_sha`
 marker + *Since last review* selector) are still open, as is the optional
 auto-collapse of viewed files.
+
+When that file changes again, the diff viewer keeps the original overall file
+list but renders the file card from the stored blob to its current blob. The
+card therefore contains only work added since the user clicked Viewed, rather
+than resurfacing changes they already reviewed. Working-tree blobs are written
+to Git's object store when hashed so an uncommitted review baseline remains
+available after later edits. The client submits all changed viewed baselines in
+one bulk request; the server resolves current blob IDs together and computes the
+individual deltas sequentially, bounding request and Git-process fanout.
 
 ## Problem
 
@@ -114,7 +124,7 @@ viewing proves insufficient on its own.
 
 - `internal/git/diff.go` - `DiffFile`, `GetDiff`/`GetDiffFiles` (add blob sha).
 - `internal/http/handlers.go` - `GetAgentDiff` response mapping (`apiDiffFiles`).
-- `api/openapi.yaml` - `DiffFile` schema (then `mage generate:go` + web codegen).
+- `api/openapi.yaml` - `DiffFile` schema (then `mage generateGo` + web codegen).
 - `web/src/DiffViewer.tsx` - file cards, header count, checkbox.
 - `web/src/lib/agentViewPrefs.ts` - viewed map (v1 storage).
 - `internal/db` + `api` - only if promoting storage / adding the marker.

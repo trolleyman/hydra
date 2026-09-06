@@ -35,6 +35,35 @@ export const usePasteMarkersStore = create<PasteMarkersState>()(
   ),
 )
 
+// Which unmodified Enter behaviour the chat composer uses. By default Enter
+// sends and Cmd/Ctrl+Enter sends too. Turning this off makes Enter add a newline
+// and leaves Cmd/Ctrl+Enter as the explicit send shortcut. Shift+Enter is a
+// newline in either mode.
+export function loadEnterSends(): boolean {
+  return readLocal(StorageKeys.enterSends) !== '0'
+}
+
+interface EnterSendsState {
+  enabled: boolean
+  setEnabled: (enabled: boolean) => void
+}
+
+export const useEnterSendsStore = create<EnterSendsState>()(
+  persist(
+    (set) => ({
+      enabled: loadEnterSends(),
+      setEnabled: (enabled) => set({ enabled }),
+    }),
+    {
+      name: StorageKeys.enterSends,
+      storage: singleFieldStorage('enabled', loadEnterSends, (enabled) =>
+        writeLocal(StorageKeys.enterSends, enabled ? null : '0'),
+      ),
+      partialize: (s) => ({ enabled: s.enabled }),
+    },
+  ),
+)
+
 // Whether the composers auto-pair as you type - a typed opener brings its closer
 // with it, Enter on a "```" line opens a fenced block, and a mark typed over a
 // selection wraps it (lib/autoPair.ts has the full rules). Absent (or anything

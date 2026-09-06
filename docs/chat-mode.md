@@ -144,7 +144,10 @@ is what makes reconnect, recovery and multi-attach safe.
 ```
 
 It holds plan entries, the sub-agent graph, the active turn, any outstanding
-interaction, model, usage totals, queued messages and the observed Git head.
+interaction, model, authentication source, usage totals, queued messages and
+the observed Git head. The authentication source keeps Claude API-key cost
+footers accurate when the original `system:init` event is older than the newest
+history page.
 Complete messages, tool output, reasoning and sub-agent transcripts stay in the
 paged log: a snapshot may reference their item ids but does not grow with the
 conversation. The checkpoint is replaced atomically (temp file plus rename) at
@@ -186,6 +189,13 @@ to `conversation_started`, assistant content blocks to `assistant_message` /
 to `interaction_requested`, partial `stream_event` lines to
 `assistant_delta`/`reasoning_delta` and `usage_updated`.
 
+Claude's final `result` line carries `total_cost_usd`, a client-side estimate
+for the whole user turn. Hydra shows it in the turn footer when `system:init`
+reports API-key authentication. Subscription auth reports `apiKeySource` as
+`none`; the same estimate is not an amount billed for that turn, so Hydra hides
+it. Both values are normalized and persisted in the projection so reconnecting
+does not depend on the initial event remaining in the latest history window.
+
 Some lines produce nothing on purpose. The CLI's internal placeholders - the
 resume nudge and its synthetic reply, the note it logs when it downscales an
 image - are dropped by `claudestream.IsHiddenChatMessage` before normalization,
@@ -209,6 +219,13 @@ so a head that ran unwatched - or predates the event log - still backfills.
 Claude keeps its stream-json `set_model` control request, issued through the
 same registry operation Codex's model selection uses.
 
+The agent and model picker's **Thinking effort** choice is shared by Claude and Codex
+and remembered separately for each provider. `Default` omits the API field so
+the selected provider and model keep their own default. A fresh Claude session
+receives `--effort`; a fresh terminal-mode Codex session receives
+`model_reasoning_effort` through its config override. Resume does not reapply
+either launch override, so the saved conversation remains authoritative.
+
 ## The Codex driver
 
 For a fresh head the controller launches `codex app-server --listen stdio://`
@@ -228,10 +245,22 @@ explicitly selected the selector reads `Default`: an omitted app-server model
 deliberately uses the user's own Codex configuration, and the thread lifecycle
 never echoes a concrete replacement id. A model change is held by the controller
 and applied to the next `turn/start`; an active turn is not mutated.
+An explicitly selected thinking effort is also applied to every new
+`turn/start`. Codex owns it as a subsequent-turn override, so it remains in
+effect after the initial spawn turn without being resent on `thread/resume`.
 
 Resume repeats initialization, calls `thread/resume` with the persisted thread
 id, reads back through `thread/read`, translates the returned items with the
 live normalizer, and only then drains a queued resumed turn.
+
+If the daemon stopped while Codex was inside a tool, the persisted final turn
+can contain an `inProgress` tool item without its matching output. Hydra removes
+that one incomplete turn from Codex's model history before continuing, while
+leaving its filesystem effects and Hydra's visible tool cards intact. The
+replacement turn receives the interrupted turn's user input together with the
+queued resume message, so it continues from the current worktree without stale
+unified-exec process ids. Paginated threads use `thread/revert`; legacy threads
+use the compatible `thread/rollback` operation.
 
 Interrupt calls `turn/interrupt` with the active thread and turn ids. Cancelled,
 canceled and interrupted statuses - including failed turns whose error
@@ -371,8 +400,10 @@ one expandable `Merged <base> - N commits` row. Its expanded list connects to
 the summary as one surface: the list's top border runs along the exposed
 shoulders and opens beneath the summary. It draws the commits on a continuous
 vertical graph that reaches the list edges, and uses the shared commit card for
-each row's hover details. Ordinary commit pills use the same edge-to-edge graph
-line around their single commit dot. Hydra also
+each row's hover details. Commit subjects wrap inside ordinary pills, merge
+summaries, and expanded merge rows, while their SHA and change totals remain
+visible. Ordinary commit pills use the same edge-to-edge graph line around their
+single commit dot. Hydra also
 observes every chat that owns a merge destination before merging another head
 into it, then labels the resulting fast-forward or merge commit with the
 incoming branch. This works for both managed worktree branches and a
@@ -411,7 +442,8 @@ A queued message lives only in the checkpointed queue projection and rides in
 `state_snapshot` with its stable client-generated id, enqueue sequence and
 content. It is deliberately absent from history - the provider has not received
 a turn yet. Dequeuing removes it from the projection and emits no conversation
-event.
+event. Messages not typed in the composer also retain their `origin`, `reason`,
+and `source_agent_id` provenance fields in the queue snapshot.
 
 Draining the queue is one logical transition: append a durable `user_message`
 carrying the same client id, remove that id from the queue projection, advance
@@ -487,8 +519,11 @@ scroll-back renders the same search query, plan activity and sub-agent report as
 the original live session.
 
 **Shell output.** Command strings are decoded as shell-quoted arguments,
-including concatenated quote segments and nested `bash -lc`. An interactive
-launcher such as `bash -lc bash` may receive its real command through stdin;
+including concatenated quote segments, nested `bash -lc`, and Bash or Zsh
+launchers under `/bin`, `/usr/bin`, and `/usr/local/bin`. An empty `--format=`
+on `git show` is treated as a patch with its commit header suppressed, so its
+diff keeps source-aware highlighting. An interactive launcher such as `bash -lc
+bash` may receive its real command through stdin;
 where app-server exposes that only as the first PTY echo, the UI promotes the
 echo to the command panel, labels it inferred terminal input, and renders the
 cleaned remaining transcript as output. CRLF is a newline; only a bare carriage

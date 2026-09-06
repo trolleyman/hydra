@@ -10,10 +10,13 @@
 package checkout
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/git"
@@ -25,6 +28,10 @@ import (
 // headroom up to 4 lets freed slots stay "warm" on recently-used commits for
 // zero-cost affinity reuse.
 const maxSlots = 4
+
+const detachedRemovalMarker = ".hydra-remove-"
+
+var detachedRemovalSequence atomic.Uint64
 
 // SlotsForConcurrency sizes a worktree-slot pool for a generation concurrency.
 // Every commit-side generation holds one slot for its duration, so the pool must
@@ -246,8 +253,51 @@ func (p *Pool) Clean() {
 	for _, s := range p.all {
 		_ = git.RemoveWorktree(p.projectRoot, s.path)
 	}
-	_ = os.RemoveAll(p.dir)
+	RemoveAllDetached(p.dir)
 	_ = git.PruneWorktrees(p.projectRoot)
 	p.all = nil
 	p.free = nil
+}
+
+// RemoveAllDetached makes a disposable directory disappear from its live path
+// immediately, then reclaims its contents in the background. Renaming within
+// the parent filesystem is constant-time, while recursively unlinking a warm
+// dependency checkout can take many seconds and must not hold up daemon startup.
+// Abandoned detached directories from an interrupted cleanup are swept on the
+// next call.
+func RemoveAllDetached(dir string) {
+	for _, stale := range detachedRemovalDirs(dir) {
+		go func() { _ = os.RemoveAll(stale) }()
+	}
+	if stale := detachForRemoval(dir); stale != "" {
+		go func() { _ = os.RemoveAll(stale) }()
+	}
+}
+
+func detachForRemoval(dir string) string {
+	stale := fmt.Sprintf("%s%s%d-%d", dir, detachedRemovalMarker, os.Getpid(), detachedRemovalSequence.Add(1))
+	if err := os.Rename(dir, stale); err == nil {
+		return stale
+	}
+	// Preserve the old cleanup behavior on filesystems that cannot rename the
+	// directory. This path is exceptional; normal checkout roots and their
+	// detached names share a parent and therefore a filesystem.
+	_ = os.RemoveAll(dir)
+	return ""
+}
+
+func detachedRemovalDirs(dir string) []string {
+	parent := filepath.Dir(dir)
+	prefix := filepath.Base(dir) + detachedRemovalMarker
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	var stale []string
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			stale = append(stale, filepath.Join(parent, entry.Name()))
+		}
+	}
+	return stale
 }
