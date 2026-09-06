@@ -129,9 +129,26 @@ const syncInterval = 2 * time.Second
 const checkpointInterval = 30 * time.Second
 
 func Open(projectRoot, id string) (*Store, error) {
+	return errtrace.Wrap2(openFiles(
+		paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id),
+		paths.GetChatStateJSONFromProjectRoot(projectRoot, id),
+	))
+}
+
+// OpenDirectory opens a self-contained conversation store beneath dir. It is
+// used by clients that do not have Hydra's project/head state layout, while
+// Open preserves that layout through the same underlying implementation.
+func OpenDirectory(dir string) (*Store, error) {
+	if strings.TrimSpace(dir) == "" {
+		return nil, errtrace.Wrap(errors.New("chat store directory is empty"))
+	}
+	return errtrace.Wrap2(openFiles(filepath.Join(dir, "events.jsonl"), filepath.Join(dir, "projection.json")))
+}
+
+func openFiles(eventsPath, projectionPath string) (*Store, error) {
 	s := &Store{
-		eventsPath:          paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id),
-		projectionPath:      paths.GetChatStateJSONFromProjectRoot(projectRoot, id),
+		eventsPath:          eventsPath,
+		projectionPath:      projectionPath,
 		now:                 time.Now,
 		sourceIDs:           map[string]uint64{},
 		completedViewImages: map[string]struct{}{},

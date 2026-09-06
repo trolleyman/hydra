@@ -1,6 +1,6 @@
 # VS Code extension
 
-Status: planned.
+Status: in development.
 
 Hydra's VS Code extension provides a deliberately smaller local-agent product
 than the Hydra web application. It runs Claude Code and Codex in Hydra's existing
@@ -382,7 +382,7 @@ that commit.
   delivery sequence.
 - [ ] Extract shared chat, policy, and agent-host schemas with Go/TypeScript
   generation and conformance tests.
-- [ ] Add a directory-based chat store API without changing Hydra's existing
+- [x] Add a directory-based chat store API without changing Hydra's existing
   head storage behavior.
 - [ ] Add the standalone `hydra-agent-host` stdio command and protocol handshake.
 - [ ] Run Codex through the host with streaming, send, interrupt, model changes,

@@ -3,12 +3,52 @@ package chat
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/paths"
 )
+
+func TestOpenDirectoryUsesSelfContainedConversationPaths(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "conversation")
+	s, err := OpenDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := AssistantMessage{}
+	msg.MessageId = "answer"
+	msg.Text = "hello from the extension"
+	if _, err := s.Append(msg); err != nil {
+		t.Fatal(err)
+	}
+	s.Checkpoint()
+
+	for _, name := range []string{"events.jsonl", "projection.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("conversation %s: %v", name, err)
+		}
+	}
+
+	reopened, err := OpenDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, err := reopened.Before("", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "assistant_message" {
+		t.Fatalf("reopened events = %+v", events)
+	}
+}
+
+func TestOpenDirectoryRejectsEmptyPath(t *testing.T) {
+	if _, err := OpenDirectory("  "); err == nil {
+		t.Fatal("OpenDirectory accepted an empty path")
+	}
+}
 
 func TestStoreAppendProjectAndPage(t *testing.T) {
 	root := t.TempDir()
