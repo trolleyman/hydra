@@ -384,7 +384,7 @@ that commit.
   generation and conformance tests.
 - [x] Add a directory-based chat store API without changing Hydra's existing
   head storage behavior.
-- [ ] Add the standalone `hydra-agent-host` stdio command and protocol handshake.
+- [x] Add the standalone `hydra-agent-host` stdio command and protocol handshake.
 - [ ] Run Codex through the host with streaming, send, interrupt, model changes,
   history, and resume.
 - [ ] Run Claude through the same host contract with streaming, controls,
