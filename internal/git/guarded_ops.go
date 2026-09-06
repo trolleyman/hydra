@@ -21,6 +21,8 @@ import (
 // (git_isolation readonly). Returns ok plus an agent-readable summary/explanation.
 func RunGuardedOp(worktree, expectedBranch string, req gitq.Request) (ok bool, summary string) {
 	switch req.Op {
+	case gitq.OpCheckout:
+		return GuardedCheckout(worktree, expectedBranch, req.Ref)
 	case "", gitq.OpCommit:
 		return GuardedCommit(worktree, expectedBranch, req.Message, req.Paths, req.Amend, req.Staged)
 	case gitq.OpReset:
@@ -48,6 +50,35 @@ func RunGuardedOp(worktree, expectedBranch string, req gitq.Request) (ok bool, s
 	default:
 		return false, fmt.Sprintf("Unknown git operation %q.", req.Op)
 	}
+}
+
+// GuardedCheckout switches a standalone workspace to an existing local branch.
+// It is deliberately not advertised by full Hydra heads, whose branch identity
+// is fixed; the VS Code host opts into it with a profile-filtered Git catalog.
+func GuardedCheckout(worktree, expectedBranch, target string) (bool, string) {
+	current, ok, message := ensureOwnBranch(worktree, expectedBranch)
+	if !ok {
+		return false, message
+	}
+	target = strings.TrimSpace(target)
+	if err := ValidateRef(target); err != nil {
+		return false, "Invalid branch: " + err.Error()
+	}
+	if target == current {
+		return true, fmt.Sprintf("Already on %s.", current)
+	}
+	if dirty, err := ListUncommittedFiles(worktree); err != nil {
+		return false, "Could not inspect the worktree: " + err.Error()
+	} else if len(dirty) > 0 {
+		return false, "Refusing checkout: the worktree has uncommitted changes."
+	}
+	if _, err := gitOutput(worktree, "show-ref", "--verify", "--quiet", "refs/heads/"+target); err != nil {
+		return false, fmt.Sprintf("No local branch %q exists.", target)
+	}
+	if out, err := gitCombined(worktree, "checkout", "--quiet", target); err != nil {
+		return false, "Checkout failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
+	}
+	return true, fmt.Sprintf("Switched the workspace from %s to %s.", current, target)
 }
 
 // ensureOwnBranch verifies the worktree is checked out on the head's OWN branch

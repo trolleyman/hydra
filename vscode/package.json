@@ -143,7 +143,22 @@
                   "main",
                   "master",
                   "release/*"
-                ]
+                ],
+                "operations": {
+                  "checkout": "ask",
+                  "add": "allow",
+                  "commit": "ask",
+                  "reset": "ask",
+                  "revert": "ask",
+                  "cherry_pick": "ask",
+                  "merge": "ask",
+                  "merge_continue": "ask",
+                  "merge_abort": "ask",
+                  "rebase": "ask",
+                  "rebase_continue": "ask",
+                  "rebase_abort": "ask",
+                  "stash": "ask"
+                }
               }
             }
           },

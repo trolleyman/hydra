@@ -28,10 +28,45 @@ type approvalBroker struct {
 	gateApprovalDir   string
 	gatePolicyPath    string
 	chatNetworkGrants map[string]bool
+	chatGitGrants     map[string]bool
 }
 
 func newApprovalBroker(writer *writer) *approvalBroker {
-	return &approvalBroker{writer: writer, pending: map[string]chan approvalAnswer{}, gatePending: map[string]gate.Request{}, chatNetworkGrants: map[string]bool{}}
+	return &approvalBroker{writer: writer, pending: map[string]chan approvalAnswer{}, gatePending: map[string]gate.Request{}, chatNetworkGrants: map[string]bool{}, chatGitGrants: map[string]bool{}}
+}
+
+func (b *approvalBroker) requestGit(operation, branch string, cancel <-chan struct{}) bool {
+	b.mu.Lock()
+	if b.chatGitGrants[operation] {
+		b.mu.Unlock()
+		return true
+	}
+	id := fmt.Sprintf("git-%d", b.seq.Add(1))
+	answer := make(chan approvalAnswer, 1)
+	b.pending[id] = answer
+	b.mu.Unlock()
+	if err := b.writer.write(agenthostapi.ApprovalRequestFrame{Type: agenthostapi.ApprovalRequest, RequestId: id, Kind: agenthostapi.Git, Target: operation, CanonicalTarget: operation, Summary: fmt.Sprintf("Allow git_%s on %s?", operation, branch), Reason: "The active profile requires approval for this Git operation."}); err != nil {
+		b.remove(id)
+		return false
+	}
+	timer := time.NewTimer(approvalTimeout)
+	defer timer.Stop()
+	select {
+	case result := <-answer:
+		allowed := result.decision == agenthostapi.Allow
+		if allowed && result.scope != agenthostapi.Once {
+			b.mu.Lock()
+			b.chatGitGrants[operation] = true
+			b.mu.Unlock()
+		}
+		return allowed
+	case <-cancel:
+		b.remove(id)
+		return false
+	case <-timer.C:
+		b.remove(id)
+		return false
+	}
 }
 
 func (b *approvalBroker) requestNetwork(host string, cancel <-chan struct{}) egress.Approval {

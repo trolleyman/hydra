@@ -67,6 +67,24 @@ func TestGuardedCommitFlushesAndVerifiesNewObjects(t *testing.T) {
 	}
 }
 
+func TestGuardedCheckoutRequiresCleanWorktree(t *testing.T) {
+	dir, run := opRepo(t)
+	run("branch", "feature")
+	write(t, dir, "dirty.txt", "dirty\n")
+	if ok, _ := GuardedCheckout(dir, "hydra/test", "feature"); ok {
+		t.Fatal("checkout should refuse a dirty worktree")
+	}
+	if err := os.Remove(filepath.Join(dir, "dirty.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if ok, message := GuardedCheckout(dir, "hydra/test", "feature"); !ok {
+		t.Fatalf("checkout failed: %s", message)
+	}
+	if branch := run("branch", "--show-current"); branch != "feature" {
+		t.Fatalf("current branch = %q, want feature", branch)
+	}
+}
+
 func TestGuardedResetSoftUncommit(t *testing.T) {
 	dir, run := opRepo(t)
 	write(t, dir, "a.txt", "a\n")

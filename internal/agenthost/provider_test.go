@@ -92,6 +92,26 @@ func TestProviderSeedsFilterMCPAndStandingPrompt(t *testing.T) {
 	}
 }
 
+func TestProviderSeedsAddsFocusedGitServerWhenEnabled(t *testing.T) {
+	home, workspace, conversation := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	init := testInitialize(home, workspace, conversation, policyapi.ProviderCodex)
+	init.Policy.Git.Operations = map[string]policyapi.PolicyDecision{"commit": policyapi.PolicyAsk}
+	seedDir := filepath.Join(conversation, "seed")
+	if err := os.Mkdir(seedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := providerSeeds(init, sandbox.AgentTypeCodex, seedDir); err != nil {
+		t.Fatal(err)
+	}
+	config := string(readFile(filepath.Join(seedDir, "codex-config.toml")))
+	if !strings.Contains(config, "[mcp_servers.hydra]") || !strings.Contains(config, "HYDRA_VSCODE_GIT_OPERATIONS") {
+		t.Fatalf("focused Git server missing from Codex config:\n%s", config)
+	}
+}
+
 func TestProviderCowMountsArePrivateAndWorkspaceScoped(t *testing.T) {
 	workspace, conversation := t.TempDir(), t.TempDir()
 	target := filepath.Join(workspace, "cache")

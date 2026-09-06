@@ -266,6 +266,11 @@ settings-tamper, unsafe process-kill, network, and Git checks. Ask decisions use
 the same scoped approval cards as egress; a chat-or-longer grant updates the
 live immutable policy source so later calls do not prompt again.
 
+Provider tool names remain an implementation detail in the editor. For example,
+Claude's `LS` tool is a structured directory listing and maps to Search. A
+literal `ls` inside a shell script maps to Bash and remains limited by filesystem
+readability.
+
 MCP configuration and invocation are two separate checks. A denied or entirely
 ungranted local server is removed before the provider starts, so its executable
 never runs. An allowed server, or one with at least one allowed tool, is retained
@@ -359,11 +364,19 @@ read commands (`status`, `diff`, `log`, and `show`) therefore work in Bash while
 all `.git` mutation is stopped by the OS boundary.
 
 Mutations use guarded host-side operations shared with Hydra. The initial UI
-ships commit, checkout, reset, revert, merge, and rebase operations only when the
+ships checkout, commit, add, reset, revert, cherry-pick, merge, rebase, and stash operations only when the
 corresponding profile capability is enabled. Every operation revalidates the
 workspace, current branch, expected head, target branch, dirty state, and
 protected-branch rules immediately before execution. The agent never receives a
 generic unsandboxed shell as a Git capability.
+
+The standalone `hydra-agent-host mcp` process is intentionally not the full
+Hydra control server. It advertises only the profile-enabled `git_*` tools and
+passes requests over a private file queue to the parent host. An omitted or
+`deny` operation is not advertised, `ask` enters the standard once/chat/workspace/
+profile approval flow, and `allow` runs directly. The parent rejects a request if
+the checkout moved since it was submitted or the current branch matches a
+protected-branch glob. The provider continues to see `.git` read-only.
 
 ## VS Code UI
 
@@ -462,7 +475,7 @@ that commit.
   filesystem sandbox, and rebuild safely on grants/profile changes.
 - [x] Connect hard/advisory egress filtering and interactive network approvals.
 - [x] Connect local MCP governance, core-tool policy, and approval scopes.
-- [ ] Connect read-only Git metadata and guarded mutation tools.
+- [x] Connect read-only Git metadata and guarded mutation tools.
 - [ ] Scaffold and package the VS Code extension and native helper.
 - [ ] Implement the React sidebar, streaming chat, Markdown composer, hidden
   steps, expandable sub-agents, and interruption.

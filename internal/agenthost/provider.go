@@ -21,6 +21,7 @@ import (
 	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
+	"github.com/trolleyman/hydra/internal/gitq"
 	"github.com/trolleyman/hydra/internal/policyapi"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
@@ -46,6 +47,7 @@ type liveProvider struct {
 	reg      *session.Registry
 	egress   *egress.Session
 	gateStop func()
+	gitStop  func()
 	closeOne sync.Once
 }
 
@@ -69,6 +71,9 @@ func (p *liveProvider) Close() {
 		if p.gateStop != nil {
 			p.gateStop()
 		}
+		if p.gitStop != nil {
+			p.gitStop()
+		}
 	})
 }
 
@@ -85,6 +90,7 @@ func startProvider(ctx context.Context, init agenthostapi.InitializeCommand, man
 	reg := session.NewRegistry()
 	provider := &liveProvider{reg: reg, egress: egressSession}
 	provider.gateStop = approvals.watchGate(filepath.Join(init.ConversationDir, "private", "tmp", "approvals"), filepath.Join(init.ConversationDir, "private", "seed", "gate-policy.json"))
+	provider.gitStop = watchGitOperations(filepath.Join(init.ConversationDir, "private", "tmp", "gitops"), init.Workspace, init.Policy.Git, approvals)
 	reg.SetOnChatLine(func(_ string, source string, line []byte) {
 		manager.ObserveProviderLine(providerSessionID, source, line)
 		if agentType == sandbox.AgentTypeClaude {
@@ -176,9 +182,18 @@ func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.Agen
 	if err := os.MkdirAll(approvalDir, 0o700); err != nil {
 		return sandbox.Options{}, nil, errtrace.Wrap(err)
 	}
+	gitopsDir := filepath.Join(tmpDir, "gitops")
+	if err := os.MkdirAll(gitopsDir, 0o700); err != nil {
+		return sandbox.Options{}, nil, errtrace.Wrap(err)
+	}
 	if stale, err := gate.ListRequests(approvalDir); err == nil {
 		for _, request := range stale {
 			gate.RemoveRequest(approvalDir, request.ReqID)
+		}
+	}
+	if stale, err := gitq.ListRequests(gitopsDir); err == nil {
+		for _, request := range stale {
+			_ = gitq.WriteResult(gitopsDir, request.ReqID, gitq.Result{Message: "The provider session ended before this Git request could run."})
 		}
 	}
 
@@ -218,6 +233,8 @@ func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.Agen
 		gate.EnvPolicyPath+"=/tmp/hydra-vscode-policy.json",
 		gate.EnvApprovalDir+"=/tmp/approvals",
 		gate.EnvWorktree+"="+init.Workspace,
+		"HYDRA_GITOPS_DIR=/tmp/gitops",
+		"HYDRA_VSCODE_GIT_OPERATIONS="+strings.Join(enabledGitOperations(init.Policy.Git), ","),
 	)
 	env = sandbox.RuntimeEnv(append(env, egressSession.Env...), tmpDir)
 	agentHostExecutable, err := os.Executable()
@@ -308,6 +325,10 @@ func providerCowMounts(init agenthostapi.InitializeCommand, privateDir string) (
 
 func providerSeeds(init agenthostapi.InitializeCommand, agentType sandbox.AgentType, seedDir string) ([]sandbox.Bind, []string, error) {
 	keep := allowedMCPServers(init.Policy.Tools.Mcp)
+	controlBin := ""
+	if len(enabledGitOperations(init.Policy.Git)) > 0 {
+		controlBin = sandbox.HydraBinPath
+	}
 	writeSeed := func(name string, data []byte, mode os.FileMode) (string, error) {
 		file := filepath.Join(seedDir, name)
 		if err := os.WriteFile(file, data, mode); err != nil {
@@ -319,7 +340,7 @@ func providerSeeds(init agenthostapi.InitializeCommand, agentType sandbox.AgentT
 	case sandbox.AgentTypeClaude:
 		userConfig := readFile(filepath.Join(init.Policy.UserHome, ".claude.json"))
 		workspaceConfig := readFile(filepath.Join(init.Workspace, ".mcp.json"))
-		config, err := sandbox.BuildStrictMCPConfig(userConfig, workspaceConfig, keep, "", "claude")
+		config, err := sandbox.BuildStrictMCPConfig(userConfig, workspaceConfig, keep, controlBin, "claude")
 		if err != nil {
 			return nil, nil, errtrace.Wrap(err)
 		}
@@ -341,7 +362,13 @@ func providerSeeds(init agenthostapi.InitializeCommand, agentType sandbox.AgentT
 		}, []string{mcpFile, settingsFile}, nil
 	case sandbox.AgentTypeCodex:
 		codexDir := filepath.Join(init.Policy.UserHome, ".codex")
-		config, err := sandbox.BuildStandaloneCodexConfig(readFile(filepath.Join(codexDir, "config.toml")), keep)
+		var config []byte
+		var err error
+		if controlBin == "" {
+			config, err = sandbox.BuildStandaloneCodexConfig(readFile(filepath.Join(codexDir, "config.toml")), keep)
+		} else {
+			config, err = sandbox.BuildCodexConfig(readFile(filepath.Join(codexDir, "config.toml")), controlBin, keep)
+		}
 		if err != nil {
 			return nil, nil, errtrace.Wrap(err)
 		}
@@ -480,6 +507,14 @@ func validateEffectivePolicy(policy policyapi.EffectivePolicy) error {
 	}
 	if policy.Git.Isolation != nil && !sandbox.ValidGitIsolation(string(*policy.Git.Isolation)) {
 		return errtrace.Wrap(fmt.Errorf("invalid git isolation %q", *policy.Git.Isolation))
+	}
+	for operation, decision := range policy.Git.Operations {
+		if !validGitOperations[operation] {
+			return errtrace.Wrap(fmt.Errorf("unknown Git operation %q", operation))
+		}
+		if !validDecision(decision) {
+			return errtrace.Wrap(fmt.Errorf("invalid Git decision for %s: %q", operation, decision))
+		}
 	}
 	home, err := canonicalDirectory(policy.UserHome)
 	if err != nil {

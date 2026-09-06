@@ -16,7 +16,7 @@ export type AuthoredProfile = Record<string, unknown> & {
   git?: EffectivePolicy['git']
 }
 
-export type WorkspaceGrants = { network?: string[]; core?: string[]; mcp_servers?: string[]; mcp_tools?: string[] }
+export type WorkspaceGrants = { network?: string[]; core?: string[]; mcp_servers?: string[]; mcp_tools?: string[]; git_operations?: string[] }
 
 const defaultMasks = [
   '~/.ssh', '~/.gnupg', '~/.aws', '~/.azure', '~/.kube', '~/.docker',
@@ -74,7 +74,14 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
       blocked_hosts: authored.network?.blocked_hosts ?? [],
     },
     tools,
-    git: authored.git ?? { isolation: 'readonly', protected_branches: ['main', 'master', 'release/*'] },
+    git: {
+      isolation: authored.git?.isolation ?? 'readonly',
+      protected_branches: authored.git?.protected_branches ?? ['main', 'master', 'release/*'],
+      operations: Object.fromEntries([
+        ...Object.entries(authored.git?.operations ?? {}),
+        ...(grants.git_operations ?? []).map(operation => [operation, 'allow' as const]),
+      ]),
+    },
   }
 }
 
@@ -107,6 +114,7 @@ function validateProfile(name: string, profile: AuthoredProfile): void {
   }
   if (profile.git?.isolation !== undefined && !['readonly', 'off'].includes(profile.git.isolation)) fail('git.isolation', 'must be readonly or off')
   for (const [operation, decision] of Object.entries(profile.git?.operations ?? {})) {
+	if (!['checkout', 'commit', 'add', 'reset', 'revert', 'cherry_pick', 'merge', 'merge_continue', 'merge_abort', 'rebase', 'rebase_continue', 'rebase_abort', 'stash'].includes(operation)) fail(`git.operations.${operation}`, 'is not a supported operation')
     if (!decisions.has(decision)) fail(`git.operations.${operation}`, 'must be allow, ask, or deny')
   }
 }

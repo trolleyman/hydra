@@ -235,6 +235,7 @@ function addWorkspaceGrant(grants: WorkspaceGrants, request: Extract<HostFrame, 
   if (request.kind === 'core_tool' && request.canonical_target) next.core = unique([...(next.core ?? []), request.canonical_target])
   if (request.kind === 'mcp') next.mcp_servers = unique([...(next.mcp_servers ?? []), request.target])
   if (request.kind === 'mcp_tool') next.mcp_tools = unique([...(next.mcp_tools ?? []), request.target])
+  if (request.kind === 'git') next.git_operations = unique([...(next.git_operations ?? []), request.target])
   return next
 }
 
@@ -258,6 +259,9 @@ function addProfileGrant(profile: Record<string, any>, request: Extract<HostFram
       const current = next.tools.mcp[server] ?? { decision: 'ask' }
       next.tools.mcp[server] = { ...current, tools: { ...(current.tools ?? {}), [tool]: { decision: 'allow' } } }
     }
+  }
+  if (request.kind === 'git') {
+    next.git ??= {}; next.git.operations ??= {}; next.git.operations[request.target] = 'allow'
   }
   return next
 }
