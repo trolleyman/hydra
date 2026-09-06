@@ -57,11 +57,19 @@ func debugf(id, format string, args ...any) {
 	}
 }
 
+// Approval is the result of an unknown-host prompt. Remember promotes an allow
+// to the proxy's live allow-list; without it only the connection(s) coalesced on
+// this prompt proceed.
+type Approval struct {
+	Allow    bool
+	Remember bool
+}
+
 // ApproveFunc asks whether an outbound connection to an as-yet-unlisted host may
 // proceed. It blocks (typically prompting the user) until decided, and should
-// abandon and return false when cancel is closed (the proxy is shutting down). A
+// return a denied Approval when cancel is closed (the proxy is shutting down). A
 // nil ApproveFunc means unknown hosts are silently denied.
-type ApproveFunc func(host string, cancel <-chan struct{}) bool
+type ApproveFunc func(host string, cancel <-chan struct{}) Approval
 
 // Proxy is a running per-head filtering forward proxy bound to host loopback.
 type Proxy struct {
@@ -314,20 +322,24 @@ func (p *Proxy) requestApproval(host string) bool {
 	p.inflight[host] = fa
 	p.mu.Unlock()
 
-	result := p.approve(host, p.done)
+	approval := p.approve(host, p.done)
 
 	p.mu.Lock()
-	fa.result = result
-	if result {
+	fa.result = approval.Allow
+	if approval.Allow && approval.Remember {
 		p.allowed = append(p.allowed, host)
 	}
 	delete(p.inflight, host)
 	p.mu.Unlock()
 	close(fa.done)
-	if result {
-		log.Printf("hydra egress[%s]: user APPROVED outbound connection to %q (allowed for this session)", p.id, host)
+	if approval.Allow {
+		scope := "once"
+		if approval.Remember {
+			scope = "for this session"
+		}
+		log.Printf("hydra egress[%s]: user APPROVED outbound connection to %q (%s)", p.id, host, scope)
 	}
-	return result
+	return approval.Allow
 }
 
 // deny logs a blocked egress attempt so an unattended head's exfil attempts are

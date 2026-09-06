@@ -16,6 +16,8 @@ export type AuthoredProfile = Record<string, unknown> & {
   git?: EffectivePolicy['git']
 }
 
+export type WorkspaceGrants = { network?: string[] }
+
 const defaultMasks = [
   '~/.ssh', '~/.gnupg', '~/.aws', '~/.azure', '~/.kube', '~/.docker',
   '~/.password-store', '~/.config/gh', '~/.config/glab-cli', '~/.netrc',
@@ -31,7 +33,7 @@ export function defaultProfileName(all = profiles()): string {
   return all[configured] ? configured : Object.keys(all)[0] ?? 'implement'
 }
 
-export async function resolveProfile(name: string, workspace: vscode.WorkspaceFolder): Promise<EffectivePolicy> {
+export async function resolveProfile(name: string, workspace: vscode.WorkspaceFolder, grants: WorkspaceGrants = {}): Promise<EffectivePolicy> {
   const authored = profiles()[name]
   if (!authored) throw new Error(`Unknown Hydra profile: ${name}`)
   validateProfile(name, authored)
@@ -55,13 +57,15 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
     },
     network: {
       mode: authored.network?.mode ?? 'hard',
-      allowed_hosts: authored.network?.allowed_hosts ?? [],
+      allowed_hosts: unique([...(authored.network?.allowed_hosts ?? []), ...(grants.network ?? [])]),
       blocked_hosts: authored.network?.blocked_hosts ?? [],
     },
     tools: authored.tools ?? { core: { read: 'allow', search: 'allow', edit: 'allow', bash: 'allow', fetch: 'allow' } },
     git: authored.git ?? { isolation: 'readonly', protected_branches: ['main', 'master', 'release/*'] },
   }
 }
+
+function unique(values: string[]): string[] { return [...new Set(values)] }
 
 function validateProfile(name: string, profile: AuthoredProfile): void {
   const fail = (field: string, message: string): never => { throw new Error(`Hydra profile "${name}" ${field} ${message}`) }

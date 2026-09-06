@@ -21,7 +21,7 @@ func (fakeProvider) Respond(json.RawMessage) error { return nil }
 func (fakeProvider) SetModel(string) error         { return nil }
 func (fakeProvider) Close()                        {}
 
-func launchFake(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, ioLogger) (providerRuntime, error) {
+func launchFake(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, *approvalBroker, ioLogger) (providerRuntime, error) {
 	return fakeProvider{}, nil
 }
 
@@ -117,7 +117,7 @@ func TestRunRebuildsProviderForPolicyUpdate(t *testing.T) {
 		map[string]any{"type": "shutdown"},
 	)
 	launches := 0
-	launcher := func(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, ioLogger) (providerRuntime, error) {
+	launcher := func(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, *approvalBroker, ioLogger) (providerRuntime, error) {
 		launches++
 		return fakeProvider{}, nil
 	}

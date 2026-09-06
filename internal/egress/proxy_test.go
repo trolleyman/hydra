@@ -95,9 +95,9 @@ func TestProxyApproveGrantsUnlistedHost(t *testing.T) {
 	host := mustHost(t, upstream.URL)
 
 	var calls int32
-	approve := func(h string, _ <-chan struct{}) bool {
+	approve := func(h string, _ <-chan struct{}) Approval {
 		atomic.AddInt32(&calls, 1)
-		return h == host // approve exactly the upstream host
+		return Approval{Allow: h == host, Remember: true} // approve exactly the upstream host
 	}
 	// Empty allow-list: the host is unknown and must be approved to be reached.
 	p, err := Start("h1", 0, nil, nil, approve)
@@ -131,11 +131,36 @@ func TestProxyApproveGrantsUnlistedHost(t *testing.T) {
 	}
 }
 
+func TestProxyOneShotApprovalDoesNotEnterAllowList(t *testing.T) {
+	upstream := newTestServer(t, "ok")
+	defer upstream.Close()
+	var calls int32
+	approve := func(string, <-chan struct{}) Approval {
+		atomic.AddInt32(&calls, 1)
+		return Approval{Allow: true}
+	}
+	p, err := Start("h1", 0, nil, nil, approve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	for i := 0; i < 2; i++ {
+		resp, err := newClient(t, p).Get(upstream.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("one-shot approval prompted %d times, want 2", got)
+	}
+}
+
 func TestProxyApproveDeniesUnlistedHost(t *testing.T) {
 	upstream := newTestServer(t, "secret")
 	defer upstream.Close()
 
-	approve := func(string, <-chan struct{}) bool { return false }
+	approve := func(string, <-chan struct{}) Approval { return Approval{} }
 	p, err := Start("h1", 0, nil, nil, approve)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +183,10 @@ func TestProxyApproveBlockListNeverPrompts(t *testing.T) {
 	host := mustHost(t, upstream.URL)
 
 	var calls int32
-	approve := func(string, <-chan struct{}) bool { atomic.AddInt32(&calls, 1); return true }
+	approve := func(string, <-chan struct{}) Approval {
+		atomic.AddInt32(&calls, 1)
+		return Approval{Allow: true, Remember: true}
+	}
 	// Host is explicitly block-listed: block wins, the approver is never consulted.
 	p, err := Start("h1", 0, nil, []string{host}, approve)
 	if err != nil {
@@ -185,10 +213,10 @@ func TestProxyApproveCollapsesConcurrentSameHost(t *testing.T) {
 
 	var calls int32
 	release := make(chan struct{})
-	approve := func(string, <-chan struct{}) bool {
+	approve := func(string, <-chan struct{}) Approval {
 		atomic.AddInt32(&calls, 1)
 		<-release // hold every in-flight prompt open until released
-		return true
+		return Approval{Allow: true, Remember: true}
 	}
 	p, err := Start("h1", 0, nil, nil, approve)
 	if err != nil {

@@ -42,6 +42,7 @@ func Run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 
 func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version string, launch providerLauncher) error {
 	w := &writer{enc: json.NewEncoder(out)}
+	approvals := newApprovalBroker(w)
 	if err := w.write(agenthostapi.HelloFrame{
 		Type:            agenthostapi.Hello,
 		ProtocolVersion: ProtocolVersion,
@@ -127,7 +128,7 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 			if err := writeReplay(w, manager, snapshot); err != nil {
 				return errtrace.Wrap(err)
 			}
-			provider, err = launch(ctx, init, manager, w, logOutput)
+			provider, err = launch(ctx, init, manager, w, approvals, logOutput)
 			if err != nil {
 				_ = writeError(w, "", "provider_start", err.Error(), true)
 				return errtrace.Wrap(err)
@@ -194,7 +195,7 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 			initialization.Policy = policy
 			initialization.ProviderExecutable = command.ProviderExecutable
 			initialization.ResumeSessionId = resumeID
-			provider, err = launch(ctx, initialization, manager, w, logOutput)
+			provider, err = launch(ctx, initialization, manager, w, approvals, logOutput)
 			if err != nil {
 				_ = writeResult(w, command.RequestId, err)
 				_ = writeError(w, command.RequestId, "provider_restart", err.Error(), false)
@@ -229,7 +230,7 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 			}
 			_ = writeResult(w, command.RequestId, err)
 		case agenthostapi.ApprovalResponseCommand:
-			_ = writeResult(w, command.RequestId, errors.New("no approval is pending"))
+			_ = writeResult(w, command.RequestId, approvals.resolve(command))
 		default:
 			fmt.Fprintf(logOutput, "agent-host: ignored decoded command %T\n", value)
 		}

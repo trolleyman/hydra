@@ -35,7 +35,7 @@ type providerRuntime interface {
 	Close()
 }
 
-type providerLauncher func(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, ioLogger) (providerRuntime, error)
+type providerLauncher func(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, *approvalBroker, ioLogger) (providerRuntime, error)
 
 type ioLogger interface {
 	Write([]byte) (int, error)
@@ -67,12 +67,12 @@ func (p *liveProvider) Close() {
 	})
 }
 
-func startProvider(ctx context.Context, init agenthostapi.InitializeCommand, manager *chat.Manager, output *writer, logs ioLogger) (providerRuntime, error) {
+func startProvider(ctx context.Context, init agenthostapi.InitializeCommand, manager *chat.Manager, output *writer, approvals *approvalBroker, logs ioLogger) (providerRuntime, error) {
 	agentType, err := policyProvider(init.Policy.Provider)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	launch, egressSession, err := providerSandbox(init, agentType)
+	launch, egressSession, err := providerSandbox(init, agentType, approvals.requestNetwork)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -154,7 +154,7 @@ func attachCodex(reg *session.Registry, init agenthostapi.InitializeCommand, man
 	return nil
 }
 
-func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.AgentType) (sandbox.Options, *egress.Session, error) {
+func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.AgentType, approve egress.ApproveFunc) (sandbox.Options, *egress.Session, error) {
 	if err := validateEffectivePolicy(init.Policy); err != nil {
 		return sandbox.Options{}, nil, errtrace.Wrap(err)
 	}
@@ -186,7 +186,7 @@ func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.Agen
 	}
 	binds = append(stateBinds, binds...)
 	netPolicy := networkPolicy(init.Policy.Network)
-	egressSession := egress.StartCommandEgress("vscode-"+filepath.Base(init.ConversationDir), agentType, &netPolicy, 0, nil)
+	egressSession := egress.StartCommandEgress("vscode-"+filepath.Base(init.ConversationDir), agentType, &netPolicy, 0, approve)
 	identity, _ := user.Current()
 	username := ""
 	if identity != nil {

@@ -17,6 +17,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private conversationID?: string
   private workspace?: vscode.WorkspaceFolder
   private pendingProfile?: string
+  private readonly approvals = new Map<string, Extract<HostFrame, { type: 'approval_request' }>>()
   private readonly disposables: vscode.Disposable[] = []
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
@@ -41,7 +42,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.profile = defaultProfileName()
     this.workspace = workspace
     this.pendingProfile = undefined
-    const policy = await resolveProfile(this.profile, workspace)
+    const policy = await this.resolvePolicy(this.profile, workspace)
     const conversationDir = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID)
     await fs.mkdir(conversationDir, { recursive: true })
     await fs.writeFile(path.join(conversationDir, 'metadata.json'), JSON.stringify({
@@ -102,6 +103,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private onFrame(frame: HostFrame): void {
+    if (frame.type === 'approval_request') this.approvals.set(frame.request_id, frame)
+    if (frame.type === 'operation_result' && this.approvals.has(frame.request_id)) this.approvals.delete(frame.request_id)
     if (frame.type === 'chat_event') {
       if (frame.event.type === 'turn_started') this.running = true
       if (['turn_completed', 'turn_failed', 'turn_interrupted'].includes(frame.event.type)) {
@@ -125,7 +128,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         break
       case 'interrupt': this.client?.send({ type: 'interrupt', request_id: randomUUID() }); break
       case 'approval':
-        this.client?.send({ type: 'approval_response', request_id: String(message.requestID), decision: message.decision as 'allow' | 'deny', scope: message.scope as 'once' | 'chat' | 'workspace' | 'profile' })
+        await this.answerApproval(String(message.requestID), message.decision as 'allow' | 'deny', message.scope as 'once' | 'chat' | 'workspace' | 'profile')
         break
       case 'openSettings': await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:trolleyman.hydra'); break
     }
@@ -158,7 +161,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private async applyProfile(name: string): Promise<void> {
     const workspace = this.workspace
     if (!workspace || !this.client) return
-    const policy = await resolveProfile(name, workspace)
+    const policy = await this.resolvePolicy(name, workspace)
     const providerExecutable = vscode.workspace.getConfiguration('hydra').get<string>(`providers.${policy.provider}.path`, policy.provider).trim()
     this.profile = name
     this.pendingProfile = undefined
@@ -184,6 +187,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       return
     }
     await this.applyProfile(this.profile)
+  }
+
+  private async answerApproval(requestID: string, decision: 'allow' | 'deny', scope: 'once' | 'chat' | 'workspace' | 'profile'): Promise<void> {
+    const request = this.approvals.get(requestID)
+    if (!request || !this.client) return
+    if (decision === 'allow' && request.kind === 'network' && (scope === 'workspace' || scope === 'profile')) {
+      if (scope === 'workspace' && this.workspace) {
+        const key = this.workspaceGrantKey(this.profile, this.workspace)
+        const grants = this.context.workspaceState.get<{ network?: string[] }>(key, {})
+        await this.context.workspaceState.update(key, { ...grants, network: [...new Set([...(grants.network ?? []), request.target])] })
+      } else if (scope === 'profile') {
+        const configuration = vscode.workspace.getConfiguration('hydra')
+        const globalProfiles = configuration.inspect<Record<string, any>>('profiles')?.globalValue ?? {}
+        const authored = profiles()[this.profile] ?? {}
+        const allowed = [...new Set([...(authored.network?.allowed_hosts ?? []), request.target])]
+        await configuration.update('profiles', { ...globalProfiles, [this.profile]: { ...authored, network: { ...(authored.network ?? {}), allowed_hosts: allowed } } }, vscode.ConfigurationTarget.Global)
+      }
+    }
+    this.client.send({ type: 'approval_response', request_id: requestID, decision, scope })
+  }
+
+  private resolvePolicy(name: string, workspace: vscode.WorkspaceFolder) {
+    return resolveProfile(name, workspace, this.context.workspaceState.get(this.workspaceGrantKey(name, workspace), {}))
+  }
+
+  private workspaceGrantKey(profile: string, workspace: vscode.WorkspaceFolder): string {
+    return `hydra.approvals.${workspace.uri.toString()}.${profile}`
   }
 
   private postState(): void {

@@ -19,6 +19,10 @@ header button:hover { background: var(--vscode-toolbar-hoverBackground); }
 .step pre { overflow: auto; padding: 8px; border-left: 2px solid var(--vscode-panel-border); font-size: 11px; white-space: pre-wrap; }
 .subagent { margin-left: 12px; }
 .approval, .error { margin: 8px 12px; padding: 10px; border: 1px solid var(--vscode-inputValidation-warningBorder); border-radius: 6px; }
+.approval code { display: block; margin: 7px 0; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.approvalActions { display: flex; flex-wrap: wrap; gap: 5px; }
+.approvalActions button { padding: 4px 7px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+.approvalActions button:first-child { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .error { color: var(--vscode-errorForeground); border-color: var(--vscode-inputValidation-errorBorder); }
 footer { margin: 0 10px 10px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; background: var(--vscode-input-background); }
 textarea { width: 100%; resize: vertical; border: 0; outline: 0; padding: 10px; background: transparent; }

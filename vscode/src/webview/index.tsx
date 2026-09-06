@@ -15,6 +15,7 @@ function App() {
   const [history, setHistory] = useState<any[]>([])
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
+  const [approvals, setApprovals] = useState<Extract<HostFrame, { type: 'approval_request' }>[]>([])
 
   useEffect(() => {
     const listener = (message: MessageEvent<any>) => {
@@ -27,6 +28,8 @@ function App() {
         const frame = data.frame as HostFrame
         if (frame.type === 'chat_history') setEvents(current => dedupe([...frame.events, ...current]))
         if (frame.type === 'chat_event') setEvents(current => dedupe([...current, frame.event]))
+        if (frame.type === 'approval_request') setApprovals(current => [...current.filter(item => item.request_id !== frame.request_id), frame])
+        if (frame.type === 'operation_result') setApprovals(current => current.filter(item => item.request_id !== frame.request_id))
         if (frame.type === 'host_error') setError(frame.message)
       }
     }
@@ -56,6 +59,7 @@ function App() {
       <section className="conversation">
         {!events.length && <div className="empty"><h2>What are we working on?</h2><p>Claude and Codex run inside the active Hydra profile.</p></div>}
         {events.map(event => <EventRow key={event.seq} event={event} />)}
+        {approvals.map(approval => <ApprovalCard key={approval.request_id} approval={approval} />)}
       </section>
       <footer>
         <textarea value={draft} rows={3} placeholder="Ask Hydra..." onChange={event => setDraft(event.target.value)} onKeyDown={event => {
@@ -66,6 +70,11 @@ function App() {
       </footer>
     </>}
   </main>
+}
+
+function ApprovalCard({ approval }: { approval: Extract<HostFrame, { type: 'approval_request' }> }) {
+  const answer = (decision: 'allow' | 'deny', scope: 'once' | 'chat' | 'workspace' | 'profile') => vscode.postMessage({ type: 'approval', requestID: approval.request_id, decision, scope })
+  return <article className="approval"><strong>{approval.summary}</strong><p>{approval.reason}</p><code>{approval.canonical_target ?? approval.target}</code><div className="approvalActions"><button onClick={() => answer('allow', 'once')}>Allow once</button><button onClick={() => answer('allow', 'chat')}>Chat</button><button onClick={() => answer('allow', 'workspace')}>Workspace</button><button onClick={() => answer('allow', 'profile')}>Profile</button><button onClick={() => answer('deny', 'once')}>Deny</button></div></article>
 }
 
 function EventRow({ event }: { event: Event }) {

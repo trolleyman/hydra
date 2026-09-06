@@ -302,6 +302,15 @@ Network "once" means the current connection to the displayed origin, not one
 HTTP request inside a reusable TLS tunnel. Approval wording reflects what the
 egress boundary can enforce.
 
+Unknown destinations now travel over `approval_request` / `approval_response`
+frames while the proxy parks the connection. A one-shot allow admits only the
+connection attempts coalesced on that prompt; chat, workspace, and profile
+allows enter the live proxy allow-list. Chat grants remain in the native host
+across a profile-driven sandbox rebuild. Workspace grants are held in VS Code
+`workspaceState`; profile grants update the user-level `hydra.profiles` value.
+Both persistent scopes are merged into later effective policies by the
+extension. Denies and timeouts never become grants.
+
 ### Switching profiles
 
 The active profile is conversation state, not a global setting. Shift+Tab cycles
@@ -434,7 +443,7 @@ that commit.
   history, and resume.
 - [x] Resolve and validate profiles, launch the whole provider inside Hydra's
   filesystem sandbox, and rebuild safely on grants/profile changes.
-- [ ] Connect hard/advisory egress filtering and interactive network approvals.
+- [x] Connect hard/advisory egress filtering and interactive network approvals.
 - [ ] Connect local MCP governance, core-tool policy, and approval scopes.
 - [ ] Connect read-only Git metadata and guarded mutation tools.
 - [ ] Scaffold and package the VS Code extension and native helper.
