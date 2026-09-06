@@ -455,6 +455,13 @@ explicit `hydra.providers.*.path` settings. They are not bundled. The helper and
 extension perform an exact protocol-version handshake and fail clearly when the
 packaged pair is inconsistent.
 
+From `vscode/`, `npm run check` regenerates protocol types, typechecks, and
+bundles the extension and Webview. `npm run build:host` builds the helper for the
+current platform. `npm run package -- --target <platform-arch>` cross-builds the
+matching helper with CGO disabled and asks `vsce` for a target-specific VSIX.
+Supported target spellings are `linux-x64`, `linux-arm64`, `darwin-x64`,
+`darwin-arm64`, `win32-x64`, and `win32-arm64`.
+
 ## Delivery plan
 
 Each checkbox is completed in a logical commit, with this document updated in
@@ -476,7 +483,7 @@ that commit.
 - [x] Connect hard/advisory egress filtering and interactive network approvals.
 - [x] Connect local MCP governance, core-tool policy, and approval scopes.
 - [x] Connect read-only Git metadata and guarded mutation tools.
-- [ ] Scaffold and package the VS Code extension and native helper.
+- [x] Scaffold and package the VS Code extension and native helper.
 - [ ] Implement the React sidebar, streaming chat, Markdown composer, hidden
   steps, expandable sub-agents, and interruption.
 - [ ] Implement history and profile/permissions editors, configuration reload,

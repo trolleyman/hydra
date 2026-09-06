@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "trolleyman",
   "license": "MIT",
+	"repository": {
+	  "type": "git",
+	  "url": "https://github.com/trolleyman/hydra.git",
+	  "directory": "vscode"
+	},
   "engines": {
     "vscode": "^1.105.0"
   },
@@ -16,18 +21,12 @@
     "workspace"
   ],
   "main": "./dist/extension.js",
-  "files": [
-    "dist",
-    "media",
-    "bin",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
     "generate": "openapi-typescript ../api/agent-host.yaml -o src/generated/protocol.ts",
+    "build:host": "node scripts/build-host.mjs",
     "build": "npm run generate && node scripts/build.mjs",
     "check": "npm run generate && tsc --noEmit && node scripts/build.mjs",
-    "package": "npm run check && vsce package --no-dependencies"
+    "package": "node scripts/package.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",
