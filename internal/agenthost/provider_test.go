@@ -118,8 +118,10 @@ func TestPersistClaudeSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var value map[string]string
-	if err := json.Unmarshal(data, &value); err != nil || value["session_id"] != "claude-session" {
+	var stored struct {
+		Sessions map[string]string `json:"sessions"`
+	}
+	if err := json.Unmarshal(data, &stored); err != nil || stored.Sessions["claude"] != "claude-session" {
 		t.Fatalf("provider metadata = %s, err = %v", data, err)
 	}
 }

@@ -5,7 +5,7 @@ import './style.css'
 
 const vscode = acquireVsCodeApi()
 
-type State = { page: 'chat' | 'history' | 'profiles'; profile: string; profiles: string[]; running: boolean; hasConversation: boolean }
+type State = { page: 'chat' | 'history' | 'profiles'; profile: string; pendingProfile?: string; profiles: string[]; running: boolean; hasConversation: boolean }
 type HostFrame = components['schemas']['HostFrame']
 type Event = Extract<HostFrame, { type: 'chat_event' }>['event']
 
@@ -58,11 +58,11 @@ function App() {
         {events.map(event => <EventRow key={event.seq} event={event} />)}
       </section>
       <footer>
-        <textarea value={draft} rows={3} placeholder="Ask Hydra…" onChange={event => setDraft(event.target.value)} onKeyDown={event => {
+        <textarea value={draft} rows={3} placeholder="Ask Hydra..." onChange={event => setDraft(event.target.value)} onKeyDown={event => {
           if (event.key === 'Tab' && event.shiftKey) { event.preventDefault(); vscode.postMessage({ type: 'cycleProfile' }) }
           if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() }
         }} />
-        <div className="composerBar"><span>{state.profile}</span>{state.running ? <button onClick={() => vscode.postMessage({ type: 'interrupt' })}>Stop</button> : <button onClick={send}>Send</button>}</div>
+        <div className="composerBar"><span>{state.pendingProfile ? `${state.profile} -> ${state.pendingProfile} after turn` : state.profile}</span>{state.running ? <button onClick={() => vscode.postMessage({ type: 'interrupt' })}>Stop</button> : <button onClick={send}>Send</button>}</div>
       </footer>
     </>}
   </main>

@@ -104,6 +104,7 @@ export interface components {
             type: "update_policy";
             request_id: string;
             policy: components["schemas"]["EffectivePolicy"];
+            provider_executable?: string;
             /** @enum {string} */
             behavior: "interrupt" | "next_turn";
         };

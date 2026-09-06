@@ -56,6 +56,7 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 	var provider providerRuntime
 	var cancelWatch func()
 	var policy policyapi.EffectivePolicy
+	var initialization agenthostapi.InitializeCommand
 	defer func() {
 		if cancelWatch != nil {
 			cancelWatch()
@@ -114,6 +115,7 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 				return errtrace.Wrap(err)
 			}
 			policy = init.Policy
+			initialization = init
 			manager = chat.NewManager(func(id string) (chat.HeadContext, bool) {
 				return chat.HeadContext{ProjectRoot: workspace, ConversationDir: conversationDir, AgentType: string(policy.Provider)}, id == providerSessionID
 			})
@@ -139,6 +141,10 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 
 		switch command := value.(type) {
 		case agenthostapi.UserMessageCommand:
+			if provider == nil {
+				_ = writeResult(w, command.RequestId, errors.New("provider is not running"))
+				continue
+			}
 			content, err := json.Marshal(command.Content)
 			if err != nil {
 				_ = writeResult(w, command.RequestId, err)
@@ -170,18 +176,55 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 				_ = writeResult(w, command.RequestId, errors.New("an updated policy cannot change the conversation workspace"))
 				continue
 			}
+			if command.Policy.UserHome != policy.UserHome {
+				_ = writeResult(w, command.RequestId, errors.New("an updated policy cannot change the host user home"))
+				continue
+			}
+			if err := validateEffectivePolicy(command.Policy); err != nil {
+				_ = writeResult(w, command.RequestId, err)
+				continue
+			}
+			previous := policy
+			if provider != nil {
+				provider.Close()
+			}
+			provider = nil
 			policy = command.Policy
+			resumeID := readProviderSessionID(initialization.ConversationDir, policy.Provider)
+			initialization.Policy = policy
+			initialization.ProviderExecutable = command.ProviderExecutable
+			initialization.ResumeSessionId = resumeID
+			provider, err = launch(ctx, initialization, manager, w, logOutput)
+			if err != nil {
+				_ = writeResult(w, command.RequestId, err)
+				_ = writeError(w, command.RequestId, "provider_restart", err.Error(), false)
+				continue
+			}
+			notice := chat.Notice{}
+			notice.Text = fmt.Sprintf("Profile changed from %s to %s", previous.Profile, policy.Profile)
+			_, _ = manager.Append(providerSessionID, notice)
+			_ = w.write(agenthostapi.ReadyFrame{Type: agenthostapi.Ready, Provider: policy.Provider, SessionId: resumeID})
 			_ = writeResult(w, command.RequestId, nil)
 		case agenthostapi.ShutdownCommand:
 			_ = manager.Flush(providerSessionID)
 			return nil
 		case agenthostapi.InterruptCommand:
-			_ = writeResult(w, command.RequestId, provider.Interrupt())
+			if provider == nil {
+				_ = writeResult(w, command.RequestId, errors.New("provider is not running"))
+			} else {
+				_ = writeResult(w, command.RequestId, provider.Interrupt())
+			}
 		case agenthostapi.SetModelCommand:
-			_ = writeResult(w, command.RequestId, provider.SetModel(command.Model))
+			if provider == nil {
+				_ = writeResult(w, command.RequestId, errors.New("provider is not running"))
+			} else {
+				_ = writeResult(w, command.RequestId, provider.SetModel(command.Model))
+			}
 		case agenthostapi.ControlResponseCommand:
 			response, err := json.Marshal(command.Response)
-			if err == nil {
+			if err == nil && provider == nil {
+				err = errors.New("provider is not running")
+			} else if err == nil {
 				err = provider.Respond(response)
 			}
 			_ = writeResult(w, command.RequestId, err)

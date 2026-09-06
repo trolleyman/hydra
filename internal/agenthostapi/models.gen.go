@@ -362,9 +362,10 @@ type UpdatePolicyCommand struct {
 	Behavior UpdatePolicyCommandBehavior `json:"behavior"`
 
 	// Policy Resolved and canonical policy accepted by the native host.
-	Policy    externalRef1.EffectivePolicy `json:"policy"`
-	RequestId string                       `json:"request_id"`
-	Type      UpdatePolicyCommandType      `json:"type"`
+	Policy             externalRef1.EffectivePolicy `json:"policy"`
+	ProviderExecutable string                       `json:"provider_executable,omitempty"`
+	RequestId          string                       `json:"request_id"`
+	Type               UpdatePolicyCommandType      `json:"type"`
 }
 
 // UpdatePolicyCommandBehavior defines model for UpdatePolicyCommand.Behavior.

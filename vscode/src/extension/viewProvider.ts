@@ -15,11 +15,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private profile = defaultProfileName()
   private running = false
   private conversationID?: string
+  private workspace?: vscode.WorkspaceFolder
+  private pendingProfile?: string
   private readonly disposables: vscode.Disposable[] = []
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
     this.disposables.push(vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('hydra')) this.postState()
+      if (event.affectsConfiguration('hydra')) void this.reloadProfile()
     }))
   }
 
@@ -37,6 +39,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.client?.dispose()
     this.conversationID = randomUUID()
     this.profile = defaultProfileName()
+    this.workspace = workspace
+    this.pendingProfile = undefined
     const policy = await resolveProfile(this.profile, workspace)
     const conversationDir = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID)
     await fs.mkdir(conversationDir, { recursive: true })
@@ -78,21 +82,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       let choice: string | undefined = behavior
       if (behavior === 'ask') {
         choice = await vscode.window.showInformationMessage(
-          `This turn is running under “${this.profile}”. Apply “${next}” now?`,
+          `This turn is running under "${this.profile}". Apply "${next}" now?`,
           'Interrupt and switch', 'Switch after this turn', 'Cancel',
         )
         choice = choice === 'Interrupt and switch' ? 'interrupt' : choice === 'Switch after this turn' ? 'nextTurn' : undefined
       }
       if (!choice) return
+      this.pendingProfile = next
       if (choice === 'interrupt') this.client?.send({ type: 'interrupt', request_id: randomUUID() })
+      this.postState()
+      return
     }
-    this.profile = next
-    const workspace = vscode.workspace.workspaceFolders?.[0]
-    if (workspace && this.client) {
-      const policy = await resolveProfile(next, workspace)
-      this.client.send({ type: 'update_policy', request_id: randomUUID(), policy, behavior: this.running ? 'next_turn' : 'interrupt' })
-    }
-    this.postState()
+    await this.applyProfile(next)
   }
 
   dispose(): void {
@@ -103,7 +104,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private onFrame(frame: HostFrame): void {
     if (frame.type === 'chat_event') {
       if (frame.event.type === 'turn_started') this.running = true
-      if (['turn_completed', 'turn_failed', 'turn_interrupted'].includes(frame.event.type)) this.running = false
+      if (['turn_completed', 'turn_failed', 'turn_interrupted'].includes(frame.event.type)) {
+        this.running = false
+        if (this.pendingProfile) void this.applyProfile(this.pendingProfile)
+      }
     }
     this.post({ type: 'hostFrame', frame })
     this.postState()
@@ -151,8 +155,39 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     return picked?.folder
   }
 
+  private async applyProfile(name: string): Promise<void> {
+    const workspace = this.workspace
+    if (!workspace || !this.client) return
+    const policy = await resolveProfile(name, workspace)
+    const providerExecutable = vscode.workspace.getConfiguration('hydra').get<string>(`providers.${policy.provider}.path`, policy.provider).trim()
+    this.profile = name
+    this.pendingProfile = undefined
+    this.client.send({ type: 'update_policy', request_id: randomUUID(), policy, provider_executable: providerExecutable, behavior: 'interrupt' })
+    if (this.conversationID) {
+      const metadata = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID, 'metadata.json')
+      try {
+        const current = JSON.parse(await fs.readFile(metadata, 'utf8'))
+        await fs.writeFile(metadata, JSON.stringify({ ...current, profile: name, provider: policy.provider, updatedAt: new Date().toISOString() }, null, 2))
+      } catch {}
+    }
+    this.postState()
+  }
+
+  private async reloadProfile(): Promise<void> {
+    if (!this.client) {
+      this.postState()
+      return
+    }
+    if (this.running) {
+      this.pendingProfile = this.profile
+      this.postState()
+      return
+    }
+    await this.applyProfile(this.profile)
+  }
+
   private postState(): void {
-    this.post({ type: 'state', page: this.page, profile: this.profile, profiles: Object.keys(profiles()), running: this.running, hasConversation: Boolean(this.conversationID) })
+    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(profiles()), running: this.running, hasConversation: Boolean(this.conversationID) })
   }
 
   private post(message: unknown): void { void this.view?.webview.postMessage(message) }

@@ -116,7 +116,7 @@ func attachCodex(reg *session.Registry, init agenthostapi.InitializeCommand, man
 		CWD: init.Workspace, Model: init.Policy.Model, Effort: init.Policy.Effort,
 		ConversationID: init.ResumeSessionId,
 		Send:           func(line []byte) error { return errtrace.Wrap(reg.Write(providerSessionID, line)) },
-		OnConversation: func(id string) { persistProviderSessionID(init.ConversationDir, id) },
+		OnConversation: func(id string) { persistProviderSessionID(init.ConversationDir, policyapi.ProviderCodex, id) },
 		OnModel:        func(model string) { reg.ObserveChatModel(providerSessionID, model) },
 		OnStep:         func() { reg.ChatStep(providerSessionID) },
 		OnTurnEnd:      func(string) { reg.ChatTurnEnded(providerSessionID) },
@@ -384,6 +384,15 @@ func policyProvider(provider policyapi.ProviderKind) (sandbox.AgentType, error) 
 }
 
 func validateEffectivePolicy(policy policyapi.EffectivePolicy) error {
+	if _, err := policyProvider(policy.Provider); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if !sandbox.ValidNetworkMode(string(policy.Network.Mode)) {
+		return errtrace.Wrap(fmt.Errorf("invalid network mode %q", policy.Network.Mode))
+	}
+	if policy.Git.Isolation != nil && !sandbox.ValidGitIsolation(string(*policy.Git.Isolation)) {
+		return errtrace.Wrap(fmt.Errorf("invalid git isolation %q", *policy.Git.Isolation))
+	}
 	home, err := canonicalDirectory(policy.UserHome)
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("user_home: %w", err))
@@ -407,9 +416,53 @@ func validateEffectivePolicy(policy policyapi.EffectivePolicy) error {
 			if !filepath.IsAbs(item) || strings.Contains(item, "${") || strings.HasPrefix(item, "~") {
 				return errtrace.Wrap(fmt.Errorf("%s path is not a resolved absolute path: %q", kind, item))
 			}
+			if canonical := canonicalWithMissingLeaf(item); canonical != filepath.Clean(item) {
+				return errtrace.Wrap(fmt.Errorf("%s path is not canonical: %q resolves through %q", kind, item, canonical))
+			}
+		}
+	}
+	if core := policy.Tools.Core; core != nil {
+		for name, decision := range map[string]*policyapi.PolicyDecision{"read": core.Read, "search": core.Search, "edit": core.Edit, "bash": core.Bash, "fetch": core.Fetch} {
+			if decision != nil && !validDecision(*decision) {
+				return errtrace.Wrap(fmt.Errorf("invalid core tool decision for %s: %q", name, *decision))
+			}
+		}
+	}
+	for serverName, server := range policy.Tools.Mcp {
+		if !validDecision(server.Decision) {
+			return errtrace.Wrap(fmt.Errorf("invalid MCP decision for %s: %q", serverName, server.Decision))
+		}
+		for toolName, tool := range server.Tools {
+			if !validDecision(tool.Decision) {
+				return errtrace.Wrap(fmt.Errorf("invalid MCP tool decision for %s/%s: %q", serverName, toolName, tool.Decision))
+			}
 		}
 	}
 	return nil
+}
+
+func validDecision(decision policyapi.PolicyDecision) bool {
+	return decision == policyapi.PolicyAllow || decision == policyapi.PolicyAsk || decision == policyapi.PolicyDeny
+}
+
+func canonicalWithMissingLeaf(path string) string {
+	clean := filepath.Clean(path)
+	probe := clean
+	var suffix []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(probe); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return filepath.Clean(resolved)
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return clean
+		}
+		suffix = append(suffix, filepath.Base(probe))
+		probe = parent
+	}
 }
 
 func pathCovered(target string, roots []string) bool {
@@ -447,14 +500,38 @@ func persistClaudeSessionID(dir string, line []byte) {
 		SessionID string `json:"session_id"`
 	}
 	if json.Unmarshal(line, &value) == nil && value.Type == "system" && value.Subtype == "init" && value.SessionID != "" {
-		persistProviderSessionID(dir, value.SessionID)
+		persistProviderSessionID(dir, policyapi.ProviderClaude, value.SessionID)
 	}
 }
 
-func persistProviderSessionID(dir, id string) {
-	data, _ := json.MarshalIndent(map[string]string{"session_id": id}, "", "  ")
+func persistProviderSessionID(dir string, provider policyapi.ProviderKind, id string) {
+	value := struct {
+		Sessions map[policyapi.ProviderKind]string `json:"sessions"`
+	}{Sessions: map[policyapi.ProviderKind]string{}}
+	if data, err := os.ReadFile(filepath.Join(dir, "provider.json")); err == nil {
+		_ = json.Unmarshal(data, &value)
+	}
+	if value.Sessions == nil {
+		value.Sessions = map[policyapi.ProviderKind]string{}
+	}
+	value.Sessions[provider] = id
+	data, _ := json.MarshalIndent(value, "", "  ")
 	tmp := filepath.Join(dir, "provider.json.tmp")
 	if os.WriteFile(tmp, append(data, '\n'), 0o600) == nil {
 		_ = os.Rename(tmp, filepath.Join(dir, "provider.json"))
 	}
+}
+
+func readProviderSessionID(dir string, provider policyapi.ProviderKind) string {
+	data, err := os.ReadFile(filepath.Join(dir, "provider.json"))
+	if err != nil {
+		return ""
+	}
+	var value struct {
+		Sessions map[policyapi.ProviderKind]string `json:"sessions"`
+	}
+	if json.Unmarshal(data, &value) != nil {
+		return ""
+	}
+	return value.Sessions[provider]
 }

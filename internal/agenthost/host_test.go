@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,6 +90,69 @@ func TestRunRejectsCommandBeforeInitialize(t *testing.T) {
 	if len(frames) != 2 || frames[1]["type"] != "host_error" || frames[1]["code"] != "not_initialized" || frames[1]["fatal"] != true {
 		t.Fatalf("frames = %+v", frames)
 	}
+}
+
+func TestRunRebuildsProviderForPolicyUpdate(t *testing.T) {
+	workspace := t.TempDir()
+	conversation := filepath.Join(t.TempDir(), "chat")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err = filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := map[string]any{
+		"profile": "implement", "provider": "codex", "workspace": workspace, "user_home": home,
+		"filesystem": map[string]any{"readable": []string{workspace}, "writable": []string{workspace}, "copy_on_write": []string{}, "masked": []string{}},
+		"network":    map[string]any{"mode": "off", "allowed_hosts": []string{}, "blocked_hosts": []string{}},
+		"tools":      map[string]any{}, "git": map[string]any{"isolation": "readonly"},
+	}
+	updated := mapsClone(policy)
+	updated["profile"] = "review"
+	input := encodeLines(t,
+		map[string]any{"type": "initialize", "protocol_version": ProtocolVersion, "workspace": workspace, "conversation_dir": conversation, "policy": policy},
+		map[string]any{"type": "update_policy", "request_id": "update", "policy": updated, "provider_executable": "codex", "behavior": "interrupt"},
+		map[string]any{"type": "shutdown"},
+	)
+	launches := 0
+	launcher := func(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, ioLogger) (providerRuntime, error) {
+		launches++
+		return fakeProvider{}, nil
+	}
+	var output bytes.Buffer
+	if err := run(context.Background(), strings.NewReader(input), &output, &bytes.Buffer{}, "test", launcher); err != nil {
+		t.Fatal(err)
+	}
+	if launches != 2 {
+		t.Fatalf("provider launch count = %d, want 2", launches)
+	}
+	frames := decodeLines(t, output.String())
+	ready := 0
+	for _, frame := range frames {
+		if frame["type"] == "ready" {
+			ready++
+		}
+	}
+	if ready != 2 || !hasFrameType(frames, "operation_result") {
+		t.Fatalf("policy update frames = %+v", frames)
+	}
+	store, err := chat.OpenDirectory(conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := store.Events()
+	if len(events) != 1 || events[0].Type != "notice" {
+		t.Fatalf("profile transition events = %+v", events)
+	}
+}
+
+func mapsClone(source map[string]any) map[string]any {
+	data, _ := json.Marshal(source)
+	var clone map[string]any
+	_ = json.Unmarshal(data, &clone)
+	return clone
 }
 
 func encodeLines(t *testing.T, values ...any) string {

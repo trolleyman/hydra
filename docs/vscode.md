@@ -316,6 +316,16 @@ During a running turn, `hydra.profileChangeBehavior` supports:
 Changes from `onDidChangeConfiguration` use the same behavior. The event log
 records the transition and which turn first used the new effective policy.
 
+The extension validates authored profile value kinds and decisions before path
+resolution. The native host then verifies provider/network/Git enums, tool and
+MCP decisions, the real host home, absolute paths, and symlink-canonical path
+prefixes. An applied profile stops the old provider, rebuilds every immutable
+seed and sandbox mount from the new effective policy, resumes the selected
+provider's own saved session, and records a notice in the event log. Session IDs
+are retained independently for Claude and Codex when a chat switches between
+them. “After this turn” is held by the extension until a normalized terminal
+turn event; it is never sent to a host that would apply it early.
+
 ## Git
 
 The sandbox exposes the complete resolved Git common directory read-only. Native
@@ -422,7 +432,7 @@ that commit.
   history, and resume.
 - [x] Run Claude through the same host contract with streaming, controls,
   history, and resume.
-- [ ] Resolve and validate profiles, launch the whole provider inside Hydra's
+- [x] Resolve and validate profiles, launch the whole provider inside Hydra's
   filesystem sandbox, and rebuild safely on grants/profile changes.
 - [ ] Connect hard/advisory egress filtering and interactive network approvals.
 - [ ] Connect local MCP governance, core-tool policy, and approval scopes.

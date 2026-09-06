@@ -34,6 +34,7 @@ export function defaultProfileName(all = profiles()): string {
 export async function resolveProfile(name: string, workspace: vscode.WorkspaceFolder): Promise<EffectivePolicy> {
   const authored = profiles()[name]
   if (!authored) throw new Error(`Unknown Hydra profile: ${name}`)
+  validateProfile(name, authored)
   const workspacePath = await canonical(workspace.uri.fsPath)
   const home = await canonical(os.homedir())
   const resolveAll = async (values: string[] | undefined) => Promise.all((values ?? []).map(value => resolvePath(value, workspace, home)))
@@ -59,6 +60,37 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
     },
     tools: authored.tools ?? { core: { read: 'allow', search: 'allow', edit: 'allow', bash: 'allow', fetch: 'allow' } },
     git: authored.git ?? { isolation: 'readonly', protected_branches: ['main', 'master', 'release/*'] },
+  }
+}
+
+function validateProfile(name: string, profile: AuthoredProfile): void {
+  const fail = (field: string, message: string): never => { throw new Error(`Hydra profile "${name}" ${field} ${message}`) }
+  const decisions = new Set(['allow', 'ask', 'deny'])
+  if (profile.provider !== undefined && !['claude', 'codex'].includes(profile.provider)) fail('provider', 'must be claude or codex')
+  for (const field of ['model', 'effort', 'prompt'] as const) {
+    if (profile[field] !== undefined && typeof profile[field] !== 'string') fail(field, 'must be a string')
+  }
+  for (const field of ['readable', 'writable', 'copy_on_write', 'masked'] as const) {
+    const values = profile.filesystem?.[field]
+    if (values !== undefined && (!Array.isArray(values) || values.some(value => typeof value !== 'string'))) fail(`filesystem.${field}`, 'must be an array of paths')
+  }
+  if (profile.network?.mode !== undefined && !['off', 'hard', 'advisory', 'unrestricted'].includes(profile.network.mode)) fail('network.mode', 'is invalid')
+  for (const field of ['allowed_hosts', 'blocked_hosts'] as const) {
+    const values = profile.network?.[field]
+    if (values !== undefined && (!Array.isArray(values) || values.some(value => typeof value !== 'string'))) fail(`network.${field}`, 'must be an array of host patterns')
+  }
+  for (const [tool, decision] of Object.entries(profile.tools?.core ?? {})) {
+    if (!decisions.has(String(decision))) fail(`tools.core.${tool}`, 'must be allow, ask, or deny')
+  }
+  for (const [serverName, server] of Object.entries(profile.tools?.mcp ?? {})) {
+    if (!decisions.has(server.decision)) fail(`tools.mcp.${serverName}.decision`, 'must be allow, ask, or deny')
+    for (const [toolName, tool] of Object.entries(server.tools ?? {})) {
+      if (!decisions.has(tool.decision)) fail(`tools.mcp.${serverName}.tools.${toolName}.decision`, 'must be allow, ask, or deny')
+    }
+  }
+  if (profile.git?.isolation !== undefined && !['readonly', 'off'].includes(profile.git.isolation)) fail('git.isolation', 'must be readonly or off')
+  for (const [operation, decision] of Object.entries(profile.git?.operations ?? {})) {
+    if (!decisions.has(decision)) fail(`git.operations.${operation}`, 'must be allow, ask, or deny')
   }
 }
 
