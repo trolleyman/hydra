@@ -117,6 +117,9 @@ export const StorageKeys = {
   // question card's free-text answers). Absent = off, the default. See
   // lib/composerPrefs.ts.
   spellcheck: 'hydra-spellcheck',
+  // JSON array of browser-local glob rules whose matching diff files are folded
+  // as auto-generated. Absent = the built-in rule list. See generatedFile.ts.
+  generatedFileGlobs: 'hydra-generated-file-globs',
   // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent
   // text. Default (absent) = on: incoming token bursts are revealed at a steady
   // per-frame rate so the text reads as continuous typing rather than landing in

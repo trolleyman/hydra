@@ -1,7 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Search } from 'lucide-react'
-import { languageDisplayName, searchLanguages } from '../lib/languageCatalog'
+import { LANGUAGE_OPTIONS, languageDisplayName, searchLanguages, type LanguageOption } from '../lib/languageCatalog'
+
+function LanguageOptionContent({ option }: { option: LanguageOption }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className="block text-xs font-medium text-gray-700 dark:text-gray-200">{option.label}</span>
+      <span className="block truncate text-[10px] text-gray-400">
+        {option.id}{option.extensions.length ? ` - ${option.extensions.map((ext) => `.${ext}`).join(', ')}` : ''}
+      </span>
+    </span>
+  )
+}
 
 export function LanguagePicker({ detected, selected, onSelect }: {
   detected: string
@@ -16,6 +27,11 @@ export function LanguagePicker({ detected, selected, onSelect }: {
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const language = selected ?? detected
   const results = useMemo(() => searchLanguages(query), [query])
+  const detectedOption = useMemo(
+    () => LANGUAGE_OPTIONS.find((option) => option.id === detected)
+      ?? { id: detected, label: languageDisplayName(detected), aliases: [], extensions: [], search: detected },
+    [detected],
+  )
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return
@@ -35,7 +51,13 @@ export function LanguagePicker({ detected, selected, onSelect }: {
       if (!panelRef.current?.contains(target) && !buttonRef.current?.contains(target)) setOpen(false)
     }
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
-    const closeOnScroll = () => setOpen(false)
+    // Scrolls from the results pane bubble through the capture listener on
+    // window too. Keep the picker open for those; only an outside page scroll
+    // invalidates its anchored position.
+    const closeOnScroll = (event: Event) => {
+      if (event.target instanceof Node && panelRef.current?.contains(event.target)) return
+      setOpen(false)
+    }
     document.addEventListener('pointerdown', closeOutside)
     document.addEventListener('keydown', closeOnEscape)
     window.addEventListener('resize', closeOnScroll)
@@ -93,9 +115,7 @@ export function LanguagePicker({ detected, selected, onSelect }: {
               onClick={() => choose(null)}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors duration-100"
             >
-              <span className="min-w-0 flex-1 text-xs font-medium text-gray-700 dark:text-gray-200">
-                {languageDisplayName(detected)}
-              </span>
+              <LanguageOptionContent option={detectedOption} />
               {selected == null && <Check className="h-3.5 w-3.5 text-blue-500" />}
             </button>
             {results.map((option) => (
@@ -105,12 +125,7 @@ export function LanguagePicker({ detected, selected, onSelect }: {
                 onClick={() => choose(option.id)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors duration-100"
               >
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-medium text-gray-700 dark:text-gray-200">{option.label}</span>
-                  <span className="block truncate text-[10px] text-gray-400">
-                    {option.id}{option.extensions.length ? ` - ${option.extensions.map((ext) => `.${ext}`).join(', ')}` : ''}
-                  </span>
-                </span>
+                <LanguageOptionContent option={option} />
                 {selected === option.id && <Check className="h-3.5 w-3.5 text-blue-500" />}
               </button>
             ))}

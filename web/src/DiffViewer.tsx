@@ -4,7 +4,7 @@ import { Link, linkOptions, useNavigate, type LinkProps } from '@tanstack/react-
 import { canHighlight, highlightHtml, highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
-import { isGeneratedFile } from './lib/generatedFile'
+import { generatedFileMatch, isGeneratedFile } from './lib/generatedFile'
 import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
@@ -24,7 +24,7 @@ import {
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, ArrowUp, ArrowDown, MailOpen, Paperclip,
   SquareArrowOutUpRight,
-  PanelLeftClose, PanelLeftOpen, ArrowUpToLine, ArrowDownToLine, UnfoldVertical,
+  PanelLeftClose, PanelLeftOpen, ArrowUpToLine, ArrowDownToLine,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
@@ -1610,11 +1610,27 @@ function contextLabel(src: DiffLine | string, lang: string, hlOld: Map<number, s
 // way from the count on a wide pane and made every expander's layout depend on
 // how long its label happened to be. Truncates rather than wrapping, keeping the
 // expander one line tall.
-function HunkContextLabel({ label }: { label: ContextLabel | undefined }) {
+function HunkContextLabel({ label, onClick }: { label: ContextLabel | undefined; onClick?: () => void }) {
   if (!label) return null
-  return label.html
-    ? <span className={EXPANDER_CONTEXT} title={label.text} dangerouslySetInnerHTML={{ __html: label.html }} />
-    : <span className={EXPANDER_CONTEXT} title={label.text}>{label.text}</span>
+  const content = label.html
+    ? <span dangerouslySetInnerHTML={{ __html: label.html }} />
+    : <span>{label.text}</span>
+  if (!onClick) return <span className={EXPANDER_CONTEXT} title={label.text}>{content}</span>
+  return (
+    <Tooltip content={label.text} align="left" className="min-w-0 flex-1">
+      <button type="button" onClick={onClick} className={`${EXPANDER_CONTEXT} w-full cursor-pointer hover:opacity-100 hover:underline`}>
+        {content}
+      </button>
+    </Tooltip>
+  )
+}
+
+function ShowAllLinesIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M12 9V3m0 0L9 6m3-3 3 3M5 12h14m-7 3v6m0 0-3-3m3 3 3-3" />
+    </svg>
+  )
 }
 
 function RevealButton({ direction, hidden, onClick }: {
@@ -1622,10 +1638,11 @@ function RevealButton({ direction, hidden, onClick }: {
   hidden?: number
   onClick: () => void
 }) {
-  const Icon = direction === 'up' ? ArrowUpToLine : direction === 'down' ? ArrowDownToLine : UnfoldVertical
+  const Icon = direction === 'up' ? ArrowUpToLine : direction === 'down' ? ArrowDownToLine : ShowAllLinesIcon
+  const count = hidden == null ? EXPAND_STEP : Math.min(EXPAND_STEP, hidden)
   const label = direction === 'all'
-    ? `Show all ${hidden} line${hidden === 1 ? '' : 's'}`
-    : `${direction === 'up' ? 'Up' : 'Down'} ${EXPAND_STEP} lines`
+    ? `Show all ${hidden}`
+    : `${direction === 'up' ? 'Up' : 'Down'} ${count}`
   return (
     <button onClick={onClick} className={EXPANDER_BTN}>
       <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -1657,17 +1674,18 @@ function AnimatedExpanderRow({ closing, children }: { closing?: boolean; childre
   )
 }
 
-function GapExpander({ seg, label, onDown, onUp, onAll }: {
+function GapExpander({ seg, label, onDown, onUp, onAll, onContext }: {
   seg: RenderSeg; label: ContextLabel | undefined; onDown: () => void; onUp: () => void; onAll: () => void
+  onContext?: () => void
 }) {
   return (
     <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
-        <RevealButton direction="up" onClick={onUp} />
-        <RevealButton direction="down" onClick={onDown} />
+        <RevealButton direction="up" hidden={seg.hidden} onClick={onUp} />
         <RevealButton direction="all" hidden={seg.hidden!} onClick={onAll} />
+        <RevealButton direction="down" hidden={seg.hidden} onClick={onDown} />
       </div>
-      <HunkContextLabel label={label} />
+      <HunkContextLabel label={label} onClick={onContext} />
     </AnimatedExpanderRow>
   )
 }
@@ -1675,17 +1693,23 @@ function GapExpander({ seg, label, onDown, onUp, onAll }: {
 // EdgeExpander reveals the file's hidden top (⌃, toward line 1) or bottom (⌄,
 // toward EOF). It is only rendered while lines remain hidden, so it disappears
 // once the file's first/last line is reached.
-function EdgeExpander({ seg, label, onStep, onAll }: {
+function EdgeExpander({ seg, label, onStep, onAll, onContext }: {
   seg: RenderSeg; label: ContextLabel | undefined; onStep: () => void; onAll: () => void
+  onContext?: () => void
 }) {
   const up = seg.kind === 'topedge'
   return (
     <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
-        <RevealButton direction={up ? 'up' : 'down'} onClick={onStep} />
-        <RevealButton direction="all" hidden={seg.hidden!} onClick={onAll} />
+        <RevealButton direction={up ? 'up' : 'down'} hidden={seg.hidden} onClick={onStep} />
+        {seg.hidden! > EXPAND_STEP && (
+          <>
+            <span className="px-1 text-gray-400 dark:text-gray-600" aria-hidden="true">·</span>
+            <RevealButton direction="all" hidden={seg.hidden!} onClick={onAll} />
+          </>
+        )}
       </div>
-      <HunkContextLabel label={label} />
+      <HunkContextLabel label={label} onClick={onContext} />
     </AnimatedExpanderRow>
   )
 }
@@ -1845,7 +1869,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   const detectedLang = getLanguage(file.path, fileHead)
   const [languageOverride, setLanguageOverride] = useState<string | null>(null)
   const lang = languageOverride ?? detectedLang
-  const generated = isGeneratedFile(file.path, fileHead)
+  const generated = generatedFileMatch(file.path, fileHead)
   const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
@@ -2354,7 +2378,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               </span>
               <ChangeTypeIcon type={file.change_type} />
               {generated && (
-                <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">Auto-generated</span>
+                <Tooltip content={generated.kind === 'glob' ? `Matched auto-generated glob: ${generated.rule}` : generated.rule}>
+                  <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">Auto-generated</span>
+                </Tooltip>
               )}
               {/* Copy-path rides with the path itself rather than sitting out in the
                 header's right-hand action cluster: the flex-1 above pushed it all
@@ -2468,7 +2494,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                     <GapExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
                       onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP }, seg)}
                       onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP }, seg)}
-                      onAll={() => setRegion(seg.regionId!, { top: seg.length! }, seg)} />
+                      onAll={() => setRegion(seg.regionId!, { top: seg.length! }, seg)}
+                      onContext={seg.contextBot == null ? undefined : () => setRegion(seg.regionId!, { bot: Math.max(seg.bot!, seg.contextBot!) }, seg)} />
                   )
                   // topedge reveals upward (toward line 1), botedge downward; both
                   // grow away from the expander row without moving the scroll.
@@ -2477,7 +2504,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
                         ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP }, seg)}
                       onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
-                        ? { bot: seg.length! } : { top: seg.length! }, seg)} />
+                        ? { bot: seg.length! } : { top: seg.length! }, seg)}
+                      onContext={seg.contextBot == null ? undefined : () => setRegion(seg.regionId!, { bot: Math.max(seg.bot!, seg.contextBot!) }, seg)} />
                   )
                 })}
               </div>
@@ -2512,20 +2540,25 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       {isFirst && !atTopOfFile && (
                         <div className={EXPANDER_ROW}>
                           <div className={EXPANDER_BTNS}>
-                            <RevealButton direction="up" onClick={() => windowedExpand(LEAD_REGION_ID, { bot: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
-                            {leadGap > 0 && <RevealButton direction="all" hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: currentContext + leadGap }, currentContext + leadGap)} />}
+                            <RevealButton direction="up" hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
+                            {leadGap > EXPAND_STEP && (
+                              <>
+                                <span className="px-1 text-gray-400 dark:text-gray-600" aria-hidden="true">·</span>
+                                <RevealButton direction="all" hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: currentContext + leadGap }, currentContext + leadGap)} />
+                              </>
+                            )}
                           </div>
-                          <HunkContextLabel label={contextLabels.get(hunk.header)} />
+                          <HunkContextLabel label={contextLabels.get(hunk.header)} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: currentContext + leadGap }, currentContext + leadGap)} />
                         </div>
                       )}
                       {!isFirst && gapSize > 0 && (
                         <div className={EXPANDER_ROW}>
                           <div className={EXPANDER_BTNS}>
-                            <RevealButton direction="up" onClick={() => windowedExpand(gapRegion, { bot: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
-                            <RevealButton direction="down" onClick={() => windowedExpand(gapRegion, { top: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
+                            <RevealButton direction="up" hidden={gapSize} onClick={() => windowedExpand(gapRegion, { bot: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
                             <RevealButton direction="all" hidden={gapSize} onClick={() => windowedExpand(gapRegion, { top: currentContext + gapSize }, currentContext + Math.max(gapSize, EXPAND_STEP))} />
+                            <RevealButton direction="down" hidden={gapSize} onClick={() => windowedExpand(gapRegion, { top: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
                           </div>
-                          <HunkContextLabel label={contextLabels.get(hunk.header)} />
+                          <HunkContextLabel label={contextLabels.get(hunk.header)} onClick={() => windowedExpand(gapRegion, { bot: currentContext + gapSize }, currentContext + Math.max(gapSize, EXPAND_STEP))} />
                         </div>
                       )}
                       {sideBySide
@@ -2541,8 +2574,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       {isLast && !atEndOfFile && (
                         <div className={EXPANDER_ROW}>
                           <div className={EXPANDER_BTNS}>
-                            <RevealButton direction="down" onClick={() => windowedExpand(tailRegion, { top: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
-                            {tailGap != null && tailGap > 0 && <RevealButton direction="all" hidden={tailGap} onClick={() => windowedExpand(tailRegion, { top: currentContext + tailGap }, currentContext + tailGap)} />}
+                            <RevealButton direction="down" hidden={tailGap ?? undefined} onClick={() => windowedExpand(tailRegion, { top: currentContext + EXPAND_STEP }, currentContext + EXPAND_STEP)} />
+                            {tailGap != null && tailGap > EXPAND_STEP && (
+                              <>
+                                <span className="px-1 text-gray-400 dark:text-gray-600" aria-hidden="true">·</span>
+                                <RevealButton direction="all" hidden={tailGap} onClick={() => windowedExpand(tailRegion, { top: currentContext + tailGap }, currentContext + tailGap)} />
+                              </>
+                            )}
                           </div>
                         </div>
                       )}
@@ -3586,7 +3624,6 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
           </span>
         </Tooltip>
         <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
-        {isGeneratedFile(file.path, firstFileLine(file)) && <span className="shrink-0 text-[9px] text-gray-400 dark:text-gray-500">Auto</span>}
       </span>
       <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
     </button>

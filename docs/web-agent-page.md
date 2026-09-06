@@ -99,9 +99,13 @@ and `web/src/DiffViewer.tsx`):
   with it, `atFileEnd` also drops the expander outright when the last hunk
   provably ends at EOF (the old `trailingContext < currentContext` guess couldn't
   tell that from a file with more below, and drew an action that expanded to nothing).
-  Every known gap presents labelled **Up 20 lines**, **Down 20 lines**, and/or
-  **Show all N lines** actions with directional line icons; a middle gap has all
-  three and a file edge has the two actions that make sense there.
+  Directional actions reveal at most 20 lines and state the actual remaining
+  count when it is smaller. A middle gap orders its actions as **Up N**, **Show
+  all N**, **Down N**; the compact button labels omit the word "lines". A file
+  edge shows its one directional action, followed by
+  a non-interactive interpunct and **Show all N** only when more than 20 lines
+  remain. A hunk-context label is also an action: it reveals upward through the
+  declaration it names.
 - Lazy file bodies + **measured placeholders**: a file card's body stays an empty
   placeholder until the card first scrolls near the viewport (`near`, a one-way
   IntersectionObserver latch in `FileDiff`). The placeholder's height is not
@@ -167,12 +171,17 @@ and `web/src/DiffViewer.tsx`):
     was, so it reads as detached from its own card until the next scroll.
 - Diff file headers show the detected syntax language as a lowlit control. Its
   picker searches the full Prism catalog by display name, grammar codename,
-  alias, or mapped file extension, and a per-file override immediately
-  re-highlights both sides. Jsonnet uses Hydra's bundled Jsonnet grammar.
+  alias, or mapped file extension, lists the detected language's extensions the
+  same way as every other entry, and keeps its results menu open while that menu
+  scrolls. A per-file override immediately re-highlights both sides. Jsonnet
+  uses Hydra's bundled Jsonnet grammar.
   Machine-owned lockfiles and conventional generated paths carry an
-  **Auto-generated** label and start folded once per page session. Marking a file
-  **Viewed** also folds it immediately; unmarking it leaves the reader's current
-  fold state alone.
+  **Auto-generated** label and start folded once per page session. Hovering the
+  label names the glob or first-line generated marker that matched. Settings ->
+  Browser -> Auto-generated files edits the browser-local, case-insensitive glob
+  list; each rule states whether it matches a filename or a complete repository
+  path. Marking a file **Viewed** also folds it immediately; unmarking it leaves
+  the reader's current fold state alone.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
   (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to

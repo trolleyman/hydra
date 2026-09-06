@@ -125,10 +125,16 @@ describe('diff sidebar path tooltips', () => {
     expect(within(tooltip).getByText('web/src/components')).toHaveClass('text-stone-700')
     expect(tooltip.querySelector('svg')).not.toBeNull()
   })
+
+  it('does not add generated-file metadata to the compact file row', () => {
+    render(<FileRow file={file({ path: 'Cargo.lock' })} isActive={false} onClick={() => {}} />)
+    expect(screen.queryByText('Auto')).not.toBeInTheDocument()
+  })
 })
 
 describe('file header metadata', () => {
   it('marks generated files and passes the current blob to the viewed toggle', () => {
+    vi.useFakeTimers()
     const onToggleViewed = vi.fn()
     render(
       <FileDiff
@@ -144,7 +150,12 @@ describe('file header metadata', () => {
       />,
     )
 
-    expect(screen.getByText('Auto-generated')).toBeInTheDocument()
+    const generated = screen.getByText('Auto-generated')
+    expect(generated).toBeInTheDocument()
+    fireEvent.mouseEnter(generated)
+    act(() => void vi.advanceTimersByTime(600))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Matched auto-generated glob:')
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Cargo.lock')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
     expect(onToggleViewed).toHaveBeenCalledWith('Cargo.lock', 'blob-1')
   })
@@ -163,6 +174,10 @@ describe('file header metadata', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Syntax highlighting: TypeScript' }))
+    expect(screen.getAllByText(/typescript - .*\.ts/).length).toBeGreaterThan(0)
+    const picker = screen.getByRole('dialog', { name: 'Select syntax highlighting language' })
+    fireEvent.scroll(picker.querySelector('.overflow-y-auto')!)
+    expect(picker).toBeInTheDocument()
     expect(screen.queryByText(/Detected:/)).not.toBeInTheDocument()
     expect(screen.queryByText('Use the filename and shebang')).not.toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('Search languages, aliases, extensions'), { target: { value: '.libsonnet' } })
@@ -405,10 +420,24 @@ describe('expander context labels', () => {
       />,
     )
     const row = Array.from(container.querySelectorAll(`div[class="${EXPANDER_ROW}"]`))
-      .find((el) => el.textContent?.includes('lines'))
+      .find((el) => el.textContent?.includes('Show all'))
     expect(row?.textContent).toContain('function theEnclosingOne() {')
     // The label carries the file's own token markup rather than flat grey text.
     expect(row?.innerHTML).toContain('token keyword')
+  })
+
+  it('reveals upward through the context declaration when its label is clicked', () => {
+    const { container } = render(
+      <FileDiff
+        file={fileWithHiddenFunction()} sideBySide={false} currentContext={3}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'function theEnclosingOne() {' }))
+    expect(screen.queryByRole('button', { name: 'function theEnclosingOne() {' })).not.toBeInTheDocument()
+    expect(Array.from(container.querySelectorAll(`span[class^="${UNIFIED_CODE_CLASS}"]`))
+      .some((cell) => cell.textContent === 'function theEnclosingOne() {')).toBe(true)
   })
 })
 
@@ -443,17 +472,44 @@ describe('a windowed file counts what its edges hide', () => {
   it('counts both edges when the file states its length', () => {
     const f = windowedDeep({ total_lines: 500 })
     expect(expanderTexts(f)).toEqual([
-      expect.stringContaining('99 lines'),
-      expect.stringContaining('395 lines'),
+      expect.stringContaining('Show all 99'),
+      expect.stringContaining('Show all 395'),
     ])
     expect(bodyShape(f, false, false, 3)).toMatchObject({
       expanders: [{ buttons: 2, hidden: 99 }, { buttons: 2, hidden: 395 }],
     })
   })
 
+  it('caps directional counts and omits redundant edge show-all actions', () => {
+    const shortLead = file({
+      expanded: false, additions: 1, deletions: 0,
+      hunks: [hunk([ctx('a', 19), add('added', 20)], 19, 19)],
+    })
+    expect(expanderTexts(shortLead)).toEqual(['Up 18'])
+
+    const [longLead] = expanderTexts(windowedDeep({ total_lines: 500 }))
+    expect(longLead).toContain('Up 20·Show all 99')
+  })
+
+  it('orders middle actions as up, show all, then down', () => {
+    cleanup()
+    const { container } = render(
+      <FileDiff
+        file={windowedFile()} sideBySide={false} currentContext={3}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    const middle = Array.from(container.querySelectorAll(`div[class="${EXPANDER_ROW}"]`))
+      .find((el) => el.textContent?.includes('Show all'))!
+    expect(Array.from(middle.querySelectorAll('button'), (button) => button.textContent)).toEqual([
+      'Up 20', 'Show all 46', 'Down 20',
+    ])
+  })
+
   it('still counts the leading run without one, and leaves the trailing action directional-only', () => {
     const f = windowedDeep()
-    expect(expanderTexts(f)).toEqual([expect.stringContaining('99 lines'), 'Down 20 lines'])
+    expect(expanderTexts(f)).toEqual([expect.stringContaining('Show all 99'), 'Down 20'])
     expect(bodyShape(f, false, false, 3)).toMatchObject({
       expanders: [{ buttons: 2, hidden: 99 }, { buttons: 1, hidden: null }],
     })
@@ -465,7 +521,7 @@ describe('a windowed file counts what its edges hide', () => {
   // total_lines settles it, so that expander now disappears.
   it('drops the trailing expander when the last hunk provably reaches EOF', () => {
     const atEof = windowedDeep({ total_lines: 105 })
-    expect(expanderTexts(atEof)).toEqual([expect.stringContaining('99 lines')])
+    expect(expanderTexts(atEof)).toEqual([expect.stringContaining('Show all 99')])
     expect(bodyShape(atEof, false, false, 3)).toMatchObject({ expanders: [{ buttons: 2, hidden: 99 }] })
   })
 
@@ -474,7 +530,7 @@ describe('a windowed file counts what its edges hide', () => {
       expanded: false, additions: 1, deletions: 0, total_lines: 500,
       hunks: [hunk([ctx('a', 1), add('added', 2), ctx('b', 3)], 1, 1)],
     })
-    expect(expanderTexts(f)).toEqual([expect.stringContaining('497 lines')])
+    expect(expanderTexts(f)).toEqual([expect.stringContaining('Show all 497')])
   })
 })
 
