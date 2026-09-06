@@ -1050,6 +1050,7 @@ func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageR
 		resp.SessionResetText = &txt
 	}
 	resp.WeeklyPercentUsed = f64ToF32(snap.WeeklyPercentUsed)
+	resp.WeeklyResetsAt = snap.WeeklyResetsAt
 	if snap.WeeklyResetText != "" {
 		txt := snap.WeeklyResetText
 		resp.WeeklyResetText = &txt
@@ -1076,11 +1077,16 @@ func (s *Server) GetCodexUsage(ctx context.Context, request api.GetCodexUsageReq
 	}
 	resp.SessionPercentUsed = f64ToF32(snap.SessionPercentUsed)
 	resp.SessionResetsAt = snap.SessionResetsAt
+	if snap.SessionModel != "" {
+		model := snap.SessionModel
+		resp.SessionModel = &model
+	}
 	if snap.SessionResetText != "" {
 		txt := snap.SessionResetText
 		resp.SessionResetText = &txt
 	}
 	resp.WeeklyPercentUsed = f64ToF32(snap.WeeklyPercentUsed)
+	resp.WeeklyResetsAt = snap.WeeklyResetsAt
 	if snap.WeeklyResetText != "" {
 		txt := snap.WeeklyResetText
 		resp.WeeklyResetText = &txt

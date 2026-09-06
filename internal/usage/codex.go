@@ -130,14 +130,13 @@ func parseCodexRateLimits(raw json.RawMessage) (Snapshot, error) {
 		return Snapshot{}, errtrace.Wrap(err)
 	}
 
-	// Codex can put the general weekly window in rateLimits.primary while shorter
-	// model-specific windows appear only in rateLimitsByLimitId. Summarize all
-	// groups so the compact UI shows both time scales. Duplicate top-level/map
-	// entries are harmless.
-	groups := make([]codexRateLimits, 0, len(result.RateLimitsByLimitID)+1)
-	groups = append(groups, result.RateLimits)
-	for _, limits := range result.RateLimitsByLimitID {
-		groups = append(groups, limits)
+	// Codex puts the account-wide weekly window in rateLimits, while a short
+	// window can belong to a specific model in rateLimitsByLimitId. Keep that
+	// owner so the UI never presents a Spark-only limit for another model.
+	groups := make([]codexLimitGroup, 0, len(result.RateLimitsByLimitID)+1)
+	groups = append(groups, codexLimitGroup{limits: result.RateLimits})
+	for id, limits := range result.RateLimitsByLimitID {
+		groups = append(groups, codexLimitGroup{id: id, limits: limits})
 	}
 	session, weekly := selectCodexRateLimitWindows(groups)
 	if session == nil && weekly == nil {
@@ -148,6 +147,7 @@ func parseCodexRateLimits(raw json.RawMessage) (Snapshot, error) {
 	if session != nil {
 		snap.SessionPercentUsed = &session.UsedPercent
 		snap.SessionResetText = codexWindowLabel(session.WindowDurationMins)
+		snap.SessionModel = session.groupID
 	}
 	if session != nil && session.ResetsAt > 0 {
 		t := time.Unix(session.ResetsAt, 0)
@@ -156,6 +156,10 @@ func parseCodexRateLimits(raw json.RawMessage) (Snapshot, error) {
 	if weekly != nil {
 		snap.WeeklyPercentUsed = &weekly.UsedPercent
 		snap.WeeklyResetText = codexWindowLabel(weekly.WindowDurationMins)
+		if weekly.ResetsAt > 0 {
+			t := time.Unix(weekly.ResetsAt, 0)
+			snap.WeeklyResetsAt = &t
+		}
 	}
 	return snap, nil
 }
@@ -163,6 +167,16 @@ func parseCodexRateLimits(raw json.RawMessage) (Snapshot, error) {
 type codexRateLimits struct {
 	Primary   *codexRateLimitWindow `json:"primary"`
 	Secondary *codexRateLimitWindow `json:"secondary"`
+}
+
+type codexLimitGroup struct {
+	id     string
+	limits codexRateLimits
+}
+
+type selectedCodexWindow struct {
+	*codexRateLimitWindow
+	groupID string
 }
 
 type codexRateLimitWindow struct {
@@ -173,16 +187,17 @@ type codexRateLimitWindow struct {
 
 const codexWeekMinutes = 7 * 24 * 60
 
-func selectCodexRateLimitWindows(groups []codexRateLimits) (session, weekly *codexRateLimitWindow) {
-	for _, limits := range groups {
-		for _, window := range []*codexRateLimitWindow{limits.Primary, limits.Secondary} {
+func selectCodexRateLimitWindows(groups []codexLimitGroup) (session, weekly *selectedCodexWindow) {
+	for _, group := range groups {
+		for _, window := range []*codexRateLimitWindow{group.limits.Primary, group.limits.Secondary} {
 			if window == nil {
 				continue
 			}
+			candidate := &selectedCodexWindow{codexRateLimitWindow: window, groupID: group.id}
 			if window.WindowDurationMins < codexWeekMinutes {
-				session = preferCodexWindow(session, window)
+				session = preferCodexWindow(session, candidate)
 			} else {
-				weekly = preferCodexWindow(weekly, window)
+				weekly = preferCodexWindow(weekly, candidate)
 			}
 		}
 	}
@@ -193,7 +208,7 @@ func selectCodexRateLimitWindows(groups []codexRateLimits) (session, weekly *cod
 // when several limit groups share that duration. The latter is the useful
 // conservative summary for a compact indicator with one value per time scale;
 // the later reset makes otherwise-equal choices deterministic and conservative.
-func preferCodexWindow(current, candidate *codexRateLimitWindow) *codexRateLimitWindow {
+func preferCodexWindow(current, candidate *selectedCodexWindow) *selectedCodexWindow {
 	if current == nil ||
 		(candidate.WindowDurationMins > 0 && (current.WindowDurationMins <= 0 || candidate.WindowDurationMins < current.WindowDurationMins)) ||
 		(candidate.WindowDurationMins == current.WindowDurationMins && candidate.UsedPercent > current.UsedPercent) ||

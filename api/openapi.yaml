@@ -4034,6 +4034,11 @@ components:
           format: float
           nullable: true
           description: Percent of the weekly (all-models) limit used (0-100).
+        weekly_resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the weekly limit resets.
         weekly_reset_text:
           type: string
           nullable: true
@@ -4068,11 +4073,20 @@ components:
           type: string
           nullable: true
           description: Display label for the selected short Codex rate-limit window.
+        session_model:
+          type: string
+          nullable: true
+          description: Model id that owns the selected short Codex rate-limit window. Omitted for an account-wide short window.
         weekly_percent_used:
           type: number
           format: float
           nullable: true
           description: Percent used (0-100) for the shortest week-or-longer Codex window, choosing the most constrained matching limit group.
+        weekly_resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the selected week-or-longer Codex rate-limit window resets.
         weekly_reset_text:
           type: string
           nullable: true

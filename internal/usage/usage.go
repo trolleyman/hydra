@@ -52,10 +52,14 @@ type Snapshot struct {
 	SessionPercentUsed *float64
 	SessionResetsAt    *time.Time
 	SessionResetText   string
+	// SessionModel is the Codex model id which owns Session. It is empty for
+	// provider-wide limits such as Claude's session window.
+	SessionModel string
 
 	// Weekly is the "Current week (all models)" limit. Its reset is days out and
-	// only ever shown as an absolute date, so only the text is captured.
+	// the CLI writes it as an absolute date.
 	WeeklyPercentUsed *float64
+	WeeklyResetsAt    *time.Time
 	WeeklyResetText   string
 }
 
@@ -332,6 +336,9 @@ func Parse(text string, now time.Time) Snapshot {
 	}
 	if m := resetLineRe.FindStringSubmatch(weeklyBlock); m != nil {
 		snap.WeeklyResetText = strings.TrimSpace(m[1])
+	}
+	if t, ok := parseResetAt(weeklyBlock, now); ok {
+		snap.WeeklyResetsAt = &t
 	}
 
 	if snap.SessionPercentUsed != nil {

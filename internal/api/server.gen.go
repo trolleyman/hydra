@@ -1793,6 +1793,9 @@ type ClaudeUsageResponse struct {
 
 	// WeeklyResetText Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
 	WeeklyResetText *string `json:"weekly_reset_text"`
+
+	// WeeklyResetsAt When the weekly limit resets.
+	WeeklyResetsAt *time.Time `json:"weekly_resets_at"`
 }
 
 // CodexUsageResponse defines model for CodexUsageResponse.
@@ -1805,6 +1808,9 @@ type CodexUsageResponse struct {
 
 	// Error Why usage is unavailable (CLI missing, unsupported authentication, parse failure, ...).
 	Error *string `json:"error"`
+
+	// SessionModel Model id that owns the selected short Codex rate-limit window. Omitted for an account-wide short window.
+	SessionModel *string `json:"session_model"`
 
 	// SessionPercentUsed Percent used (0-100) for the shortest Codex rate-limit window shorter than one week, when available across the account's limit groups.
 	SessionPercentUsed *float32 `json:"session_percent_used"`
@@ -1820,6 +1826,9 @@ type CodexUsageResponse struct {
 
 	// WeeklyResetText Display label for the selected week-or-longer Codex rate-limit window.
 	WeeklyResetText *string `json:"weekly_reset_text"`
+
+	// WeeklyResetsAt When the selected week-or-longer Codex rate-limit window resets.
+	WeeklyResetsAt *time.Time `json:"weekly_resets_at"`
 }
 
 // CommitCreatedEvent defines model for CommitCreatedEvent.

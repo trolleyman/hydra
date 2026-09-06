@@ -71,6 +71,31 @@ describe('ClaudeUsageIndicator', () => {
     expect(screen.getByText('35%')).toBeInTheDocument()
   })
 
+  it('only shows a model-specific Codex session limit for its model, while keeping the weekly reset visible', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-06T20:00:00Z'))
+    vi.spyOn(api.default, 'getCodexUsage').mockResolvedValue({
+      available: true,
+      session_percent_used: 38,
+      session_reset_text: '5h',
+      session_model: 'gpt-5.3-codex-spark',
+      session_resets_at: '2026-09-07T00:59:00Z',
+      weekly_percent_used: 65,
+      weekly_reset_text: 'week',
+      weekly_resets_at: '2026-09-13T19:59:00Z',
+    })
+    render(<ClaudeUsageIndicator agentType="codex" model="gpt-5.6-sol" />)
+    await act(async () => { await Promise.resolve() })
+
+    expect(screen.queryByText('62%')).not.toBeInTheDocument()
+    expect(screen.getByText('35%')).toBeInTheDocument()
+    expect(screen.getByText('6d 23h 59m')).toBeInTheDocument()
+
+    render(<ClaudeUsageIndicator agentType="codex" model="gpt-5.3-codex-spark" />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByText('62%')).toBeInTheDocument()
+  })
+
   it('forces fresh probes just after the session reset until the snapshot advances', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-30T15:00:00Z'))

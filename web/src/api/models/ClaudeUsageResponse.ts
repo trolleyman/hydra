@@ -36,6 +36,10 @@ export type ClaudeUsageResponse = {
      */
     weekly_percent_used?: number | null;
     /**
+     * When the weekly limit resets.
+     */
+    weekly_resets_at?: string | null;
+    /**
      * Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
      */
     weekly_reset_text?: string | null;

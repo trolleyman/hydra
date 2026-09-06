@@ -64,7 +64,7 @@ function UsageStat({ label, value, valueClass }: { label: string; value: string;
 // UsageIndicator shows the selected chat provider's subscription usage in the
 // sidebar footer. It only supports Claude and Codex: other agent types retain
 // the last relevant provider so the footer does not flicker away while browsing.
-export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'codex' }) {
+export function ClaudeUsageIndicator({ agentType, model }: { agentType: 'claude' | 'codex'; model?: string }) {
   // Current wall-clock time, refreshed by the countdown ticker below. Held in
   // state (rather than reading Date.now() during render) so render stays pure.
   const [now, setNow] = useState(() => Date.now())
@@ -78,7 +78,13 @@ export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'cod
     { intervalMs: POLL_MS, initial: null },
   )
 
-  const resetsAt = data?.session_resets_at ? Date.parse(data.session_resets_at) : NaN
+  const codexData = agentType === 'codex' ? data as CodexUsageResponse | null : null
+  const sessionMatchesModel = agentType === 'claude' || !codexData?.session_model || codexData.session_model === model
+  const session = sessionMatchesModel ? remaining(data?.session_percent_used) : null
+  const weekly = remaining(data?.weekly_percent_used)
+  const sessionResetsAt = session != null && data?.session_resets_at ? Date.parse(data.session_resets_at) : NaN
+  const weeklyResetsAt = weekly != null && data?.weekly_resets_at ? Date.parse(data.weekly_resets_at) : NaN
+  const resetsAt = !Number.isNaN(sessionResetsAt) ? sessionResetsAt : weeklyResetsAt
 
   // Tick once a second only while there's a live countdown to animate.
   useEffect(() => {
@@ -107,8 +113,6 @@ export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'cod
   }, [fetchUsage, resetsAt])
 
   if (!data) return null
-  const session = remaining(data.session_percent_used)
-  const weekly = remaining(data.weekly_percent_used)
   // Probe ran but yielded no quota (e.g. API-billing account, CLI missing).
   if (!data.available && session == null && weekly == null) return null
 
@@ -121,18 +125,21 @@ export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'cod
   // or as a wall clock time, "Resets 3:10pm (Europe/London)").
   const countdown = rawReset ? withoutTimezone(rawReset.replace(/^resets?\s+(in\s+)?/i, '')) : null
 
+  const resetDetail = (resetsAt: number, text: string | null | undefined) => !Number.isNaN(resetsAt)
+    ? `resets ${new Date(resetsAt).toLocaleString()}`
+    : text ? withoutTimezone(text) : null
   const tip = (
     <div className="text-xs leading-relaxed">
       {session != null && (
         <div>
-          Session: {Math.round(session)}% left
-          {data.session_reset_text && agentType === 'claude' ? ` · ${withoutTimezone(data.session_reset_text)}` : ''}
+          {agentType === 'codex' ? (data.session_reset_text ?? 'Session') : 'Session'}: {Math.round(session)}% left
+          {resetDetail(sessionResetsAt, data.session_reset_text) ? ` · ${resetDetail(sessionResetsAt, data.session_reset_text)}` : ''}
         </div>
       )}
       {weekly != null && (
         <div>
           Week: {Math.round(weekly)}% left
-          {data.weekly_reset_text && agentType === 'claude' ? ` · ${withoutTimezone(data.weekly_reset_text)}` : ''}
+          {resetDetail(weeklyResetsAt, data.weekly_reset_text) ? ` · ${resetDetail(weeklyResetsAt, data.weekly_reset_text)}` : ''}
         </div>
       )}
       {data.error && <div className="text-amber-400">{data.error}</div>}

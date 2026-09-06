@@ -28,9 +28,17 @@ export type CodexUsageResponse = {
      */
     session_reset_text?: string | null;
     /**
+     * Model id that owns the selected short Codex rate-limit window. Omitted for an account-wide short window.
+     */
+    session_model?: string | null;
+    /**
      * Percent used (0-100) for the shortest week-or-longer Codex window, choosing the most constrained matching limit group.
      */
     weekly_percent_used?: number | null;
+    /**
+     * When the selected week-or-longer Codex rate-limit window resets.
+     */
+    weekly_resets_at?: string | null;
     /**
      * Display label for the selected week-or-longer Codex rate-limit window.
      */

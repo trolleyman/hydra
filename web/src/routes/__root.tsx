@@ -294,21 +294,25 @@ function RootLayout() {
     if (!selectedAgentId) return undefined
     return selectAgent(s, selectedAgentId)?.agent_type
   })
+  const selectedAgentModel = useAgentStore((s) => {
+    if (!selectedAgentId) return undefined
+    return selectAgent(s, selectedAgentId)?.model
+  })
   // Keep the last Claude/Codex choice while another agent type is in front.
   // The ref starts at Claude so the footer has a useful, stable default before
   // the user has selected either chat provider.
-  const lastUsageAgentType = useRef<'claude' | 'codex'>('claude')
+  const lastUsageAgent = useRef<{ type: 'claude' | 'codex'; model?: string }>({ type: 'claude' })
   if (selectedAgentType === 'claude' || selectedAgentType === 'codex') {
-    lastUsageAgentType.current = selectedAgentType
+    lastUsageAgent.current = { type: selectedAgentType, model: selectedAgentModel }
   } else if (!selectedAgentId && (composerAgentType === 'claude' || composerAgentType === 'codex')) {
-    lastUsageAgentType.current = composerAgentType
+    lastUsageAgent.current = { type: composerAgentType }
   }
   // On an agent route, wait for that agent record before mounting the usage
   // indicator. Otherwise the initial empty store briefly mounts the Claude
   // default and launches a Claude quota probe even when the selected head is
   // Codex; the correct Codex indicator replaces it a moment later, but the
   // needless Claude process and parse warning have already happened.
-  const usageAgentType = selectedAgentId && !selectedAgentType ? null : lastUsageAgentType.current
+  const usageAgent = selectedAgentId && !selectedAgentType ? null : lastUsageAgent.current
   // Narrow slices of the agent store, so the layout re-renders only when one of
   // THESE derived values changes - not on every ~1/s agent refresh. The live
   // agent list itself lives in <AgentSidebarList>, which owns its own
@@ -1336,7 +1340,7 @@ function RootLayout() {
             {/* The right half, as one group: usage strip + settings, neither of
                 which may shrink - see above. */}
             <div className="flex shrink-0 items-center gap-1.5">
-              {usageAgentType && <ClaudeUsageIndicator key={usageAgentType} agentType={usageAgentType} />}
+              {usageAgent && <ClaudeUsageIndicator key={`${usageAgent.type}:${usageAgent.model ?? ''}`} agentType={usageAgent.type} model={usageAgent.model} />}
             {(() => {
               const settingsActive = /\/settings(\/|$)/.test(location.pathname)
               const cls = settingsActive

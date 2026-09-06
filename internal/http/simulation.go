@@ -227,12 +227,18 @@ func (s *SimulationServer) GetCodexUsage(w http.ResponseWriter, r *http.Request,
 	weekly := float32(65)
 	sessionText := "5h"
 	weeklyText := "week"
+	sessionModel := "gpt-5.3-codex-spark"
+	sessionReset := time.Date(2026, time.September, 7, 0, 59, 0, 0, time.UTC)
+	weeklyReset := time.Date(2026, time.September, 13, 19, 59, 0, 0, time.UTC)
 	api.WriteJSON(w, http.StatusOK, api.CodexUsageResponse{
 		Available:          available,
 		SessionPercentUsed: &session,
 		SessionResetText:   &sessionText,
+		SessionModel:       &sessionModel,
+		SessionResetsAt:    &sessionReset,
 		WeeklyPercentUsed:  &weekly,
 		WeeklyResetText:    &weeklyText,
+		WeeklyResetsAt:     &weeklyReset,
 	})
 }
 

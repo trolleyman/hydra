@@ -21,7 +21,10 @@ func TestParseCodexRateLimits(t *testing.T) {
 	if snap.SessionResetText != "5h" || snap.SessionResetsAt == nil || !snap.SessionResetsAt.Equal(time.Unix(1730947200, 0)) {
 		t.Fatalf("primary reset = %q %v", snap.SessionResetText, snap.SessionResetsAt)
 	}
-	if snap.WeeklyPercentUsed == nil || *snap.WeeklyPercentUsed != 65 || snap.WeeklyResetText != "1w" {
+	if snap.SessionModel != "" {
+		t.Fatalf("top-level session model = %q, want account-wide", snap.SessionModel)
+	}
+	if snap.WeeklyPercentUsed == nil || *snap.WeeklyPercentUsed != 65 || snap.WeeklyResetText != "1w" || snap.WeeklyResetsAt == nil || !snap.WeeklyResetsAt.Equal(time.Unix(1731552000, 0)) {
 		t.Fatalf("secondary snapshot = %+v", snap)
 	}
 }
@@ -55,6 +58,9 @@ func TestParseCodexRateLimitsAcrossNamedLimitGroups(t *testing.T) {
 	}
 	if snap.SessionResetText != "5h" || snap.SessionResetsAt == nil || !snap.SessionResetsAt.Equal(time.Unix(1788620763, 0)) {
 		t.Fatalf("session reset = %q %v", snap.SessionResetText, snap.SessionResetsAt)
+	}
+	if snap.SessionModel != "codex_bengalfox" {
+		t.Fatalf("session model = %q, want codex_bengalfox", snap.SessionModel)
 	}
 	if snap.WeeklyPercentUsed == nil || *snap.WeeklyPercentUsed != 85 || snap.WeeklyResetText != "1w" {
 		t.Fatalf("weekly snapshot = %+v", snap)
