@@ -125,6 +125,11 @@ describe('diff sidebar path tooltips', () => {
     expect(within(tooltip).getByText('web/src/components')).toHaveClass('text-stone-700')
     expect(tooltip.querySelector('svg')).not.toBeNull()
   })
+
+  it('does not add generated-file metadata to the compact file row', () => {
+    render(<FileRow file={file({ path: 'Cargo.lock' })} isActive={false} onClick={() => {}} />)
+    expect(screen.queryByText('Auto')).not.toBeInTheDocument()
+  })
 })
 
 describe('file header metadata', () => {
@@ -163,6 +168,10 @@ describe('file header metadata', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Syntax highlighting: TypeScript' }))
+    expect(screen.getAllByText(/typescript - .*\.ts/).length).toBeGreaterThan(0)
+    const picker = screen.getByRole('dialog', { name: 'Select syntax highlighting language' })
+    fireEvent.scroll(picker.querySelector('.overflow-y-auto')!)
+    expect(picker).toBeInTheDocument()
     expect(screen.queryByText(/Detected:/)).not.toBeInTheDocument()
     expect(screen.queryByText('Use the filename and shebang')).not.toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('Search languages, aliases, extensions'), { target: { value: '.libsonnet' } })
@@ -410,6 +419,20 @@ describe('expander context labels', () => {
     // The label carries the file's own token markup rather than flat grey text.
     expect(row?.innerHTML).toContain('token keyword')
   })
+
+  it('reveals upward through the context declaration when its label is clicked', () => {
+    const { container } = render(
+      <FileDiff
+        file={fileWithHiddenFunction()} sideBySide={false} currentContext={3}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'function theEnclosingOne() {' }))
+    expect(screen.queryByRole('button', { name: 'function theEnclosingOne() {' })).not.toBeInTheDocument()
+    expect(Array.from(container.querySelectorAll(`span[class^="${UNIFIED_CODE_CLASS}"]`))
+      .some((cell) => cell.textContent === 'function theEnclosingOne() {')).toBe(true)
+  })
 })
 
 // A file too big to ship whole arrives as `-U3` fragments, and its two edge
@@ -449,6 +472,33 @@ describe('a windowed file counts what its edges hide', () => {
     expect(bodyShape(f, false, false, 3)).toMatchObject({
       expanders: [{ buttons: 2, hidden: 99 }, { buttons: 2, hidden: 395 }],
     })
+  })
+
+  it('caps directional counts and omits redundant edge show-all actions', () => {
+    const shortLead = file({
+      expanded: false, additions: 1, deletions: 0,
+      hunks: [hunk([ctx('a', 19), add('added', 20)], 19, 19)],
+    })
+    expect(expanderTexts(shortLead)).toEqual(['Up 18 lines'])
+
+    const [longLead] = expanderTexts(windowedDeep({ total_lines: 500 }))
+    expect(longLead).toContain('Up 20 lines·Show all 99 lines')
+  })
+
+  it('orders middle actions as up, show all, then down', () => {
+    cleanup()
+    const { container } = render(
+      <FileDiff
+        file={windowedFile()} sideBySide={false} currentContext={3}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    const middle = Array.from(container.querySelectorAll(`div[class="${EXPANDER_ROW}"]`))
+      .find((el) => el.textContent?.includes('Show all'))!
+    expect(Array.from(middle.querySelectorAll('button'), (button) => button.textContent)).toEqual([
+      'Up 20 lines', 'Show all 46 lines', 'Down 20 lines',
+    ])
   })
 
   it('still counts the leading run without one, and leaves the trailing action directional-only', () => {

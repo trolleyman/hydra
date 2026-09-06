@@ -199,6 +199,7 @@ export interface RenderSeg {
   bot?: number     // resolved context lines shown at the region's bottom
   length?: number  // total lines in the region
   context?: DiffLine // enclosing function/section line of the code just below the gap
+  contextBot?: number // lines to reveal upward to include that context line
   closing?: boolean // the fully-revealed expander is playing its exit animation
 }
 
@@ -258,13 +259,13 @@ const FUNC_LINE = /^[A-Za-z_$]/
 // Deletions are skipped: the label describes the file as it now reads. A file
 // with nothing but deletions (a delete) has no such line, so the second pass
 // takes whatever is there.
-function findContextLine(lines: DiffLine[], from: number): DiffLine | undefined {
+function findContextLineIndex(lines: DiffLine[], from: number): number | undefined {
   for (let i = from - 1; i >= 0; i--) {
     const l = lines[i]
-    if (l.type !== 'deletion' && FUNC_LINE.test(l.content)) return l
+    if (l.type !== 'deletion' && FUNC_LINE.test(l.content)) return i
   }
   for (let i = from - 1; i >= 0; i--) {
-    if (FUNC_LINE.test(lines[i].content)) return lines[i]
+    if (FUNC_LINE.test(lines[i].content)) return i
   }
   return undefined
 }
@@ -357,10 +358,12 @@ export function buildSegments(
     // search starts at the first row the reader sees under the expander. The
     // trailing edge has nothing below it, so it stays unlabelled - as git also
     // leaves the tail of a file.
-    const context = isTrail ? undefined : findContextLine(fullLines, run.e - bot)
+    const contextIndex = isTrail ? undefined : findContextLineIndex(fullLines, run.e - bot)
     segs.push({
       kind: isLead ? 'topedge' : isTrail ? 'botedge' : 'gap',
-      key: `g${run.s}`, regionId: id, hidden, top, bot, length: L, context,
+      key: `g${run.s}`, regionId: id, hidden, top, bot, length: L,
+      context: contextIndex == null ? undefined : fullLines[contextIndex],
+      contextBot: contextIndex == null ? undefined : run.e - contextIndex,
     })
     if (bot > 0) segs.push({ kind: 'lines', key: `cb${run.s}`, lines: fullLines.slice(run.e - bot, run.e) })
   })
@@ -396,10 +399,10 @@ export function bodyShape(file: DiffFile, sideBySide: boolean, isHidden: boolean
   const expanders: ExpanderShape[] = []
   if (whole) {
     for (const seg of buildSegments(all, NO_REVEAL, currentContext)) {
-      // A gap offers up, down and show-all; a file edge offers its one direction
-      // plus show-all.
+      // A middle gap always offers up, show-all and down. A file edge only adds
+      // show-all when more than one 20-line step remains.
       if (seg.kind === 'lines') runs.push(seg.lines!)
-      else expanders.push({ buttons: seg.kind === 'gap' ? 3 : 2, hidden: seg.hidden! })
+      else expanders.push({ buttons: seg.kind === 'gap' ? 3 : seg.hidden! > 20 ? 2 : 1, hidden: seg.hidden! })
     }
   } else {
     hunks.forEach((hunk, i) => {
@@ -411,12 +414,15 @@ export function bodyShape(file: DiffFile, sideBySide: boolean, isHidden: boolean
       // The windowed path's leading expander counts what it hides from the hunk's
       // own start line; the trailing one can only do so when the file's length
       // came with the diff, and has no Show all action (hidden: null) otherwise.
-      if (isFirst && !atTopOfFile) expanders.push({ buttons: 2, hidden: leadingGap(hunk) || null })
+      if (isFirst && !atTopOfFile) {
+        const hidden = leadingGap(hunk) || null
+        expanders.push({ buttons: hidden != null && hidden > 20 ? 2 : 1, hidden })
+      }
       if (!isFirst && gap > 0) expanders.push({ buttons: 3, hidden: gap })
       runs.push(hunk.lines)
       if (isLast && !atEndOfFile) {
         const hidden = trailingGap(hunk, file.total_lines)
-        expanders.push({ buttons: hidden == null ? 1 : 2, hidden })
+        expanders.push({ buttons: hidden != null && hidden > 20 ? 2 : 1, hidden })
       }
     })
   }
