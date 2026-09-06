@@ -1,4 +1,4 @@
-import { createContext, memo, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, isValidElement, memo, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -19,6 +19,7 @@ import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
 import { renderCommentMentions } from './mentionHighlight'
 import { FilePathLabel } from '../components/FilePathLabel'
+import { UrlText } from '../components/HostName'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -96,6 +97,21 @@ function encodePath(p: string): string {
 // and strengthen its neutral border instead.
 const LINK_CLASS = 'text-stone-800 dark:text-stone-100 underline decoration-dotted decoration-stone-400/70 dark:decoration-stone-500/80 underline-offset-2 hover:decoration-solid focus-visible:decoration-solid [&:has(>code)]:no-underline [&>code]:border-stone-400/70 dark:[&>code]:border-stone-500/70'
 
+function linkText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(linkText).join('')
+  if (isValidElement<{ children?: ReactNode }>(node)) return linkText(node.props.children)
+  return ''
+}
+
+// Regular links disclose a destination that their label does not already spell
+// out. Repository file and directory links keep their path-specific treatment.
+function RegularLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const anchor = <a className={LINK_CLASS} href={href} target="_blank" rel="noreferrer">{children}</a>
+  if (!href || linkText(children).trim() === href) return anchor
+  return <Tooltip content={<UrlText url={href} />} align="left">{anchor}</Tooltip>
+}
+
 // FileLink keeps the author's exact Markdown label in the prose, then uses the
 // tooltip for the richer file treatment shared with repository surfaces: a
 // Lucide file-kind icon, a lowlit directory and an emphasized filename.
@@ -125,7 +141,7 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
   if (!href) return <a className={LINK_CLASS}>{children}</a>
   if (href.startsWith('#')) return <a className={LINK_CLASS} href={href}>{children}</a>
   if (isExternalHref(href)) {
-    return <a className={LINK_CLASS} href={href} target="_blank" rel="noreferrer">{children}</a>
+    return <RegularLink href={href}>{children}</RegularLink>
   }
   const hashIdx = href.indexOf('#')
   const hash = hashIdx >= 0 ? href.slice(hashIdx) : ''
@@ -576,7 +592,7 @@ function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, 
       linkCtx ? (
         <RepoLink href={href} ctx={linkCtx} fileChip={variant === 'chat'}>{children}</RepoLink>
       ) : (
-        <a className={LINK_CLASS} href={href} target="_blank" rel="noreferrer">{children}</a>
+        <RegularLink href={href}>{children}</RegularLink>
       ),
     img: ({ src, alt }) => <MarkdownMedia src={typeof src === 'string' ? src : undefined} alt={alt} ctx={linkCtx} />,
     table: ({ children }) => (

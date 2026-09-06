@@ -12,7 +12,7 @@
 //                                          ~/../deep/dir
 //                                          ~/../dir
 //   3. Drop the anchor too:                ../dir
-//   4. Clip the end, longest first:        ../di...  ../d...  ../...  ...
+//   4. Clip the start, longest first:      .../dir  ...dir  ...ir  ...r
 //
 // The final fallback ("..." or the last candidate) is returned even if it does
 // not fit - the caller's container clips/ellipsises whatever remains.
@@ -25,7 +25,7 @@ export function fitPath(displayPath: string, fits: (candidate: string) => boolea
   const components = path.slice(anchor.length).split('/').filter(Boolean)
 
   // Nothing to elide (bare "~", "/", or a single-component path): go straight
-  // to end-clipping.
+  // to start-clipping.
   let last = path
   if (components.length > 1) {
     // Stage 2: keep the anchor, replace 1..n-1 leading components with "..".
@@ -38,9 +38,11 @@ export function fitPath(displayPath: string, fits: (candidate: string) => boolea
     if (fits(last)) return last
   }
 
-  // Stage 4: clip the end of whatever we're left with, appending "...".
-  for (let len = last.length - 1; len > 0; len--) {
-    const candidate = `${last.slice(0, len)}...`
+  // Stage 4: clip the start of whatever is left, preserving the filename suffix.
+  // This is the last-resort shape for a very narrow diff header; showing the end
+  // still distinguishes `.ts` from `.go`, while `name...` throws that away.
+  for (let start = 1; start < last.length; start++) {
+    const candidate = `...${last.slice(start)}`
     if (fits(candidate)) return candidate
   }
   return '...'

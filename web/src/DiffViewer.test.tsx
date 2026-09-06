@@ -130,6 +130,31 @@ describe('diff sidebar path tooltips', () => {
     render(<FileRow file={file({ path: 'Cargo.lock' })} isActive={false} onClick={() => {}} />)
     expect(screen.queryByText('Auto')).not.toBeInTheDocument()
   })
+
+  it('lowlights viewed files and fully viewed folders, with the toggle after the stats', () => {
+    const viewedFile = file({ path: 'src/a.ts', head_blob_sha: 'a' })
+    const onToggleViewed = vi.fn()
+    const { container } = render(
+      <TreeNodeView
+        node={{ name: 'src', path: 'src', type: 'dir', children: [
+          { name: 'a.ts', path: 'src/a.ts', type: 'file', children: [], file: viewedFile },
+        ] }}
+        depth={0}
+        collapsedFolders={new Set()}
+        toggleFolder={() => {}}
+        onFileClick={() => {}}
+        activeFilePath={null}
+        isFileViewed={() => true}
+        onToggleViewed={onToggleViewed}
+      />,
+    )
+
+    expect(container.querySelectorAll('[data-viewed="true"]')).toHaveLength(2)
+    const toggle = screen.getByRole('button', { name: 'Mark src/a.ts unviewed' })
+    expect(screen.getByLabelText('1 lines added, 1 lines removed').compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(toggle)
+    expect(onToggleViewed).toHaveBeenCalledWith(viewedFile)
+  })
 })
 
 describe('file header metadata', () => {
@@ -156,7 +181,7 @@ describe('file header metadata', () => {
     act(() => void vi.advanceTimersByTime(600))
     expect(screen.getByRole('tooltip')).toHaveTextContent('Matched auto-generated glob:')
     expect(screen.getByRole('tooltip')).toHaveTextContent('Cargo.lock')
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mark Cargo.lock viewed' }))
     expect(onToggleViewed).toHaveBeenCalledWith('Cargo.lock', 'blob-1')
   })
 
@@ -186,8 +211,8 @@ describe('file header metadata', () => {
   })
 })
 
-describe('viewed file delta', () => {
-  it('labels new changes and marks the latest blob when reviewed', () => {
+describe('viewed file changes', () => {
+  it('labels new changes before the file type and marks the latest blob when viewed', () => {
     const onToggleViewed = vi.fn()
     const reviewedDelta = file({
       path: 'README.md',
@@ -197,26 +222,28 @@ describe('viewed file delta', () => {
     const { rerender } = render(
       <FileDiff
         file={reviewedDelta} sideBySide={false} currentContext={3}
-        viewed={false} showingSinceViewed onToggleViewed={onToggleViewed}
+        viewed={false} hasNewChanges onToggleViewed={onToggleViewed}
         onComment={() => {}} onExpand={() => {}}
         isCollapsed={false} onToggleCollapse={() => {}}
       />,
     )
 
-    expect(screen.getByText('New since viewed')).toBeVisible()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Viewed' }))
+    const marker = screen.getByText('New changes')
+    const changeType = screen.getByLabelText('modified')
+    expect(marker.compareDocumentPosition(changeType) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Mark README.md viewed' }))
     expect(onToggleViewed).toHaveBeenCalledWith('README.md', 'current-blob')
 
     rerender(
       <FileDiff
         file={reviewedDelta} sideBySide={false} currentContext={3}
-        viewed showingSinceViewed={false} onToggleViewed={onToggleViewed}
+        viewed hasNewChanges={false} onToggleViewed={onToggleViewed}
         onComment={() => {}} onExpand={() => {}}
         isCollapsed={false} onToggleCollapse={() => {}}
       />,
     )
-    expect(screen.queryByText('New since viewed')).not.toBeInTheDocument()
-    expect(screen.getByRole('checkbox', { name: 'Viewed' })).toBeChecked()
+    expect(screen.queryByText('New changes')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mark README.md unviewed' })).toBeInTheDocument()
   })
 })
 

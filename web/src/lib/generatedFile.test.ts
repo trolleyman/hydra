@@ -3,7 +3,7 @@ import { generatedFileMatch, isGeneratedFile, matchesGeneratedFileGlob } from '.
 
 describe('isGeneratedFile', () => {
   it('recognises dependency locks', () => {
-    for (const path of ['Cargo.lock', 'web/package-lock.json', 'pnpm-lock.yaml', 'ios/Package.resolved', 'uv.lock']) {
+    for (const path of ['aube-lock.yaml', 'Cargo.lock', 'web/package-lock.json', 'pnpm-lock.yaml', 'ios/Package.resolved', 'uv.lock']) {
       expect(isGeneratedFile(path), path).toBe(true)
     }
   })

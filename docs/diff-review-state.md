@@ -1,23 +1,19 @@
 # Plan: per-file "viewed" state for the diff review workflow
 
-Status: **per-file viewed state and per-file changes-since-viewed are BUILT (v1,
-client storage); the head-wide "reviewed up to" marker and DB-backed storage
-remain unbuilt.** Build steps 1-2 below are done:
+Status: **per-file viewed state is BUILT (v1, client storage); the head-wide
+"reviewed up to" marker and DB-backed storage remain unbuilt.** Build steps 1-2
+below are done:
 `git.HeadBlobSHAs` fills `git.DiffFile.HeadBlobSHA` -> `api.DiffFile.head_blob_sha`;
 the client keys `agentViewPrefs.viewedFiles` (path -> last-viewed head blob sha)
-off it, with a "Viewed" checkbox per file card and an `N/M viewed` count in the
-Files header. Steps 3-4 (promote storage to `internal/db`; the `reviewed_up_to_sha`
-marker + *Since last review* selector) are still open, as is the optional
-auto-collapse of viewed files.
+off it, with eye controls in each file card and sidebar row and an `N viewed`
+count in the Files header. Steps 3-4 (promote storage to `internal/db`; the
+`reviewed_up_to_sha` marker + *Since last review* selector) are still open.
 
-When that file changes again, the diff viewer keeps the original overall file
-list but renders the file card from the stored blob to its current blob. The
-card therefore contains only work added since the user clicked Viewed, rather
-than resurfacing changes they already reviewed. Working-tree blobs are written
-to Git's object store when hashed so an uncommitted review baseline remains
-available after later edits. The client submits all changed viewed baselines in
-one bulk request; the server resolves current blob IDs together and computes the
-individual deltas sequentially, bounding request and Git-process fanout.
+Marking a file viewed collapses its card. When that file changes again, the blob
+mismatch makes it unviewed and automatically expands it. Its card always renders
+the complete base-to-head diff, while the normal context controls fold unchanged
+lines. A "New changes" label beside the change-type indicator calls out the
+mismatch without replacing the real diff with a second comparison.
 
 ## Problem
 
@@ -89,13 +85,14 @@ it earns its keep.
 
 ### UI
 
-- A checkbox in each diff file card header (`DiffViewer.tsx` file column + file
-  diff headers). Ticking stores the current head blob sha; a file whose stored sha
-  != current renders unticked with no extra work.
-- A header count: "12 / 30 files viewed".
-- Optional: collapse viewed files by default (the card body already unmounts when
-  collapsed via `CollapsibleCard`), so a re-review naturally surfaces only what
-  changed.
+- An eye control in each diff file card header and file-list row. The open eye
+  appears on hover for an unviewed file; the closed eye remains visible for a
+  viewed file. Activating it stores the current head blob sha.
+- Viewed file rows are lowlit. A tree or grouped folder is lowlit when every file
+  below it is viewed.
+- A header count: "12 viewed". The total is already shown immediately before it.
+- Marking a file viewed collapses it with scroll correction. A later blob mismatch
+  automatically expands it again.
 
 ## Secondary (optional): "reviewed up to" marker
 

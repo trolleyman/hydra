@@ -56,6 +56,13 @@ and `web/src/DiffViewer.tsx`):
   change, defaulting to 3. The browser-wide preference is shared with repository
   branch comparisons and drives both the server's windowed diff context and the
   client-side whole-file collapse model.
+- Per-file viewed state is keyed by the head-side blob. Viewed files collapse and
+  are lowlit in the file list; folders lowlight only when all descendants are
+  viewed. A later edit reopens the file, labels it "New changes", and keeps the
+  complete base-to-head diff with unchanged regions behind the normal context
+  expanders.
+- The uncommitted-changes tooltip merges tracked and untracked paths into one
+  path-sorted list while keeping each row's change-type indicator.
 - The commit range selectors keep every right-side commit selectable. Choosing a
   right endpoint that is not newer than the current left endpoint moves left to
   that commit's first parent, producing a one-commit diff; an already-valid
