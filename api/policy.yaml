@@ -187,6 +187,10 @@ components:
       description: Portable user-authored profile stored in VS Code configuration.
       additionalProperties: false
       properties:
+        name:
+          type: string
+          description: User-facing label; the containing settings key remains the stable profile ID.
+          x-go-type-skip-optional-pointer: true
         provider:
           $ref: '#/components/schemas/ProviderKind'
         model:

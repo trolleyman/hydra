@@ -5,11 +5,11 @@
   "version": "0.1.0",
   "publisher": "trolleyman",
   "license": "MIT",
-	"repository": {
-	  "type": "git",
-	  "url": "https://github.com/trolleyman/hydra.git",
-	  "directory": "vscode"
-	},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trolleyman/hydra.git",
+    "directory": "vscode"
+  },
   "engines": {
     "vscode": "^1.105.0"
   },
@@ -22,13 +22,15 @@
   ],
   "main": "./dist/extension.js",
   "scripts": {
-    "generate": "openapi-typescript ../api/agent-host.yaml -o src/generated/protocol.ts",
+    "generate": "node node_modules/openapi-typescript/bin/cli.js ../api/agent-host.yaml -o src/generated/protocol.ts",
     "build:host": "node scripts/build-host.mjs",
-    "build": "npm run generate && node scripts/build.mjs",
-    "check": "npm run generate && tsc --noEmit && node scripts/build.mjs",
+    "build": "node scripts/check.mjs --build-only",
+    "check": "node scripts/check.mjs",
     "package": "node scripts/package.mjs"
   },
   "dependencies": {
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.11",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -37,6 +39,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/vscode": "^1.105.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.0",
     "openapi-typescript": "^7.13.0",
@@ -62,6 +65,11 @@
       {
         "command": "hydra.cycleProfile",
         "title": "Hydra: Cycle Profile"
+      },
+      {
+        "command": "hydra.moveToSecondarySidebar",
+        "title": "Hydra: Move View...",
+        "icon": "$(layout-sidebar-right)"
       }
     ],
     "viewsContainers": {
@@ -98,6 +106,11 @@
           "command": "hydra.showProfiles",
           "when": "view == hydra.chatView",
           "group": "navigation@3"
+        },
+        {
+          "command": "hydra.moveToSecondarySidebar",
+          "when": "view == hydra.chatView",
+          "group": "navigation@4"
         }
       ]
     },
@@ -108,7 +121,27 @@
           "type": "object",
           "scope": "window",
           "default": {
-            "implement": {
+            "plan": {
+              "name": "Plan",
+              "provider": "codex",
+              "prompt": "Analyze the request, inspect the workspace, and produce a concrete implementation plan. Do not modify files or Git state.",
+              "filesystem": {
+                "readable": ["."],
+                "writable": [],
+                "masked": [".env*"]
+              },
+              "network": { "mode": "hard", "allowed_hosts": [], "blocked_hosts": [] },
+              "tools": {
+                "core": { "read": "allow", "search": "allow", "edit": "deny", "bash": "allow", "fetch": "allow" }
+              },
+              "git": {
+                "isolation": "readonly",
+                "protected_branches": ["main", "master", "release/*"],
+                "operations": {}
+              }
+            },
+            "edit": {
+              "name": "Edit",
               "provider": "codex",
               "prompt": "Work carefully in the opened workspace and complete the user's request.",
               "filesystem": {
@@ -165,7 +198,7 @@
         },
         "hydra.defaultProfile": {
           "type": "string",
-          "default": "implement",
+          "default": "edit",
           "scope": "window",
           "description": "Profile selected for a new conversation."
         },

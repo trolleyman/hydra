@@ -168,10 +168,13 @@ type Profile struct {
 	Filesystem *AuthoredFilesystemPolicy `json:"filesystem,omitempty"`
 	Git        *GitPolicy                `json:"git,omitempty"`
 	Model      string                    `json:"model,omitempty"`
-	Network    *AuthoredNetworkPolicy    `json:"network,omitempty"`
-	Prompt     string                    `json:"prompt,omitempty"`
-	Provider   *ProviderKind             `json:"provider,omitempty"`
-	Tools      *ToolPolicy               `json:"tools,omitempty"`
+
+	// Name User-facing label; the containing settings key remains the stable profile ID.
+	Name     string                 `json:"name,omitempty"`
+	Network  *AuthoredNetworkPolicy `json:"network,omitempty"`
+	Prompt   string                 `json:"prompt,omitempty"`
+	Provider *ProviderKind          `json:"provider,omitempty"`
+	Tools    *ToolPolicy            `json:"tools,omitempty"`
 }
 
 // ProviderKind defines model for ProviderKind.

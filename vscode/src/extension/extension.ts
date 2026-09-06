@@ -13,6 +13,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('hydra.showHistory', () => provider.showPage('history')),
     vscode.commands.registerCommand('hydra.showProfiles', () => provider.showPage('profiles')),
     vscode.commands.registerCommand('hydra.cycleProfile', () => provider.cycleProfile()),
+    vscode.commands.registerCommand('hydra.moveToSecondarySidebar', async () => {
+      await vscode.commands.executeCommand('workbench.action.moveFocusedView', 'hydra.chatView')
+    }),
   )
 }
 

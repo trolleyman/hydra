@@ -6,6 +6,7 @@ import type { components } from '../generated/protocol'
 
 export type EffectivePolicy = components['schemas']['InitializeCommand']['policy']
 export type AuthoredProfile = Record<string, unknown> & {
+  name?: string
   provider?: 'claude' | 'codex'
   model?: string
   effort?: string
@@ -29,8 +30,8 @@ export function profiles(): Record<string, AuthoredProfile> {
 }
 
 export function defaultProfileName(all = profiles()): string {
-  const configured = vscode.workspace.getConfiguration('hydra').get<string>('defaultProfile', 'implement')
-  return all[configured] ? configured : Object.keys(all)[0] ?? 'implement'
+  const configured = vscode.workspace.getConfiguration('hydra').get<string>('defaultProfile', 'edit')
+  return all[configured] ? configured : Object.keys(all)[0] ?? 'edit'
 }
 
 export async function resolveProfile(name: string, workspace: vscode.WorkspaceFolder, grants: WorkspaceGrants = {}): Promise<EffectivePolicy> {
@@ -42,7 +43,7 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
   const resolveAll = async (values: string[] | undefined) => Promise.all((values ?? []).map(value => resolvePath(value, workspace, home)))
   const filesystem = authored.filesystem ?? {}
   const defaultTools: EffectivePolicy['tools'] = { core: { read: 'allow', search: 'allow', edit: 'allow', bash: 'allow', fetch: 'allow' } }
-  const tools: EffectivePolicy['tools'] = structuredClone(authored.tools ?? defaultTools)
+  const tools: EffectivePolicy['tools'] = jsonClone(authored.tools ?? defaultTools)
   tools.core ??= {}
   for (const capability of grants.core ?? []) (tools.core as Record<string, 'allow'>)[capability] = 'allow'
   tools.mcp ??= {}
@@ -86,12 +87,13 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
 }
 
 function unique(values: string[]): string[] { return [...new Set(values)] }
+function jsonClone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 
-function validateProfile(name: string, profile: AuthoredProfile): void {
+export function validateProfile(name: string, profile: AuthoredProfile): void {
   const fail = (field: string, message: string): never => { throw new Error(`Hydra profile "${name}" ${field} ${message}`) }
   const decisions = new Set(['allow', 'ask', 'deny'])
   if (profile.provider !== undefined && !['claude', 'codex'].includes(profile.provider)) fail('provider', 'must be claude or codex')
-  for (const field of ['model', 'effort', 'prompt'] as const) {
+  for (const field of ['name', 'model', 'effort', 'prompt'] as const) {
     if (profile[field] !== undefined && typeof profile[field] !== 'string') fail(field, 'must be a string')
   }
   for (const field of ['readable', 'writable', 'copy_on_write', 'masked'] as const) {
@@ -114,7 +116,7 @@ function validateProfile(name: string, profile: AuthoredProfile): void {
   }
   if (profile.git?.isolation !== undefined && !['readonly', 'off'].includes(profile.git.isolation)) fail('git.isolation', 'must be readonly or off')
   for (const [operation, decision] of Object.entries(profile.git?.operations ?? {})) {
-	if (!['checkout', 'commit', 'add', 'reset', 'revert', 'cherry_pick', 'merge', 'merge_continue', 'merge_abort', 'rebase', 'rebase_continue', 'rebase_abort', 'stash'].includes(operation)) fail(`git.operations.${operation}`, 'is not a supported operation')
+    if (!['checkout', 'commit', 'add', 'reset', 'revert', 'cherry_pick', 'merge', 'merge_continue', 'merge_abort', 'rebase', 'rebase_continue', 'rebase_abort', 'stash'].includes(operation)) fail(`git.operations.${operation}`, 'is not a supported operation')
     if (!decisions.has(decision)) fail(`git.operations.${operation}`, 'must be allow, ask, or deny')
   }
 }

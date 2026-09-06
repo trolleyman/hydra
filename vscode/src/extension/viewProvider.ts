@@ -4,9 +4,10 @@ import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { agentHostPath } from './extension'
 import { HostClient, type HostFrame, type InitializeCommand } from './hostClient'
-import { defaultProfileName, profiles, resolveProfile, type WorkspaceGrants } from './profiles'
+import { defaultProfileName, profiles, resolveProfile, validateProfile, type AuthoredProfile, type WorkspaceGrants } from './profiles'
 
 type Page = 'chat' | 'history' | 'profiles'
+type ChatEvent = Extract<HostFrame, { type: 'chat_event' }>['event']
 
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view?: vscode.WebviewView
@@ -19,10 +20,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private pendingProfile?: string
   private readonly approvals = new Map<string, Extract<HostFrame, { type: 'approval_request' }>>()
   private readonly disposables: vscode.Disposable[] = []
+  private pendingFrames: HostFrame[] = []
+  private frameTimer?: NodeJS.Timeout
+  private metadataUpdate = Promise.resolve()
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
     this.disposables.push(vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('hydra')) void this.reloadProfile()
+      if (event.affectsConfiguration('hydra')) void this.reloadProfile().catch(error => this.reportError(error))
     }))
   }
 
@@ -30,7 +34,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.view = view
     view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }
     view.webview.html = this.html(view.webview)
-    this.disposables.push(view.webview.onDidReceiveMessage(message => this.onMessage(message)))
+    this.disposables.push(view.webview.onDidReceiveMessage(message => {
+      void this.onMessage(message).catch(error => this.reportError(error))
+    }))
     this.postState()
   }
 
@@ -78,12 +84,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const names = Object.keys(profiles())
     if (names.length < 2) return
     const next = names[(names.indexOf(this.profile) + 1 + names.length) % names.length]
+    await this.selectProfile(next)
+  }
+
+  private async selectProfile(next: string): Promise<void> {
+    if (!profiles()[next] || next === this.profile) return
+    if (!this.client) {
+      this.profile = next
+      this.postState()
+      return
+    }
     if (this.running) {
       const behavior = vscode.workspace.getConfiguration('hydra').get<string>('profileChangeBehavior', 'ask')
       let choice: string | undefined = behavior
       if (behavior === 'ask') {
+        const labels = this.profileLabels()
         choice = await vscode.window.showInformationMessage(
-          `This turn is running under "${this.profile}". Apply "${next}" now?`,
+          `This turn is running under "${labels[this.profile]}". Apply "${labels[next]}" now?`,
           'Interrupt and switch', 'Switch after this turn', 'Cancel',
         )
         choice = choice === 'Interrupt and switch' ? 'interrupt' : choice === 'Switch after this turn' ? 'nextTurn' : undefined
@@ -99,6 +116,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   dispose(): void {
     this.client?.dispose()
+    if (this.frameTimer) clearTimeout(this.frameTimer)
     for (const disposable of this.disposables) disposable.dispose()
   }
 
@@ -112,7 +130,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         if (this.pendingProfile) void this.applyProfile(this.pendingProfile)
       }
     }
-    this.post({ type: 'hostFrame', frame })
+    if (frame.type === 'state_snapshot') this.running = frame.projection.turn?.status === 'running'
+    if (frame.type === 'chat_event' && frame.event.type.endsWith('_delta')) this.queueFrame(frame)
+    else {
+      this.flushFrames()
+      this.post({ type: 'hostFrame', frame })
+    }
+    if (frame.type === 'chat_event') void this.touchMetadata(frame.event)
     this.postState()
   }
 
@@ -124,13 +148,42 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case 'cycleProfile': await this.cycleProfile(); break
       case 'sendMessage':
         if (!this.client) await this.newChat()
-        this.client?.send({ type: 'user_message', request_id: randomUUID(), id: randomUUID(), content: [{ type: 'text', text: String(message.text ?? '') }] })
+        const text = String(message.text ?? '')
+        this.client?.send({ type: 'user_message', request_id: randomUUID(), id: randomUUID(), content: [{ type: 'text', text }] })
+        await this.touchMetadata(undefined, text)
         break
       case 'interrupt': this.client?.send({ type: 'interrupt', request_id: randomUUID() }); break
       case 'approval':
         await this.answerApproval(String(message.requestID), message.decision as 'allow' | 'deny', message.scope as 'once' | 'chat' | 'workspace' | 'profile')
         break
+      case 'controlResponse':
+        if (this.client && typeof message.response === 'object' && message.response) {
+          this.client.send({ type: 'control_response', request_id: randomUUID(), response: message.response as Record<string, unknown> })
+        }
+        break
+      case 'loadSubagent': this.client?.send({ type: 'load_subagent', request_id: randomUUID(), agent_id: String(message.agentID) }); break
+      case 'openHistory': await this.openHistory(String(message.id)); break
+      case 'deleteHistory': await this.deleteHistory(String(message.id)); break
+      case 'openLink': {
+        const uri = vscode.Uri.parse(String(message.href))
+        if (uri.scheme === 'https' || uri.scheme === 'http') await vscode.env.openExternal(uri)
+        break
+      }
       case 'openSettings': await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:trolleyman.hydra'); break
+      case 'selectProfile': await this.selectProfile(String(message.name)); break
+      case 'saveProfile': {
+        const name = String(message.name)
+        if (!name.trim() || typeof message.profile !== 'object' || !message.profile) break
+        const profile = message.profile as AuthoredProfile
+        validateProfile(name, profile)
+        const configuration = vscode.workspace.getConfiguration('hydra')
+        const target = message.scope === 'workspace' ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global
+        const inspected = configuration.inspect<Record<string, AuthoredProfile>>('profiles')
+        const existing = target === vscode.ConfigurationTarget.Workspace ? inspected?.workspaceValue ?? {} : inspected?.globalValue ?? {}
+        await configuration.update('profiles', { ...existing, [name]: profile }, target)
+        void vscode.window.showInformationMessage(`Saved Hydra profile "${profile.name || name}" to ${message.scope === 'workspace' ? 'this workspace' : 'user settings'}.`)
+        break
+      }
     }
   }
 
@@ -145,6 +198,81 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       }))).filter(Boolean).sort((a: any, b: any) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
     } catch {}
     this.post({ type: 'history', entries })
+  }
+
+  private async openHistory(id: string): Promise<void> {
+    if (!/^[a-zA-Z0-9-]+$/.test(id)) return
+    const conversationDir = path.join(this.context.globalStorageUri.fsPath, 'conversations', id)
+    let metadata: any
+    try { metadata = JSON.parse(await fs.readFile(path.join(conversationDir, 'metadata.json'), 'utf8')) } catch { return }
+    const folders = vscode.workspace.workspaceFolders ?? []
+    const resolved = await Promise.all(folders.map(async folder => ({ folder, path: await fs.realpath(folder.uri.fsPath).catch(() => path.resolve(folder.uri.fsPath)) })))
+    const wanted = await fs.realpath(String(metadata.workspace)).catch(() => path.resolve(String(metadata.workspace)))
+    const workspace = resolved.find(item => item.path === wanted)?.folder
+    if (!workspace) {
+      const choice = await vscode.window.showInformationMessage('This chat belongs to a workspace that is not open in this window.', 'Open workspace')
+      if (choice === 'Open workspace') await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(String(metadata.workspace)), { forceNewWindow: true })
+      return
+    }
+    const configured = profiles()
+    const profile = configured[metadata.profile] ? metadata.profile : defaultProfileName(configured)
+    const policy = await this.resolvePolicy(profile, workspace)
+    let resumeSessionID: string | undefined
+    try {
+      const provider = JSON.parse(await fs.readFile(path.join(conversationDir, 'provider.json'), 'utf8'))
+      resumeSessionID = provider.sessions?.[policy.provider]
+    } catch {}
+    this.client?.dispose()
+    this.conversationID = id
+    this.workspace = workspace
+    this.profile = profile
+    this.pendingProfile = undefined
+    this.page = 'chat'
+    const initialize: InitializeCommand = {
+      type: 'initialize', protocol_version: 1, workspace: policy.workspace,
+      conversation_dir: conversationDir, policy, resume_session_id: resumeSessionID,
+      provider_executable: vscode.workspace.getConfiguration('hydra').get<string>(`providers.${policy.provider}.path`, policy.provider).trim(),
+    }
+    const client = new HostClient(agentHostPath(this.context), initialize, this.output)
+    client.onFrame(frame => this.onFrame(frame))
+    client.onExit(error => error && this.post({ type: 'hostExit', message: error.message }))
+    this.client = client
+    this.post({ type: 'clearConversation' })
+    this.postState()
+  }
+
+  private async deleteHistory(id: string): Promise<void> {
+    if (!/^[a-zA-Z0-9-]+$/.test(id) || id === this.conversationID) return
+    const answer = await vscode.window.showWarningMessage('Delete this chat history permanently?', { modal: true }, 'Delete')
+    if (answer !== 'Delete') return
+    await fs.rm(path.join(this.context.globalStorageUri.fsPath, 'conversations', id), { recursive: true })
+    await this.postHistory()
+  }
+
+  private queueFrame(frame: HostFrame): void {
+    this.pendingFrames.push(frame)
+    if (this.frameTimer) return
+    this.frameTimer = setTimeout(() => this.flushFrames(), 16)
+  }
+
+  private flushFrames(): void {
+    if (this.frameTimer) clearTimeout(this.frameTimer)
+    this.frameTimer = undefined
+    const frames = this.pendingFrames.splice(0)
+    if (frames.length) this.post({ type: 'hostFrames', frames })
+  }
+
+  private touchMetadata(event?: ChatEvent, firstText?: string): Promise<void> {
+    if (!this.conversationID) return Promise.resolve()
+    const file = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID, 'metadata.json')
+    this.metadataUpdate = this.metadataUpdate.then(async () => {
+      try {
+        const current = JSON.parse(await fs.readFile(file, 'utf8'))
+        const title = current.title === 'New chat' && firstText ? firstText.replace(/\s+/g, ' ').slice(0, 72) : current.title
+        await fs.writeFile(file, JSON.stringify({ ...current, title, updatedAt: event?.timestamp ?? new Date().toISOString() }, null, 2))
+      } catch {}
+    })
+    return this.metadataUpdate
   }
 
   private async chooseWorkspace(): Promise<vscode.WorkspaceFolder | undefined> {
@@ -216,7 +344,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private postState(): void {
-    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(profiles()), running: this.running, hasConversation: Boolean(this.conversationID) })
+    const configured = profiles()
+    const profileLabels = this.profileLabels(configured)
+    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(configured), profileLabels, profileValues: JSON.parse(JSON.stringify(configured)), running: this.running, hasConversation: Boolean(this.conversationID) })
+  }
+
+  private profileLabels(configured = profiles()): Record<string, string> {
+    return Object.fromEntries(Object.entries(configured).map(([id, value]) => [id, value.name || id]))
+  }
+
+  private reportError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    this.output.appendLine(message)
+    this.post({ type: 'hostExit', message })
+    void vscode.window.showErrorMessage(message)
   }
 
   private post(message: unknown): void { void this.view?.webview.postMessage(message) }
@@ -230,7 +371,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 }
 
 function addWorkspaceGrant(grants: WorkspaceGrants, request: Extract<HostFrame, { type: 'approval_request' }>): WorkspaceGrants {
-  const next = structuredClone(grants)
+  const next = JSON.parse(JSON.stringify(grants)) as WorkspaceGrants
   if (request.kind === 'network') next.network = unique([...(next.network ?? []), request.target])
   if (request.kind === 'core_tool' && request.canonical_target) next.core = unique([...(next.core ?? []), request.canonical_target])
   if (request.kind === 'mcp') next.mcp_servers = unique([...(next.mcp_servers ?? []), request.target])
@@ -240,7 +381,7 @@ function addWorkspaceGrant(grants: WorkspaceGrants, request: Extract<HostFrame, 
 }
 
 function addProfileGrant(profile: Record<string, any>, request: Extract<HostFrame, { type: 'approval_request' }>): Record<string, any> {
-  const next = structuredClone(profile)
+  const next = JSON.parse(JSON.stringify(profile))
   if (request.kind === 'network') {
     next.network ??= {}
     next.network.allowed_hosts = unique([...(next.network.allowed_hosts ?? []), request.target])

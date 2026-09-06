@@ -7,9 +7,9 @@ const target = targetIndex >= 0 ? args[targetIndex + 1] : `${process.platform}-$
 if (!target) throw new Error('--target requires a VS Code target')
 
 for (const command of [
-  ['npm', ['run', 'check']],
+  ['node', ['scripts/check.mjs']],
   ['node', ['scripts/build-host.mjs', target]],
-  ['npx', ['vsce', 'package', '--no-dependencies', '--target', target]],
+	['node', ['node_modules/@vscode/vsce/vsce', 'package', '--no-dependencies', '--target', target]],
 ]) {
   const result = spawnSync(command[0], command[1], { stdio: 'inherit', shell: process.platform === 'win32' })
   if (result.error) throw result.error

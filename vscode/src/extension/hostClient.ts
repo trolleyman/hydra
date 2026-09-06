@@ -11,6 +11,8 @@ export class HostClient implements vscode.Disposable {
   private readonly process: ChildProcessWithoutNullStreams
   private readonly framesEmitter = new vscode.EventEmitter<HostFrame>()
   private readonly exitEmitter = new vscode.EventEmitter<Error | undefined>()
+  private initialized = false
+  private readonly pending: HostCommand[] = []
   readonly onFrame = this.framesEmitter.event
   readonly onExit = this.exitEmitter.event
 
@@ -22,7 +24,16 @@ export class HostClient implements vscode.Disposable {
       try {
         const frame = JSON.parse(line) as HostFrame
         this.framesEmitter.fire(frame)
-        if (frame.type === 'hello') this.send(initialize)
+        if (frame.type === 'hello') {
+          if (frame.protocol_version !== initialize.protocol_version) {
+            this.exitEmitter.fire(new Error(`Agent host protocol ${frame.protocol_version} does not match extension protocol ${initialize.protocol_version}. Reinstall the matching VSIX.`))
+            this.process.kill()
+            return
+          }
+          this.initialized = true
+          this.send(initialize)
+          for (const command of this.pending.splice(0)) this.send(command)
+        }
       } catch (error) {
         output.appendLine(`Invalid agent-host frame: ${String(error)}`)
       }
@@ -32,6 +43,10 @@ export class HostClient implements vscode.Disposable {
   }
 
   send(command: HostCommand): void {
+    if (!this.initialized && command.type !== 'initialize') {
+      this.pending.push(command)
+      return
+    }
     this.process.stdin.write(`${JSON.stringify(command)}\n`)
   }
 

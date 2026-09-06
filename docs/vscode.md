@@ -224,7 +224,10 @@ Profiles are registered under `hydra.profiles`, with
 `hydra.defaultProfile` and `hydra.profileChangeBehavior` as adjacent settings.
 The inline `prompt` is the normal path; prompt files are not required. The custom
 Profiles view edits the same registered JSON configuration used by VS Code's
-Settings UI and `onDidChangeConfiguration` reloads it.
+Settings UI and `onDidChangeConfiguration` reloads it. Each profile has a stable
+settings key and an optional user-facing `name`; the bundled `plan` and `edit`
+profiles render as Plan and Edit. The editor can save to user settings, which
+are eligible for Settings Sync, or workspace settings.
 
 The initial profile policy contains:
 
@@ -385,17 +388,23 @@ React is an implementation detail inside the Webview; the extension host remains
 authoritative for processes, persistence, configuration, and approvals. The two
 sides communicate through typed `postMessage` messages.
 
-The sidebar contains:
+The view title toolbar contains New chat, History, Profiles, and Move View. The
+Webview itself contains:
 
-- a compact toolbar with New chat, History, current profile, and Settings;
+- the current profile switcher;
 - the live or historical conversation;
 - collapsed reasoning and tool steps, expandable in place;
 - sub-agents nested under their spawning tool and loaded on expansion;
-- queued-message and approval cards;
+- provider question and sandbox approval cards;
 - a Markdown multiline composer with streaming-safe draft preservation;
 - a historical-chat list; and
 - a Profiles/Permissions editor with core tools first and expandable local MCP,
   remote MCP, filesystem, network, and Git sections.
+
+VS Code extension manifests can contribute an Activity Bar or Panel container,
+but not an initial Secondary Side Bar container. `Hydra: Move View...` opens VS
+Code's built-in destination picker with the Hydra view selected; choosing
+Secondary Side Bar moves it there, and VS Code persists that placement.
 
 Provider deltas are batched from the extension host to the Webview at most once
 per animation frame rather than one message per token. The Go event store remains
@@ -432,8 +441,9 @@ state.
 extension-host bundle, a React Webview bundle, styles/assets, and one platform-
 specific `hydra-agent-host` executable. Marketplace releases are targeted per
 platform and architecture rather than putting every native binary in one VSIX.
-The package uses npm and commits `package-lock.json`; development and release
-jobs install the exact graph with `npm ci`.
+The package commits `package-lock.json`; Aube is the primary package manager and
+consumes that lock directly, so development and release jobs use the exact same
+dependency graph without an Aube-specific lockfile.
 
 The package generates one TypeScript type graph from `api/agent-host.yaml` with
 `openapi-typescript`, typechecks both extension and Webview code, and bundles
@@ -455,9 +465,10 @@ explicit `hydra.providers.*.path` settings. They are not bundled. The helper and
 extension perform an exact protocol-version handshake and fail clearly when the
 packaged pair is inconsistent.
 
-From `vscode/`, `npm run check` regenerates protocol types, typechecks, and
-bundles the extension and Webview. `npm run build:host` builds the helper for the
-current platform. `npm run package -- --target <platform-arch>` cross-builds the
+From `vscode/`, `aube install` consumes `package-lock.json` without creating a
+second lockfile. `aube run check` regenerates protocol types, typechecks, and
+bundles the extension and Webview. `aube run build:host` builds the helper for
+the current platform. `aube run package -- --target <platform-arch>` cross-builds the
 matching helper with CGO disabled and asks `vsce` for a target-specific VSIX.
 Supported target spellings are `linux-x64`, `linux-arm64`, `darwin-x64`,
 `darwin-arm64`, `win32-x64`, and `win32-arm64`.
@@ -484,9 +495,9 @@ that commit.
 - [x] Connect local MCP governance, core-tool policy, and approval scopes.
 - [x] Connect read-only Git metadata and guarded mutation tools.
 - [x] Scaffold and package the VS Code extension and native helper.
-- [ ] Implement the React sidebar, streaming chat, Markdown composer, hidden
+- [x] Implement the React sidebar, streaming chat, Markdown composer, hidden
   steps, expandable sub-agents, and interruption.
-- [ ] Implement history and profile/permissions editors, configuration reload,
+- [x] Implement history and profile/permissions editors, configuration reload,
   Shift+Tab switching, and scoped approvals.
 - [ ] Add focused Go/TypeScript tests, real Extension Development Host coverage,
   platform packaging checks, documentation, and release instructions.
