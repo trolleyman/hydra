@@ -366,6 +366,8 @@ state.
 extension-host bundle, a React Webview bundle, styles/assets, and one platform-
 specific `hydra-agent-host` executable. Marketplace releases are targeted per
 platform and architecture rather than putting every native binary in one VSIX.
+The package uses npm and commits `package-lock.json`; development and release
+jobs install the exact graph with `npm ci`.
 
 The package generates one TypeScript type graph from `api/agent-host.yaml` with
 `openapi-typescript`, typechecks both extension and Webview code, and bundles
