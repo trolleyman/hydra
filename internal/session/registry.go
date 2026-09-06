@@ -373,20 +373,32 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 	unit := sandbox.ScopeUnit("", opts.ID)
 	scoped := sandbox.WrapScope(unit, spec, opts.Limits, sandbox.ScopeInteractive)
 
-	proc, err := startProcess(spec, opts.Rows, opts.Cols)
+	var proc PTY
+	var kind Kind
+	if opts.Sandbox.StdioPipes {
+		proc, err = startPipeProcess(spec)
+		kind = KindChat
+	} else {
+		proc, err = startProcess(spec, opts.Rows, opts.Cols)
+		kind = KindTerminal
+	}
 	if err != nil && scoped {
 		log.Printf("session %s: scoped spawn failed (%v); retrying unscoped", opts.ID, err)
 		sandbox.StopScope(unit)
 		spec.Path, spec.Args = origPath, origArgs
 		scoped = false
-		proc, err = startProcess(spec, opts.Rows, opts.Cols)
+		if opts.Sandbox.StdioPipes {
+			proc, err = startPipeProcess(spec)
+		} else {
+			proc, err = startProcess(spec, opts.Rows, opts.Cols)
+		}
 	}
 	if err != nil {
 		spec.Cleanup()
 		return nil, errtrace.Wrap(fmt.Errorf("start sandboxed process: %w", err))
 	}
 
-	sess := r.register(opts.ID, opts.Sandbox.AgentType, opts.Sandbox.WorktreePath, opts.Rows, opts.Cols, opts.Ephemeral, KindTerminal, proc, spec.Cleanup)
+	sess := r.register(opts.ID, opts.Sandbox.AgentType, opts.Sandbox.WorktreePath, opts.Rows, opts.Cols, opts.Ephemeral, kind, proc, spec.Cleanup)
 	if scoped {
 		sess.setScopeUnit(unit)
 	}

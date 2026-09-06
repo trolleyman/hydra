@@ -177,6 +177,11 @@ Hydra and `hydra-agent-host` provide separate lifecycle and approval adapters.
 The provider normalizers, chat store/projection, sandbox, egress boundary, gate,
 and guarded Git operations remain shared implementations.
 
+The shared session registry can launch structured providers directly with
+protocol-safe stdin/stdout pipes when `sandbox.Options.StdioPipes` is set. This
+path is independent of Hydra's namespace-host/head controller, keeps stderr out
+of the JSON stream, and is the process primitive used by the standalone host.
+
 The chat store accepts an explicit conversation directory instead of deriving
 one exclusively from a Hydra project/head. Hydra passes its existing head state
 directory; the extension passes a directory beneath VS Code extension storage.
