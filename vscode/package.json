@@ -26,6 +26,8 @@
     "build:host": "node scripts/build-host.mjs",
     "build": "node scripts/check.mjs --build-only",
     "check": "node scripts/check.mjs",
+    "test": "node --no-warnings --test test/*.test.mjs",
+    "test:extension": "node scripts/test-extension.mjs",
     "package": "node scripts/package.mjs"
   },
   "dependencies": {

@@ -30,6 +30,7 @@ header button:hover { background: var(--vscode-toolbar-hoverBackground); }
 .subagent { margin-left: 12px; }
 .notice, .muted { margin: 8px 0 12px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .approval, .error { margin: 8px 12px; padding: 10px; border: 1px solid var(--vscode-inputValidation-warningBorder); border-radius: 6px; }
+.warning { padding: 7px 10px; color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground)); background: var(--vscode-inputValidation-warningBackground); border-bottom: 1px solid var(--vscode-inputValidation-warningBorder); font-size: 12px; }
 .approval code { display: block; margin: 7px 0; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 .approvalActions { display: flex; flex-wrap: wrap; gap: 5px; }
 .approvalActions button { white-space: nowrap; }
@@ -43,6 +44,9 @@ header button:hover { background: var(--vscode-toolbar-hoverBackground); }
 .questionOption small { color: var(--vscode-descriptionForeground); }
 .otherAnswer { display: flex; flex-direction: column; gap: 3px; margin-top: 5px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .questionCard > button { padding: 5px 9px; border-radius: 5px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.questionCard > button:disabled { cursor: default; opacity: .55; }
+.questionError { color: var(--vscode-errorForeground); }
+.answerSummary { margin: 8px 0 0; white-space: pre-wrap; }
 .approvalActions button { padding: 4px 7px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .approvalActions button:first-child { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .error { color: var(--vscode-errorForeground); border-color: var(--vscode-inputValidation-errorBorder); }
@@ -60,6 +64,7 @@ textarea { width: 100%; resize: vertical; border: 0; outline: 0; padding: 10px; 
 .profilesPage { display: flex; flex-direction: column; gap: 10px; }
 .pageTitle { display: flex; align-items: center; justify-content: space-between; }
 .pageTitle h2 { margin: 0; }
+.pageTitle > div { display: flex; gap: 10px; }
 .pageTitle button { color: var(--vscode-textLink-foreground); }
 .profilesPage > label, .tree > label { display: flex; flex-direction: column; gap: 4px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .profilesPage input, .profilesPage select, .profilesPage textarea { width: 100%; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 5px 6px; color: var(--vscode-input-foreground, var(--vscode-foreground)); background: var(--vscode-input-background); }
@@ -70,4 +75,5 @@ textarea { width: 100%; resize: vertical; border: 0; outline: 0; padding: 10px; 
 .decisionRow select { width: 110px; }
 .saveRow { display: flex; align-items: center; gap: 7px; }
 .saveRow select { flex: 1; }
+.removeProfile { padding: 5px 8px; color: var(--vscode-errorForeground); }
 .saveProfile { padding: 5px 9px; border-radius: 5px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); white-space: nowrap; }

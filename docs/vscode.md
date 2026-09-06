@@ -1,6 +1,6 @@
 # VS Code extension
 
-Status: in development.
+Status: initial implementation complete.
 
 Hydra's VS Code extension provides a deliberately smaller local-agent product
 than the Hydra web application. It runs Claude Code and Codex in Hydra's existing
@@ -414,6 +414,54 @@ The first implementation follows VS Code theme tokens and accessibility APIs.
 It does not copy Hydra's entire Tailwind/component system. Markdown parsing and
 sanitization are shared conceptually, with Webview-safe link and command routing.
 
+Question tools use one provider-neutral card. Claude's `AskUserQuestion` control
+request and Codex's `item/tool/requestUserInput` request normalize into the same
+multi-question representation. Cards support single-select and multi-select
+options, option descriptions, free-text answers, and optional notes. Single
+choice and free text are mutually exclusive; every question needs an answer
+before submission. The response is sent through `control_response`, a failed
+provider write makes the card retryable, and terminal or resolved historical
+questions render read-only rather than pretending they can still be answered.
+
+Profiles can be created, edited, and removed from the Profiles page. Saving can
+target user or workspace settings; removing a definition at one scope reveals
+the next VS Code configuration layer, including the bundled Plan/Edit defaults.
+Advisory and unrestricted network profiles display a persistent warning in the
+chat rather than relying on a transient notification.
+
+### Bash progress
+
+The initial Bash presentation uses the normalized tool start, output, and
+completion events plus the tool's description. It does not inject `echo`
+headings into user commands.
+
+Bash can expose the currently executing simple command through a `DEBUG` trap or
+through `set -x` with a dedicated `BASH_XTRACEFD` and machine-readable `PS4`.
+That is feasible for a wrapper-owned Bash process, but it is not a reliable
+general progress protocol: scripts can replace traps, invoke another shell,
+disable tracing, emit secrets after expansion, or depend on exact tracing
+behavior. Hydra therefore keeps shell tracing off by default. A later opt-in
+implementation should emit structured command-boundary frames from a dedicated
+file descriptor, redact expanded arguments, and describe itself as best-effort;
+provider tool events remain the authoritative lifecycle.
+
+### Native VS Code Chat
+
+The custom Webview remains the primary surface because it owns profile
+switching, historical conversations, provider question forms, and Hydra's four
+approval scopes. VS Code's [Chat Participant API](https://code.visualstudio.com/api/extension-guides/ai/chat)
+can later provide an optional `@hydra` adapter that forwards a prompt to the same
+agent host and mirrors Markdown/progress into the native Chat view. It does not
+replace the helper or policy boundary.
+
+Hydra does not register Claude or Codex as a Language Model Chat Provider in the
+initial release. Their CLIs already own an agent loop, tools, resume state, and
+authentication, while that API models provider responses consumed by VS Code's
+own chat orchestration. Brokered integrations can instead be exposed later as
+[Language Model Tools](https://code.visualstudio.com/api/extension-guides/ai/tools),
+and portable integrations can remain MCP servers. These are adapters around the
+same policy model, not a second execution path.
+
 ## History
 
 Conversation data is local machine state beneath the extension's global storage
@@ -467,11 +515,22 @@ packaged pair is inconsistent.
 
 From `vscode/`, `aube install` consumes `package-lock.json` without creating a
 second lockfile. `aube run check` regenerates protocol types, typechecks, and
-bundles the extension and Webview. `aube run build:host` builds the helper for
+tests the conversation/question projection before bundling the extension and
+Webview. `aube run build:host` builds the helper for
 the current platform. `aube run package -- --target <platform-arch>` cross-builds the
 matching helper with CGO disabled and asks `vsce` for a target-specific VSIX.
 Supported target spellings are `linux-x64`, `linux-arm64`, `darwin-x64`,
 `darwin-arm64`, `win32-x64`, and `win32-arm64`.
+
+`aube run test:extension` runs an activation/manifest/command smoke test in a
+real Extension Development Host. It downloads stable VS Code on first use; set
+`HYDRA_VSCODE_EXECUTABLE` to an existing executable to avoid the download. The
+test requires a graphical host session on Linux. Install a packaged build for a
+manual provider test with:
+
+```bash
+code --install-extension hydra-linux-x64-0.1.0.vsix --force
+```
 
 ## Delivery plan
 
@@ -480,7 +539,7 @@ that commit.
 
 - [x] Document the product boundary, shared contracts, security model, and
   delivery sequence.
-- [ ] Extract shared chat, policy, and agent-host schemas with Go/TypeScript
+- [x] Expose shared chat, policy, and agent-host schemas with Go/TypeScript
   generation and conformance tests.
 - [x] Add a directory-based chat store API without changing Hydra's existing
   head storage behavior.
@@ -499,7 +558,7 @@ that commit.
   steps, expandable sub-agents, and interruption.
 - [x] Implement history and profile/permissions editors, configuration reload,
   Shift+Tab switching, and scoped approvals.
-- [ ] Add focused Go/TypeScript tests, real Extension Development Host coverage,
+- [x] Add focused Go/TypeScript tests, real Extension Development Host coverage,
   platform packaging checks, documentation, and release instructions.
 
 ## Acceptance criteria

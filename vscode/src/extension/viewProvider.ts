@@ -158,7 +158,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         break
       case 'controlResponse':
         if (this.client && typeof message.response === 'object' && message.response) {
-          this.client.send({ type: 'control_response', request_id: randomUUID(), response: message.response as Record<string, unknown> })
+          const operationRequestID = String(message.operationRequestID ?? '')
+          this.client.send({ type: 'control_response', request_id: operationRequestID.startsWith('question-response:') ? operationRequestID : randomUUID(), response: message.response as Record<string, unknown> })
         }
         break
       case 'loadSubagent': this.client?.send({ type: 'load_subagent', request_id: randomUUID(), agent_id: String(message.agentID) }); break
@@ -184,6 +185,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         void vscode.window.showInformationMessage(`Saved Hydra profile "${profile.name || name}" to ${message.scope === 'workspace' ? 'this workspace' : 'user settings'}.`)
         break
       }
+      case 'createProfile': await this.createProfile(); break
+      case 'deleteProfile': await this.deleteProfile(String(message.name), message.scope === 'workspace' ? 'workspace' : 'user'); break
     }
   }
 
@@ -305,6 +308,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private async reloadProfile(): Promise<void> {
+    if (!profiles()[this.profile]) this.profile = defaultProfileName()
     if (!this.client) {
       this.postState()
       return
@@ -346,7 +350,41 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private postState(): void {
     const configured = profiles()
     const profileLabels = this.profileLabels(configured)
-    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(configured), profileLabels, profileValues: JSON.parse(JSON.stringify(configured)), running: this.running, hasConversation: Boolean(this.conversationID) })
+    const networkMode = configured[this.profile]?.network?.mode ?? 'hard'
+    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(configured), profileLabels, profileValues: JSON.parse(JSON.stringify(configured)), networkMode, running: this.running, hasConversation: Boolean(this.conversationID) })
+  }
+
+  private async createProfile(): Promise<void> {
+    const id = await vscode.window.showInputBox({
+      title: 'Create Hydra profile',
+      prompt: 'Stable profile ID (used in settings)',
+      placeHolder: 'review',
+      validateInput: value => /^[a-z][a-z0-9_-]*$/.test(value) ? profiles()[value] ? 'That profile already exists.' : undefined : 'Use lowercase letters, numbers, underscores, or hyphens, starting with a letter.',
+    })
+    if (!id) return
+    const label = await vscode.window.showInputBox({ title: 'Create Hydra profile', prompt: 'Display name', value: id[0].toUpperCase() + id.slice(1) })
+    if (!label) return
+    const source = profiles()[this.profile] ?? {}
+    const profile = JSON.parse(JSON.stringify({ ...source, name: label })) as AuthoredProfile
+    validateProfile(id, profile)
+    const configuration = vscode.workspace.getConfiguration('hydra')
+    const existing = configuration.inspect<Record<string, AuthoredProfile>>('profiles')?.globalValue ?? {}
+    await configuration.update('profiles', { ...existing, [id]: profile }, vscode.ConfigurationTarget.Global)
+  }
+
+  private async deleteProfile(name: string, scope: 'user' | 'workspace'): Promise<void> {
+    const configuration = vscode.workspace.getConfiguration('hydra')
+    const inspected = configuration.inspect<Record<string, AuthoredProfile>>('profiles')
+    const existing = scope === 'workspace' ? inspected?.workspaceValue ?? {} : inspected?.globalValue ?? {}
+    if (!existing[name]) {
+      void vscode.window.showInformationMessage(`Hydra profile "${this.profileLabels()[name] ?? name}" has no ${scope} override to remove.`)
+      return
+    }
+    const answer = await vscode.window.showWarningMessage(`Remove the ${scope} definition of "${this.profileLabels()[name] ?? name}"?`, { modal: true }, 'Remove')
+    if (answer !== 'Remove') return
+    const next = { ...existing }
+    delete next[name]
+    await configuration.update('profiles', next, scope === 'workspace' ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global)
   }
 
   private profileLabels(configured = profiles()): Record<string, string> {

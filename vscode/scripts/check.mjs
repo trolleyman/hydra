@@ -5,6 +5,7 @@ const buildOnly = process.argv.includes('--build-only')
 const commands = [
   ['node', ['node_modules/openapi-typescript/bin/cli.js', '../api/agent-host.yaml', '-o', 'src/generated/protocol.ts']],
   ...(!buildOnly ? [['node', ['node_modules/typescript/bin/tsc', '--noEmit']]] : []),
+  ...(!buildOnly ? [['node', ['--no-warnings', '--test', 'test/*.test.mjs']]] : []),
   ['node', ['scripts/build.mjs']],
 ]
 for (const [executable, args] of commands) {

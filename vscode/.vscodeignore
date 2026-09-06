@@ -1,5 +1,6 @@
 src/**
 scripts/**
+test/**
 .gitignore
 .vscodeignore
 node_modules/**

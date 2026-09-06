@@ -15,3 +15,8 @@ platform-specific VSIX with `aube run package -- --target linux-x64` (also
 `linux-arm64`, `darwin-x64`, `darwin-arm64`, `win32-x64`, and `win32-arm64`).
 The VSIX contains a helper only for its declared target; Claude Code and Codex
 remain external prerequisites and can be selected through the Hydra settings.
+
+Run `aube run test:extension` from a graphical host session for the real
+Extension Development Host smoke test. It downloads the matching stable VS Code
+build on first use. Set `HYDRA_VSCODE_EXECUTABLE` to reuse an existing VS Code
+executable instead.
