@@ -77,6 +77,10 @@ components:
           type: string
         policy:
           $ref: './policy.yaml#/components/schemas/EffectivePolicy'
+        provider_executable:
+          type: string
+          description: Executable name or absolute path selected by the workspace extension.
+          x-go-type-skip-optional-pointer: true
         resume_session_id:
           type: string
           x-go-type-skip-optional-pointer: true

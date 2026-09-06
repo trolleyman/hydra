@@ -8,6 +8,7 @@ export type EffectivePolicy = components['schemas']['InitializeCommand']['policy
 export type AuthoredProfile = Record<string, unknown> & {
   provider?: 'claude' | 'codex'
   model?: string
+  effort?: string
   prompt?: string
   filesystem?: { readable?: string[]; writable?: string[]; copy_on_write?: string[]; masked?: string[] }
   network?: { mode?: 'off' | 'hard' | 'advisory' | 'unrestricted'; allowed_hosts?: string[]; blocked_hosts?: string[] }
@@ -41,6 +42,7 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
     profile: name,
     provider: authored.provider ?? 'codex',
     model: authored.model,
+    effort: authored.effort,
     prompt: authored.prompt,
     workspace: workspacePath,
     user_home: home,

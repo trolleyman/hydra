@@ -189,6 +189,23 @@ its existing head state layout; the extension passes a directory beneath VS Code
 extension storage and receives the same normalization, projection, paging, and
 live-watch behavior.
 
+The standalone host now launches both structured providers through that path.
+Claude uses stream-json and Codex uses app-server plus the shared Codex
+controller. User messages are durably appended at the host boundary and then
+sent through the provider-neutral session driver; provider output, recovered
+Codex history, streaming deltas, interrupts, interaction responses, and model
+changes feed the same normalized event manager. The provider-native session ID
+is atomically recorded in `provider.json` for exact resume.
+
+Provider processes inherit an allow-listed environment shared with Hydra heads,
+including credentials only for the selected provider. Their private temp/cache
+state lives beneath the conversation. Missing provider state paths are staged
+there instead of being created in the user's home. Existing state for only the
+selected provider is mounted. Claude receives an immutable empty user settings
+file plus a strict filtered MCP file; Codex receives an immutable filtered
+config with ungoverned hooks disabled and a profile-prompt `AGENTS.md`. Neither
+standalone config injects Hydra's daemon/head control MCP server.
+
 ## Profiles and policy
 
 `api/policy.yaml` defines and generates Go models for two related shapes:
@@ -401,9 +418,9 @@ that commit.
 - [x] Add a directory-based chat store API without changing Hydra's existing
   head storage behavior.
 - [x] Add the standalone `hydra-agent-host` stdio command and protocol handshake.
-- [ ] Run Codex through the host with streaming, send, interrupt, model changes,
+- [x] Run Codex through the host with streaming, send, interrupt, model changes,
   history, and resume.
-- [ ] Run Claude through the same host contract with streaming, controls,
+- [x] Run Claude through the same host contract with streaming, controls,
   history, and resume.
 - [ ] Resolve and validate profiles, launch the whole provider inside Hydra's
   filesystem sandbox, and rebuild safely on grants/profile changes.

@@ -97,6 +97,8 @@ type EffectiveNetworkPolicy struct {
 
 // EffectivePolicy Resolved and canonical policy accepted by the native host.
 type EffectivePolicy struct {
+	// Effort Provider-specific reasoning effort.
+	Effort     string                    `json:"effort,omitempty"`
 	Filesystem EffectiveFilesystemPolicy `json:"filesystem"`
 	Git        GitPolicy                 `json:"git"`
 	Model      string                    `json:"model,omitempty"`
@@ -161,6 +163,8 @@ type PolicyDecision string
 
 // Profile Portable user-authored profile stored in VS Code configuration.
 type Profile struct {
+	// Effort Provider-specific reasoning effort.
+	Effort     string                    `json:"effort,omitempty"`
 	Filesystem *AuthoredFilesystemPolicy `json:"filesystem,omitempty"`
 	Git        *GitPolicy                `json:"git,omitempty"`
 	Model      string                    `json:"model,omitempty"`

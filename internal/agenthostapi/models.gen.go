@@ -248,9 +248,12 @@ type InitializeCommand struct {
 	// Policy Resolved and canonical policy accepted by the native host.
 	Policy          externalRef1.EffectivePolicy `json:"policy"`
 	ProtocolVersion int                          `json:"protocol_version"`
-	ResumeSessionId string                       `json:"resume_session_id,omitempty"`
-	Type            InitializeCommandType        `json:"type"`
-	Workspace       string                       `json:"workspace"`
+
+	// ProviderExecutable Executable name or absolute path selected by the workspace extension.
+	ProviderExecutable string                `json:"provider_executable,omitempty"`
+	ResumeSessionId    string                `json:"resume_session_id,omitempty"`
+	Type               InitializeCommandType `json:"type"`
+	Workspace          string                `json:"workspace"`
 }
 
 // InitializeCommandType defines model for InitializeCommand.Type.

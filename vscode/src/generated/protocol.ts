@@ -21,6 +21,8 @@ export interface components {
             workspace: string;
             conversation_dir: string;
             policy: components["schemas"]["EffectivePolicy"];
+            /** @description Executable name or absolute path selected by the workspace extension. */
+            provider_executable?: string;
             resume_session_id?: string;
         };
         UserMessageCommand: {
@@ -288,6 +290,8 @@ export interface components {
             profile: string;
             provider: components["schemas"]["ProviderKind"];
             model?: string;
+            /** @description Provider-specific reasoning effort. */
+            effort?: string;
             prompt?: string;
             /** @description Canonical absolute workspace directory. */
             workspace: string;

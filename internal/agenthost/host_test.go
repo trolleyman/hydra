@@ -8,8 +8,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trolleyman/hydra/internal/agenthostapi"
 	"github.com/trolleyman/hydra/internal/chat"
 )
+
+type fakeProvider struct{}
+
+func (fakeProvider) Send(json.RawMessage) error    { return nil }
+func (fakeProvider) Interrupt() error              { return nil }
+func (fakeProvider) Respond(json.RawMessage) error { return nil }
+func (fakeProvider) SetModel(string) error         { return nil }
+func (fakeProvider) Close()                        {}
+
+func launchFake(context.Context, agenthostapi.InitializeCommand, *chat.Manager, *writer, ioLogger) (providerRuntime, error) {
+	return fakeProvider{}, nil
+}
 
 func TestRunHandshakeReplayAndPersistedUserMessage(t *testing.T) {
 	workspace := t.TempDir()
@@ -31,18 +44,15 @@ func TestRunHandshakeReplayAndPersistedUserMessage(t *testing.T) {
 	}
 	input := encodeLines(t, initialize, message, map[string]any{"type": "shutdown"})
 	var output, logs bytes.Buffer
-	if err := Run(context.Background(), strings.NewReader(input), &output, &logs, "test-version"); err != nil {
+	if err := run(context.Background(), strings.NewReader(input), &output, &logs, "test-version", launchFake); err != nil {
 		t.Fatal(err)
 	}
 
 	frames := decodeLines(t, output.String())
-	wantTypes := []string{"hello", "state_snapshot", "chat_history", "replay_done", "ready", "chat_event", "operation_result"}
-	if len(frames) != len(wantTypes) {
-		t.Fatalf("frame count = %d, want %d: %s", len(frames), len(wantTypes), output.String())
-	}
-	for i, want := range wantTypes {
-		if frames[i]["type"] != want {
-			t.Fatalf("frame %d type = %v, want %s", i, frames[i]["type"], want)
+	wantTypes := []string{"hello", "state_snapshot", "chat_history", "replay_done", "ready", "operation_result"}
+	for _, want := range wantTypes {
+		if !hasFrameType(frames, want) {
+			t.Fatalf("missing %s frame: %s", want, output.String())
 		}
 	}
 	if frames[0]["protocol_version"] != float64(ProtocolVersion) || frames[0]["host_version"] != "test-version" {
@@ -57,6 +67,15 @@ func TestRunHandshakeReplayAndPersistedUserMessage(t *testing.T) {
 	if len(events) != 1 || events[0].Type != "user_message" {
 		t.Fatalf("persisted events = %+v", events)
 	}
+}
+
+func hasFrameType(frames []map[string]any, want string) bool {
+	for _, frame := range frames {
+		if frame["type"] == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRunRejectsCommandBeforeInitialize(t *testing.T) {

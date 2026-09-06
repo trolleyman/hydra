@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	toml "github.com/pelletier/go-toml/v2"
+	"github.com/trolleyman/hydra/internal/gate"
 )
 
 func TestHydraMCPServerSpec(t *testing.T) {
@@ -110,6 +111,24 @@ command = "drop"
 	servers, _ := cfg["mcp_servers"].(map[string]any)
 	if servers["keep"] == nil || servers["hydra"] == nil || servers["drop"] != nil {
 		t.Fatalf("filtered servers = %#v", servers)
+	}
+}
+
+func TestBuildCodexConfigCanOmitHydraControlServer(t *testing.T) {
+	existing := []byte("[mcp_servers.keep]\ncommand = \"keep\"\n")
+	data, err := BuildCodexConfig(existing, "", []string{"keep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := ListCodexMCPServers(data)
+	if len(servers) != 1 || servers[0].Name != "keep" {
+		t.Fatalf("standalone MCP servers = %+v; config:\n%s", servers, data)
+	}
+	if strings.Contains(string(data), gate.HydraControlServer) {
+		t.Fatalf("standalone config injected Hydra control server:\n%s", data)
+	}
+	if !strings.Contains(string(data), "hooks = false") {
+		t.Fatalf("standalone config did not disable provider hooks:\n%s", data)
 	}
 }
 

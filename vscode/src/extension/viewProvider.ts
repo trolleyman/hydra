@@ -52,6 +52,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const initialize: InitializeCommand = {
       type: 'initialize', protocol_version: 1, workspace: policy.workspace,
       conversation_dir: conversationDir, policy,
+      provider_executable: vscode.workspace.getConfiguration('hydra').get<string>(`providers.${policy.provider}.path`, policy.provider).trim(),
     }
     const client = new HostClient(agentHostPath(this.context), initialize, this.output)
     client.onFrame(frame => this.onFrame(frame))
