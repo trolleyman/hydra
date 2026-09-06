@@ -185,7 +185,7 @@ export interface components {
             type: "approval_request";
             request_id: string;
             /** @enum {string} */
-            kind: "filesystem_read" | "filesystem_write" | "network" | "mcp" | "mcp_tool" | "git" | "integration";
+            kind: "filesystem_read" | "filesystem_write" | "core_tool" | "network" | "mcp" | "mcp_tool" | "git" | "integration";
             target: string;
             canonical_target?: string;
             summary: string;

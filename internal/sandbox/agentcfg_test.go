@@ -47,6 +47,17 @@ func TestBuildClaudeSettingsRegistersGateWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestBuildStandaloneClaudeSettingsContainsOnlyGateHook(t *testing.T) {
+	data, err := BuildStandaloneClaudeSettings("/tmp/hydra-agent-host", []string{"github"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "gate claude") || strings.Contains(text, "trigger-hook") || strings.Contains(text, "SessionStart") {
+		t.Fatalf("standalone Claude settings:\n%s", data)
+	}
+}
+
 func TestBuildClaudeSettingsNoGateWhenDisabled(t *testing.T) {
 	data, err := BuildClaudeSettings(nil, "/tmp/hydra-internal", false, nil)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 
 // Defines values for ApprovalRequestFrameKind.
 const (
+	CoreTool        ApprovalRequestFrameKind = "core_tool"
 	FilesystemRead  ApprovalRequestFrameKind = "filesystem_read"
 	FilesystemWrite ApprovalRequestFrameKind = "filesystem_write"
 	Git             ApprovalRequestFrameKind = "git"

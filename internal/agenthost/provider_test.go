@@ -20,12 +20,40 @@ func TestAllowedMCPServersRequiresExplicitGrant(t *testing.T) {
 		}},
 		"ask": {Decision: policyapi.PolicyAsk},
 		"deny": {Decision: policyapi.PolicyDeny, Tools: map[string]policyapi.MCPToolPolicy{
-			"read": {Decision: policyapi.PolicyDeny},
+			"read": {Decision: policyapi.PolicyAllow},
 		}},
 	}
 	got := strings.Join(allowedMCPServers(servers), ",")
 	if got != "all,partial" {
 		t.Fatalf("allowed MCP servers = %q, want all,partial", got)
+	}
+}
+
+func TestProviderGatePolicyMapsCoreAndMCPDecisions(t *testing.T) {
+	read, bash := policyapi.PolicyDeny, policyapi.PolicyAsk
+	policy := policyapi.EffectivePolicy{
+		UserHome: "/home/test", Workspace: "/workspace",
+		Network: policyapi.EffectiveNetworkPolicy{Mode: policyapi.NetworkHard, AllowedHosts: []string{"docs.example"}},
+		Tools: policyapi.ToolPolicy{
+			Core: &policyapi.CoreToolPolicy{Read: &read, Bash: &bash},
+			Mcp: map[string]policyapi.MCPServerPolicy{
+				"all":  {Decision: policyapi.PolicyAllow},
+				"none": {Decision: policyapi.PolicyDeny},
+				"partial": {Decision: policyapi.PolicyAsk, Tools: map[string]policyapi.MCPToolPolicy{
+					"read": {Decision: policyapi.PolicyAllow}, "write": {Decision: policyapi.PolicyDeny},
+				}},
+			},
+		},
+	}
+	got := providerGatePolicy(policy, sandbox.AgentTypeCodex)
+	if got.ToolDecisions["read"] != "deny" || got.ToolDecisions["bash"] != "ask" {
+		t.Fatalf("core decisions = %+v", got.ToolDecisions)
+	}
+	if strings.Join(got.MCPAllowed, ",") != "all" || strings.Join(got.MCPBlocked, ",") != "none" {
+		t.Fatalf("MCP server policy = allowed %v blocked %v", got.MCPAllowed, got.MCPBlocked)
+	}
+	if strings.Join(got.MCPToolsAllowed, ",") != "partial__read" || strings.Join(got.MCPToolsBlocked, ",") != "partial__write" {
+		t.Fatalf("MCP tool policy = allowed %v blocked %v", got.MCPToolsAllowed, got.MCPToolsBlocked)
 	}
 }
 
@@ -51,8 +79,8 @@ func TestProviderSeedsFilterMCPAndStandingPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(binds) != 2 {
-		t.Fatalf("bind count = %d, want 2", len(binds))
+	if len(binds) != 3 {
+		t.Fatalf("bind count = %d, want 3", len(binds))
 	}
 	config := string(readFile(filepath.Join(seedDir, "codex-config.toml")))
 	if !strings.Contains(config, "[mcp_servers.keep]") || strings.Contains(config, "mcp_servers.drop") || strings.Contains(config, "mcp_servers.hydra") {

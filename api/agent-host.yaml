@@ -272,7 +272,7 @@ components:
         request_id: { type: string }
         kind:
           type: string
-          enum: [filesystem_read, filesystem_write, network, mcp, mcp_tool, git, integration]
+          enum: [filesystem_read, filesystem_write, core_tool, network, mcp, mcp_tool, git, integration]
         target: { type: string }
         canonical_target:
           type: string

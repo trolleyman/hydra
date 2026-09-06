@@ -19,6 +19,7 @@ import (
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/codexstream"
 	"github.com/trolleyman/hydra/internal/egress"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/policyapi"
 	"github.com/trolleyman/hydra/internal/sandbox"
@@ -44,6 +45,7 @@ type ioLogger interface {
 type liveProvider struct {
 	reg      *session.Registry
 	egress   *egress.Session
+	gateStop func()
 	closeOne sync.Once
 }
 
@@ -64,6 +66,9 @@ func (p *liveProvider) Close() {
 		_ = p.reg.Kill(providerSessionID)
 		p.reg.StopAll()
 		p.egress.Close()
+		if p.gateStop != nil {
+			p.gateStop()
+		}
 	})
 }
 
@@ -79,6 +84,7 @@ func startProvider(ctx context.Context, init agenthostapi.InitializeCommand, man
 
 	reg := session.NewRegistry()
 	provider := &liveProvider{reg: reg, egress: egressSession}
+	provider.gateStop = approvals.watchGate(filepath.Join(init.ConversationDir, "private", "tmp", "approvals"), filepath.Join(init.ConversationDir, "private", "seed", "gate-policy.json"))
 	reg.SetOnChatLine(func(_ string, source string, line []byte) {
 		manager.ObserveProviderLine(providerSessionID, source, line)
 		if agentType == sandbox.AgentTypeClaude {
@@ -95,7 +101,7 @@ func startProvider(ctx context.Context, init agenthostapi.InitializeCommand, man
 	})
 
 	if _, err := reg.Start(session.StartOptions{ID: providerSessionID, Sandbox: launch}); err != nil {
-		egressSession.Close()
+		provider.Close()
 		return nil, errtrace.Wrap(err)
 	}
 	if agentType == sandbox.AgentTypeCodex {
@@ -166,6 +172,15 @@ func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.Agen
 			return sandbox.Options{}, nil, errtrace.Wrap(err)
 		}
 	}
+	approvalDir := filepath.Join(tmpDir, "approvals")
+	if err := os.MkdirAll(approvalDir, 0o700); err != nil {
+		return sandbox.Options{}, nil, errtrace.Wrap(err)
+	}
+	if stale, err := gate.ListRequests(approvalDir); err == nil {
+		for _, request := range stale {
+			gate.RemoveRequest(approvalDir, request.ReqID)
+		}
+	}
 
 	argv, err := sandbox.AgentArgv(agentType, init.ResumeSessionId != "", init.Policy.Prompt, "", init.Policy.Model, init.Policy.Effort, true, init.ResumeSessionId, strictMCPConfigSandboxPath(agentType, init.Policy.UserHome), claudeSettingSources(agentType))
 	if err != nil {
@@ -185,6 +200,12 @@ func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.Agen
 		return sandbox.Options{}, nil, errtrace.Wrap(err)
 	}
 	binds = append(stateBinds, binds...)
+	gatePolicyPath := filepath.Join(seedDir, "gate-policy.json")
+	if err := providerGatePolicy(init.Policy, agentType).Save(gatePolicyPath); err != nil {
+		return sandbox.Options{}, nil, errtrace.Wrap(err)
+	}
+	binds = append(binds, sandbox.Bind{Source: gatePolicyPath, Target: "/tmp/hydra-vscode-policy.json", ReadOnly: true})
+	immutable = append(immutable, gatePolicyPath)
 	netPolicy := networkPolicy(init.Policy.Network)
 	egressSession := egress.StartCommandEgress("vscode-"+filepath.Base(init.ConversationDir), agentType, &netPolicy, 0, approve)
 	identity, _ := user.Current()
@@ -193,7 +214,17 @@ func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.Agen
 		username = identity.Username
 	}
 	env := agentenv.FromHost(agentType, nil, init.Policy.UserHome, username, "", "")
+	env = append(env,
+		gate.EnvPolicyPath+"=/tmp/hydra-vscode-policy.json",
+		gate.EnvApprovalDir+"=/tmp/approvals",
+		gate.EnvWorktree+"="+init.Workspace,
+	)
 	env = sandbox.RuntimeEnv(append(env, egressSession.Env...), tmpDir)
+	agentHostExecutable, err := os.Executable()
+	if err != nil {
+		egressSession.Close()
+		return sandbox.Options{}, nil, errtrace.Wrap(err)
+	}
 
 	gitDir, _ := git.GetCommonDir(init.Workspace)
 	gitIsolation := sandbox.GitIsolationReadonly
@@ -214,7 +245,8 @@ func providerSandbox(init agenthostapi.InitializeCommand, agentType sandbox.Agen
 		ReadablePaths: append(defaults.ReadablePaths, init.Policy.Filesystem.Readable...),
 		MaskedPaths:   append(defaults.MaskedPaths, init.Policy.Filesystem.Masked...),
 		Network:       netPolicy, Binds: binds, ImmutablePaths: immutable, CowMounts: cowMounts, Env: env, Argv: argv,
-		StdioPipes: true, EgressWrap: egressSession.Wrap, HardenGUI: true, Seccomp: true,
+		HydraBinPath: agentHostExecutable,
+		StdioPipes:   true, EgressWrap: egressSession.Wrap, HardenGUI: true, Seccomp: true,
 	}, egressSession, nil
 }
 
@@ -295,7 +327,11 @@ func providerSeeds(init agenthostapi.InitializeCommand, agentType sandbox.AgentT
 		if err != nil {
 			return nil, nil, errtrace.Wrap(err)
 		}
-		settingsFile, err := writeSeed("claude-settings.json", []byte("{}\n"), 0o600)
+		settings, err := sandbox.BuildStandaloneClaudeSettings(sandbox.HydraBinPath, keep)
+		if err != nil {
+			return nil, nil, errtrace.Wrap(err)
+		}
+		settingsFile, err := writeSeed("claude-settings.json", settings, 0o600)
 		if err != nil {
 			return nil, nil, errtrace.Wrap(err)
 		}
@@ -305,7 +341,7 @@ func providerSeeds(init agenthostapi.InitializeCommand, agentType sandbox.AgentT
 		}, []string{mcpFile, settingsFile}, nil
 	case sandbox.AgentTypeCodex:
 		codexDir := filepath.Join(init.Policy.UserHome, ".codex")
-		config, err := sandbox.BuildCodexConfig(readFile(filepath.Join(codexDir, "config.toml")), "", keep)
+		config, err := sandbox.BuildStandaloneCodexConfig(readFile(filepath.Join(codexDir, "config.toml")), keep)
 		if err != nil {
 			return nil, nil, errtrace.Wrap(err)
 		}
@@ -315,6 +351,16 @@ func providerSeeds(init agenthostapi.InitializeCommand, agentType sandbox.AgentT
 		}
 		binds := []sandbox.Bind{{Source: configFile, Target: filepath.Join(codexDir, "config.toml"), ReadOnly: true}}
 		immutable := []string{configFile}
+		hooks, err := sandbox.BuildStandaloneCodexHooks(sandbox.HydraBinPath)
+		if err != nil {
+			return nil, nil, errtrace.Wrap(err)
+		}
+		hooksFile, err := writeSeed("codex-hooks.json", hooks, 0o600)
+		if err != nil {
+			return nil, nil, errtrace.Wrap(err)
+		}
+		binds = append(binds, sandbox.Bind{Source: hooksFile, Target: filepath.Join(codexDir, "hooks.json"), ReadOnly: true})
+		immutable = append(immutable, hooksFile)
 		if init.Policy.Prompt != "" {
 			content := combineInstructions(init.Policy.Prompt, readFile(filepath.Join(codexDir, "AGENTS.md")))
 			agentsFile, err := writeSeed("codex-AGENTS.md", content, 0o600)
@@ -347,6 +393,9 @@ func claudeSettingSources(agentType sandbox.AgentType) string {
 func allowedMCPServers(servers map[string]policyapi.MCPServerPolicy) []string {
 	keep := make([]string, 0, len(servers))
 	for name, server := range servers {
+		if server.Decision == policyapi.PolicyDeny {
+			continue
+		}
 		if server.Decision == policyapi.PolicyAllow {
 			keep = append(keep, name)
 			continue
@@ -360,6 +409,45 @@ func allowedMCPServers(servers map[string]policyapi.MCPServerPolicy) []string {
 	}
 	sort.Strings(keep)
 	return keep
+}
+
+func providerGatePolicy(policy policyapi.EffectivePolicy, agentType sandbox.AgentType) gate.Policy {
+	result := gate.Policy{
+		GateEnabled: true, ToolDecisions: map[string]gate.Decision{},
+		MCPToolRW: map[string]string{}, Home: policy.UserHome, WorktreePath: policy.Workspace,
+		HostMediatedGit:      true,
+		WebFetchFilter:       policy.Network.Mode == policyapi.NetworkHard || policy.Network.Mode == policyapi.NetworkAdvisory,
+		WebFetchAllowHosts:   append(sandbox.DefaultAllowedHosts(agentType), policy.Network.AllowedHosts...),
+		WebFetchBlockedHosts: append([]string(nil), policy.Network.BlockedHosts...),
+	}
+	if policy.Git.Isolation != nil {
+		result.HostMediatedGit = *policy.Git.Isolation == policyapi.GitReadOnly
+	}
+	if core := policy.Tools.Core; core != nil {
+		for name, decision := range map[string]*policyapi.PolicyDecision{"read": core.Read, "search": core.Search, "edit": core.Edit, "bash": core.Bash, "fetch": core.Fetch} {
+			if decision != nil {
+				result.ToolDecisions[name] = gate.Decision(*decision)
+			}
+		}
+	}
+	for serverName, server := range policy.Tools.Mcp {
+		switch server.Decision {
+		case policyapi.PolicyAllow:
+			result.MCPAllowed = append(result.MCPAllowed, serverName)
+		case policyapi.PolicyDeny:
+			result.MCPBlocked = append(result.MCPBlocked, serverName)
+		}
+		for toolName, tool := range server.Tools {
+			full := serverName + "__" + toolName
+			switch tool.Decision {
+			case policyapi.PolicyAllow:
+				result.MCPToolsAllowed = append(result.MCPToolsAllowed, full)
+			case policyapi.PolicyDeny:
+				result.MCPToolsBlocked = append(result.MCPToolsBlocked, full)
+			}
+		}
+	}
+	return result
 }
 
 func networkPolicy(policy policyapi.EffectiveNetworkPolicy) sandbox.NetworkPolicy {

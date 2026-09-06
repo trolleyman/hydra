@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/trolleyman/hydra/internal/agenthostapi"
+	"github.com/trolleyman/hydra/internal/gate"
 )
 
 type frameSink struct{ frames chan []byte }
@@ -13,6 +14,37 @@ type frameSink struct{ frames chan []byte }
 func (s frameSink) Write(data []byte) (int, error) {
 	s.frames <- append([]byte(nil), data...)
 	return len(data), nil
+}
+
+func TestApprovalBrokerBridgesAndRemembersGateRequest(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := dir + "/policy.json"
+	if err := (gate.Policy{GateEnabled: true, ToolDecisions: map[string]gate.Decision{"edit": gate.Ask}}).Save(policyPath); err != nil {
+		t.Fatal(err)
+	}
+	sink := frameSink{frames: make(chan []byte, 4)}
+	broker := newApprovalBroker(&writer{enc: json.NewEncoder(sink)})
+	stop := broker.watchGate(dir, policyPath)
+	defer stop()
+	request := gate.Request{ReqID: "tool-1", Tool: "Edit", Kind: "edit", Target: "Edit", Summary: "Edit requires approval", TS: time.Now().Format(time.RFC3339Nano)}
+	if err := gate.WriteRequest(dir, request); err != nil {
+		t.Fatal(err)
+	}
+	id := waitApprovalRequest(t, sink.frames)
+	if id != request.ReqID {
+		t.Fatalf("approval id = %q, want %q", id, request.ReqID)
+	}
+	if err := broker.resolve(agenthostapi.ApprovalResponseCommand{RequestId: id, Decision: agenthostapi.Allow, Scope: agenthostapi.Chat}); err != nil {
+		t.Fatal(err)
+	}
+	decision, ok, err := gate.ReadDecision(dir, id)
+	if err != nil || !ok || decision.Decision != gate.Allow || !decision.Remember {
+		t.Fatalf("gate decision = %+v, ok = %t, err = %v", decision, ok, err)
+	}
+	policy, err := gate.LoadPolicy(policyPath)
+	if err != nil || policy.ToolDecisions["edit"] != gate.Allow {
+		t.Fatalf("remembered policy = %+v, err = %v", policy.ToolDecisions, err)
+	}
 }
 
 func TestApprovalBrokerNetworkScopes(t *testing.T) {

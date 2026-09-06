@@ -132,6 +132,23 @@ func TestBuildCodexConfigCanOmitHydraControlServer(t *testing.T) {
 	}
 }
 
+func TestBuildStandaloneCodexHooksAndConfig(t *testing.T) {
+	hooks, err := BuildStandaloneCodexHooks("/tmp/hydra-agent-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(hooks), "gate codex") || strings.Contains(string(hooks), "trigger-hook") {
+		t.Fatalf("standalone Codex hooks:\n%s", hooks)
+	}
+	config, err := BuildStandaloneCodexConfig(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), "hooks = true") || strings.Contains(string(config), gate.HydraControlServer) {
+		t.Fatalf("standalone Codex config:\n%s", config)
+	}
+}
+
 func TestListCodexMCPServers(t *testing.T) {
 	got := ListCodexMCPServers([]byte(`
 [mcp_servers.zed]

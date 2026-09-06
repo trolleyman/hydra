@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { agentHostPath } from './extension'
 import { HostClient, type HostFrame, type InitializeCommand } from './hostClient'
-import { defaultProfileName, profiles, resolveProfile } from './profiles'
+import { defaultProfileName, profiles, resolveProfile, type WorkspaceGrants } from './profiles'
 
 type Page = 'chat' | 'history' | 'profiles'
 
@@ -192,17 +192,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private async answerApproval(requestID: string, decision: 'allow' | 'deny', scope: 'once' | 'chat' | 'workspace' | 'profile'): Promise<void> {
     const request = this.approvals.get(requestID)
     if (!request || !this.client) return
-    if (decision === 'allow' && request.kind === 'network' && (scope === 'workspace' || scope === 'profile')) {
+    if (decision === 'allow' && (scope === 'workspace' || scope === 'profile')) {
       if (scope === 'workspace' && this.workspace) {
         const key = this.workspaceGrantKey(this.profile, this.workspace)
-        const grants = this.context.workspaceState.get<{ network?: string[] }>(key, {})
-        await this.context.workspaceState.update(key, { ...grants, network: [...new Set([...(grants.network ?? []), request.target])] })
+        const grants = this.context.workspaceState.get<WorkspaceGrants>(key, {})
+        await this.context.workspaceState.update(key, addWorkspaceGrant(grants, request))
       } else if (scope === 'profile') {
         const configuration = vscode.workspace.getConfiguration('hydra')
         const globalProfiles = configuration.inspect<Record<string, any>>('profiles')?.globalValue ?? {}
         const authored = profiles()[this.profile] ?? {}
-        const allowed = [...new Set([...(authored.network?.allowed_hosts ?? []), request.target])]
-        await configuration.update('profiles', { ...globalProfiles, [this.profile]: { ...authored, network: { ...(authored.network ?? {}), allowed_hosts: allowed } } }, vscode.ConfigurationTarget.Global)
+        await configuration.update('profiles', { ...globalProfiles, [this.profile]: addProfileGrant(authored, request) }, vscode.ConfigurationTarget.Global)
       }
     }
     this.client.send({ type: 'approval_response', request_id: requestID, decision, scope })
@@ -229,3 +228,38 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`
   }
 }
+
+function addWorkspaceGrant(grants: WorkspaceGrants, request: Extract<HostFrame, { type: 'approval_request' }>): WorkspaceGrants {
+  const next = structuredClone(grants)
+  if (request.kind === 'network') next.network = unique([...(next.network ?? []), request.target])
+  if (request.kind === 'core_tool' && request.canonical_target) next.core = unique([...(next.core ?? []), request.canonical_target])
+  if (request.kind === 'mcp') next.mcp_servers = unique([...(next.mcp_servers ?? []), request.target])
+  if (request.kind === 'mcp_tool') next.mcp_tools = unique([...(next.mcp_tools ?? []), request.target])
+  return next
+}
+
+function addProfileGrant(profile: Record<string, any>, request: Extract<HostFrame, { type: 'approval_request' }>): Record<string, any> {
+  const next = structuredClone(profile)
+  if (request.kind === 'network') {
+    next.network ??= {}
+    next.network.allowed_hosts = unique([...(next.network.allowed_hosts ?? []), request.target])
+  }
+  if (request.kind === 'core_tool' && request.canonical_target) {
+    next.tools ??= {}; next.tools.core ??= {}; next.tools.core[request.canonical_target] = 'allow'
+  }
+  if (request.kind === 'mcp') {
+    next.tools ??= {}; next.tools.mcp ??= {}; next.tools.mcp[request.target] = { ...(next.tools.mcp[request.target] ?? {}), decision: 'allow' }
+  }
+  if (request.kind === 'mcp_tool') {
+    const separator = request.target.indexOf('__')
+    if (separator > 0) {
+      const server = request.target.slice(0, separator), tool = request.target.slice(separator + 2)
+      next.tools ??= {}; next.tools.mcp ??= {}
+      const current = next.tools.mcp[server] ?? { decision: 'ask' }
+      next.tools.mcp[server] = { ...current, tools: { ...(current.tools ?? {}), [tool]: { decision: 'allow' } } }
+    }
+  }
+  return next
+}
+
+function unique(values: string[]): string[] { return [...new Set(values)] }

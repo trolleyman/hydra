@@ -16,7 +16,7 @@ export type AuthoredProfile = Record<string, unknown> & {
   git?: EffectivePolicy['git']
 }
 
-export type WorkspaceGrants = { network?: string[] }
+export type WorkspaceGrants = { network?: string[]; core?: string[]; mcp_servers?: string[]; mcp_tools?: string[] }
 
 const defaultMasks = [
   '~/.ssh', '~/.gnupg', '~/.aws', '~/.azure', '~/.kube', '~/.docker',
@@ -41,6 +41,19 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
   const home = await canonical(os.homedir())
   const resolveAll = async (values: string[] | undefined) => Promise.all((values ?? []).map(value => resolvePath(value, workspace, home)))
   const filesystem = authored.filesystem ?? {}
+  const defaultTools: EffectivePolicy['tools'] = { core: { read: 'allow', search: 'allow', edit: 'allow', bash: 'allow', fetch: 'allow' } }
+  const tools: EffectivePolicy['tools'] = structuredClone(authored.tools ?? defaultTools)
+  tools.core ??= {}
+  for (const capability of grants.core ?? []) (tools.core as Record<string, 'allow'>)[capability] = 'allow'
+  tools.mcp ??= {}
+  for (const server of grants.mcp_servers ?? []) tools.mcp[server] = { ...(tools.mcp[server] ?? {}), decision: 'allow' }
+  for (const target of grants.mcp_tools ?? []) {
+    const separator = target.indexOf('__')
+    if (separator < 1) continue
+    const server = target.slice(0, separator), tool = target.slice(separator + 2)
+    const current = tools.mcp[server] ?? { decision: 'ask' as const }
+    tools.mcp[server] = { ...current, tools: { ...(current.tools ?? {}), [tool]: { decision: 'allow' } } }
+  }
   return {
     profile: name,
     provider: authored.provider ?? 'codex',
@@ -60,7 +73,7 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
       allowed_hosts: unique([...(authored.network?.allowed_hosts ?? []), ...(grants.network ?? [])]),
       blocked_hosts: authored.network?.blocked_hosts ?? [],
     },
-    tools: authored.tools ?? { core: { read: 'allow', search: 'allow', edit: 'allow', bash: 'allow', fetch: 'allow' } },
+    tools,
     git: authored.git ?? { isolation: 'readonly', protected_branches: ['main', 'master', 'release/*'] },
   }
 }
