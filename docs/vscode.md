@@ -183,7 +183,7 @@ directory; the extension passes a directory beneath VS Code extension storage.
 
 ## Profiles and policy
 
-`api/policy.yaml` defines two related shapes:
+`api/policy.yaml` defines and generates Go models for two related shapes:
 
 - `Profile` is user-authored and may contain portable paths such as `src`, `~`,
   `${workspaceFolder}`, `${workspaceFolder:name}`, and `${userHome}`.
