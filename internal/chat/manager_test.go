@@ -46,6 +46,24 @@ func TestManagerPreservesProviderOrderAndWatches(t *testing.T) {
 	}
 }
 
+func TestManagerUsesExplicitConversationDirectory(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "conversation")
+	m := NewManager(func(id string) (HeadContext, bool) {
+		return HeadContext{ProjectRoot: root, ConversationDir: dir}, id == "chat"
+	})
+	m.ObserveProviderLine("chat", "codex", []byte(`{"method":"item/completed","params":{"item":{"id":"answer","type":"agentMessage","text":"done"}}}`))
+	if err := m.Flush("chat"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "events.jsonl")); err != nil {
+		t.Fatalf("standalone event log: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".hydra")); !os.IsNotExist(err) {
+		t.Fatalf("manager created Hydra project state: %v", err)
+	}
+}
+
 func TestManagerSeedsInitialPromptOnce(t *testing.T) {
 	root := t.TempDir()
 	m := NewManager(func(id string) (HeadContext, bool) {

@@ -17,6 +17,9 @@ import (
 
 type HeadContext struct {
 	ProjectRoot string
+	// ConversationDir selects self-contained storage for a client that does not
+	// use Hydra's project/head state layout. Empty preserves the Hydra layout.
+	ConversationDir string
 	// Worktree is the managed checkout for a worktree/review chat. nil means the
 	// head deliberately operates in ProjectRoot itself.
 	Worktree  *string
@@ -107,7 +110,13 @@ func (m *Manager) store(id string) (*Store, error) {
 	if !ok {
 		return nil, errtrace.Wrap(ErrUnknownHead)
 	}
-	s, err := Open(ctx.ProjectRoot, id)
+	var s *Store
+	var err error
+	if ctx.ConversationDir != "" {
+		s, err = OpenDirectory(ctx.ConversationDir)
+	} else {
+		s, err = Open(ctx.ProjectRoot, id)
+	}
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
