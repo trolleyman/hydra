@@ -18,7 +18,7 @@ export function ChangeStats({
 
   return (
     <span
-      className={`inline-flex shrink-0 items-baseline gap-1 font-mono text-2xs ${className}`}
+      className={`inline-flex shrink-0 items-baseline gap-1 text-2xs ${className}`}
       aria-label={label}
     >
       {showAdditions && <span className="text-green-600 dark:text-green-400">+{additions}</span>}

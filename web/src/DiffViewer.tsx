@@ -4,7 +4,7 @@ import { Link, linkOptions, useNavigate, type LinkProps } from '@tanstack/react-
 import { canHighlight, highlightHtml, highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
-import { isGeneratedFile } from './lib/generatedFile'
+import { generatedFileMatch, isGeneratedFile } from './lib/generatedFile'
 import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
@@ -1641,8 +1641,8 @@ function RevealButton({ direction, hidden, onClick }: {
   const Icon = direction === 'up' ? ArrowUpToLine : direction === 'down' ? ArrowDownToLine : ShowAllLinesIcon
   const count = hidden == null ? EXPAND_STEP : Math.min(EXPAND_STEP, hidden)
   const label = direction === 'all'
-    ? `Show all ${hidden} line${hidden === 1 ? '' : 's'}`
-    : `${direction === 'up' ? 'Up' : 'Down'} ${count} line${count === 1 ? '' : 's'}`
+    ? `Show all ${hidden}`
+    : `${direction === 'up' ? 'Up' : 'Down'} ${count}`
   return (
     <button onClick={onClick} className={EXPANDER_BTN}>
       <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -1869,7 +1869,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   const detectedLang = getLanguage(file.path, fileHead)
   const [languageOverride, setLanguageOverride] = useState<string | null>(null)
   const lang = languageOverride ?? detectedLang
-  const generated = isGeneratedFile(file.path, fileHead)
+  const generated = generatedFileMatch(file.path, fileHead)
   const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
@@ -2378,7 +2378,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               </span>
               <ChangeTypeIcon type={file.change_type} />
               {generated && (
-                <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">Auto-generated</span>
+                <Tooltip content={generated.kind === 'glob' ? `Matched auto-generated glob: ${generated.rule}` : generated.rule}>
+                  <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">Auto-generated</span>
+                </Tooltip>
               )}
               {/* Copy-path rides with the path itself rather than sitting out in the
                 header's right-hand action cluster: the flex-1 above pushed it all

@@ -6,9 +6,10 @@ afterEach(cleanup)
 
 describe('ChangeStats', () => {
   it('shows positive additions and deletions', () => {
-    render(<ChangeStats additions={12} deletions={3} />)
+    const { container } = render(<ChangeStats additions={12} deletions={3} />)
     expect(screen.getByText('+12')).toBeInTheDocument()
     expect(screen.getByText('-3')).toBeInTheDocument()
+    expect(container.firstElementChild).not.toHaveClass('font-mono')
   })
 
   it('hides each non-positive side independently', () => {

@@ -157,11 +157,11 @@ function buildProbe(): Probe | null {
   // measured rather than assumed, since the chrome around it is free to change.
   const expander = mk('div', EXPANDER_ROW, host)
   const btns = mk('div', EXPANDER_BTNS, expander)
-  mk('span', EXPANDER_BTN, btns).textContent = 'Up 20 lines'
+  mk('span', EXPANDER_BTN, btns).textContent = 'Up 20'
   const expanderBtn2 = mk('span', `${EXPANDER_BTN} block`, btns)
-  expanderBtn2.textContent = 'Down 20 lines'
+  expanderBtn2.textContent = 'Down 20'
   const expanderBtn3 = mk('span', `${EXPANDER_BTN} block`, btns)
-  expanderBtn3.textContent = 'Show all 999 lines'
+  expanderBtn3.textContent = 'Show all 999'
 
   const notice = mk('div', NOTICE_BLOCK, host)
   notice.textContent = 'Binary file changed'
@@ -227,7 +227,7 @@ function measureExpanders(p: Probe, shapes: ExpanderShape[]): number {
     if (h === undefined) {
       p.expanderBtn2.style.display = e.buttons >= 2 ? '' : 'none'
       p.expanderBtn3.style.display = e.buttons >= 3 ? '' : 'none'
-      p.expanderBtn3.textContent = e.hidden == null ? '' : `Show all ${e.hidden} lines`
+      p.expanderBtn3.textContent = e.hidden == null ? '' : `Show all ${e.hidden}`
       h = p.expander.getBoundingClientRect().height
       seen.set(key, h)
     }

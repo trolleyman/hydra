@@ -101,7 +101,8 @@ and `web/src/DiffViewer.tsx`):
   tell that from a file with more below, and drew an action that expanded to nothing).
   Directional actions reveal at most 20 lines and state the actual remaining
   count when it is smaller. A middle gap orders its actions as **Up N**, **Show
-  all N**, **Down N**. A file edge shows its one directional action, followed by
+  all N**, **Down N**; the compact button labels omit the word "lines". A file
+  edge shows its one directional action, followed by
   a non-interactive interpunct and **Show all N** only when more than 20 lines
   remain. A hunk-context label is also an action: it reveals upward through the
   declaration it names.
@@ -175,9 +176,12 @@ and `web/src/DiffViewer.tsx`):
   scrolls. A per-file override immediately re-highlights both sides. Jsonnet
   uses Hydra's bundled Jsonnet grammar.
   Machine-owned lockfiles and conventional generated paths carry an
-  **Auto-generated** label and start folded once per page session. Marking a file
-  **Viewed** also folds it immediately; unmarking it leaves the reader's current
-  fold state alone.
+  **Auto-generated** label and start folded once per page session. Hovering the
+  label names the glob or first-line generated marker that matched. Settings ->
+  Browser -> Auto-generated files edits the browser-local, case-insensitive glob
+  list; each rule states whether it matches a filename or a complete repository
+  path. Marking a file **Viewed** also folds it immediately; unmarking it leaves
+  the reader's current fold state alone.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
   (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to

@@ -25,6 +25,7 @@ import { DEFAULT_BASH_INDENT } from './bashFormat'
 import { useWhitespaceStore } from './whitespacePrefs'
 import { useDefaultRowsStore } from './terminalGeometry'
 import { useNotifyStore } from './notifyPrefs'
+import { DEFAULT_GENERATED_FILE_GLOBS, useGeneratedFileRulesStore } from './generatedFile'
 import { useSyncExternalStore } from 'react'
 
 // Every store the list above reads, so a subscriber can be told about any of
@@ -46,6 +47,7 @@ const PREF_STORES = [
   useWhitespaceStore,
   useDefaultRowsStore,
   useNotifyStore,
+  useGeneratedFileRulesStore,
 ]
 
 // Which control a pref belongs to. The Fonts section has its own reset - eight
@@ -82,6 +84,7 @@ export function browserPrefs(): Pref[] {
   const ws = useWhitespaceStore.getState()
   const rows = useDefaultRowsStore.getState()
   const notify = useNotifyStore.getState()
+  const generated = useGeneratedFileRulesStore.getState()
   return [
     simple('theme', () => theme.mode, theme.setMode, 'system'),
     // Family and size are separate controls per role, so they are separate
@@ -113,6 +116,12 @@ export function browserPrefs(): Pref[] {
     simple('chat height', () => height.height, height.setHeight, null),
     simple('whitespace marks', () => ws.marks, ws.setMarks, 'off'),
     simple('terminal height', () => rows.rows, rows.setRows, null),
+    {
+      label: 'auto-generated file rules',
+      isDefault: () => generated.rules.length === DEFAULT_GENERATED_FILE_GLOBS.length
+        && generated.rules.every((rule, index) => rule === DEFAULT_GENERATED_FILE_GLOBS[index]),
+      reset: () => generated.setRules([...DEFAULT_GENERATED_FILE_GLOBS]),
+    },
     // Off is the default, and turning it off never prompts - only turning it ON
     // needs the OS permission, so a reset can't get stuck behind a dialog.
     simple('desktop notifications', () => notify.enabled, () => void notify.setEnabled(false), false),
