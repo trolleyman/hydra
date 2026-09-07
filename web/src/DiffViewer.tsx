@@ -2365,10 +2365,12 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
             </button>
             {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-            <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
               {/* Keep the filename visible by progressively eliding middle path
-                components with the shared fitted-path treatment. */}
-              <span className="flex min-w-0 flex-[0_1_auto] items-center text-xs cursor-pointer hover:underline">
+                components with the shared fitted-path treatment. Both wrappers
+                own the available width: sizing them from the already-elided text
+                makes the label lock itself at that shorter width after a resize. */}
+              <span className="flex min-w-0 flex-1 items-center text-xs cursor-pointer hover:underline">
                 {file.change_type === 'renamed' && file.old_path ? (
                   <>
                     <FittedPathLabel path={file.old_path} lowlightDirectory />

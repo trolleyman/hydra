@@ -189,6 +189,10 @@ and `web/src/DiffViewer.tsx`):
   list; each rule states whether it matches a filename or a complete repository
   path. Marking a file **Viewed** also folds it immediately; unmarking it leaves
   the reader's current fold state alone.
+  The file path owns the space left after the header controls and renders in
+  full whenever it fits. Its middle-elision treatment is only for genuine width
+  pressure; expanding a pane refits the full path instead of leaving it stuck at
+  an earlier shortened value.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
   (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to
