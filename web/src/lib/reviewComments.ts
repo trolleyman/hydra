@@ -46,6 +46,8 @@ export interface PendingReviewComment {
   hunkHash: string
   /** "user" | "reviewer" | "agent" - shown on a published comment that isn't yours. */
   author: string
+  /** Provider identity used for an agent author's name and brand mark. */
+  agentType?: string
   published: boolean
   /** Dealt with. A published comment that is resolved drops out of the open list. */
   resolved: boolean
@@ -97,6 +99,7 @@ function toPending(c: ReviewComment): PendingReviewComment {
     contextBlock: c.context ?? '',
     hunkHash: c.hunk_hash ?? '',
     author: c.author,
+    agentType: c.agent_type,
     published: c.status === 'published',
     resolved: !!c.resolved,
     read: !!c.read,

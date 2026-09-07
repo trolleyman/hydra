@@ -1440,7 +1440,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 				{Id: "703", Number: ptr(5), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
 				// Unread: an agent's reply is news, and this is what the unread dot and
 				// the next-unread jump are for.
-				{Id: "local-1", Number: ptr(6), Read: ptr(false), Author: ptr("agent"), Body: "Narrowed it to a `HeadStore` interface in 4f21ac9 - spawn now takes just `CreateAgent`/`GetAgent`.", Origin: api.LocalOnly, CreatedAt: ptr("2026-07-28T09:41:00Z")},
+				{Id: "local-1", Number: ptr(6), Read: ptr(false), Author: ptr("agent"), AgentType: ptr("claude"), Body: "Narrowed it to a `HeadStore` interface in 4f21ac9 - spawn now takes just `CreateAgent`/`GetAgent`.", Origin: api.LocalOnly, CreatedAt: ptr("2026-07-28T09:41:00Z")},
 			},
 		},
 		{
@@ -1603,14 +1603,14 @@ func simSeedComments(id string) []api.ReviewComment {
 		// simulation - it is otherwise invisible, and invisible is the exact bug
 		// it exists to fix.
 		{
-			Number: 9, Status: api.Published, Author: "reviewer",
+			Number: 9, Status: api.Published, Author: "reviewer", AgentType: ptr("claude"),
 			Body:      "This reads under the lock but `Set` above takes it again on the same goroutine in one caller - not in this diff, but it deadlocks with the change you made to the schema loader.",
 			Path:      ptr("internal/store/store.go"),
 			Line:      ptr(16),
 			CreatedAt: "2026-07-28T11:14:00Z", PublishedAt: ptr("2026-07-28T11:14:00Z"),
 		},
 		{
-			Number: 10, Status: api.Published, Author: "reviewer",
+			Number: 10, Status: api.Published, Author: "reviewer", AgentType: ptr("claude"),
 			Body:      "Overall this reads well. The schema split is the right call; my only real worry is the migration ordering.",
 			CreatedAt: "2026-07-28T11:16:00Z", PublishedAt: ptr("2026-07-28T11:16:00Z"),
 		},

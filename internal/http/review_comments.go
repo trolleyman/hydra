@@ -35,7 +35,7 @@ func (s *Server) GetReviewComments(ctx context.Context, request api.GetReviewCom
 	if errResp != nil {
 		return api.GetReviewComments404JSONResponse(*errResp), nil
 	}
-	return api.GetReviewComments200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+	return api.GetReviewComments200JSONResponse(commentsResponse(projectRoot, *head, nil)), nil
 }
 
 // AddReviewComment stores a comment - a draft by default, published straight away
@@ -85,14 +85,14 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 	if err != nil {
 		return commentBadRequest(fmt.Sprintf("the comment could not be saved: %v", err)), nil
 	}
-	resp := commentsResponse(projectRoot, head.ID, nil)
+	resp := commentsResponse(projectRoot, *head, nil)
 	if derefOr(request.Body.Publish, false) {
 		published, err := reviewstore.PublishDrafts(projectRoot, head.ID, []int{stored.Number})
 		if err != nil {
 			return commentBadRequest(fmt.Sprintf("the comment was saved but could not be published: %v", err)), nil
 		}
 		notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
-		resp = commentsResponse(projectRoot, head.ID, notified)
+		resp = commentsResponse(projectRoot, *head, notified)
 		resp.NotifiedReviewer = ptr(toReviewer)
 	}
 	s.notifyAgentsChanged(projectRoot, false)
@@ -119,7 +119,7 @@ func (s *Server) UpdateReviewComment(ctx context.Context, request api.UpdateRevi
 	if _, err := reviewstore.UpdateDraft(projectRoot, head.ID, request.Number, body, attachments); err != nil {
 		return updateCommentBadRequest(commentWriteError(err)), nil
 	}
-	return api.UpdateReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+	return api.UpdateReviewComment200JSONResponse(commentsResponse(projectRoot, *head, nil)), nil
 }
 
 // DeleteReviewComment discards a draft. Its number stays retired.
@@ -131,7 +131,7 @@ func (s *Server) DeleteReviewComment(ctx context.Context, request api.DeleteRevi
 	if err := reviewstore.DeleteDraft(projectRoot, head.ID, request.Number); err != nil {
 		return deleteCommentBadRequest(commentWriteError(err)), nil
 	}
-	return api.DeleteReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+	return api.DeleteReviewComment200JSONResponse(commentsResponse(projectRoot, *head, nil)), nil
 }
 
 // PublishReviewComments publishes drafts and notifies the head's agent by id.
@@ -153,7 +153,7 @@ func (s *Server) PublishReviewComments(ctx context.Context, request api.PublishR
 	}
 	notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
 	s.notifyAgentsChanged(projectRoot, false)
-	resp := commentsResponse(projectRoot, head.ID, notified)
+	resp := commentsResponse(projectRoot, *head, notified)
 	resp.NotifiedReviewer = ptr(toReviewer)
 	return api.PublishReviewComments200JSONResponse(resp), nil
 }
@@ -286,7 +286,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	resolved := request.Body.Resolved
 	if _, err := reviewstore.SetResolved(projectRoot, head.ID, request.Number, resolved); err == nil {
 		s.notifyAgentsChanged(projectRoot, false)
-		return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+		return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, *head, nil)), nil
 	} else if !errors.Is(err, reviewstore.ErrNoComment) {
 		return resolveCommentBadRequest(err.Error()), nil
 	}
@@ -301,7 +301,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 		return resolveCommentBadRequest(err.Error()), nil
 	}
 	s.notifyAgentsChanged(projectRoot, false)
-	return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+	return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, *head, nil)), nil
 }
 
 // MarkReviewCommentsRead records what the user has seen.
@@ -327,7 +327,7 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 		log.Printf("warn: review comments: mark read for %s: %v", head.ID, err)
 	}
 	s.notifyAgentsChanged(projectRoot, false)
-	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, *head, nil)), nil
 }
 
 // Resolving does NOT notify the head, deliberately, and it used to.
@@ -346,9 +346,9 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 // written, and reviewstore.OpenComments filters resolved ones out - so the next
 // time the agent reads its comments, for any reason, #3 is simply not there.
 
-func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCommentsResponse {
-	stored := reviewstore.LoadComments(projectRoot, headID)
-	read := reviewstore.ReadSet(projectRoot, headID)
+func commentsResponse(projectRoot string, head heads.Head, notified *string) api.ReviewCommentsResponse {
+	stored := reviewstore.LoadComments(projectRoot, head.ID)
+	read := reviewstore.ReadSet(projectRoot, head.ID)
 	out := api.ReviewCommentsResponse{
 		Comments: make([]api.ReviewComment, 0, len(stored)),
 		Notified: notified,
@@ -366,6 +366,9 @@ func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCo
 			Author:    c.Author,
 			Body:      c.Body,
 			CreatedAt: c.CreatedAt,
+		}
+		if agentType := reviewAuthorAgentType(head, c.Author); agentType != "" {
+			ac.AgentType = &agentType
 		}
 		setIf(&ac.ReplyTo, c.ReplyTo, c.ReplyTo > 0)
 		setIf(&ac.Path, c.Path, c.Path != "")

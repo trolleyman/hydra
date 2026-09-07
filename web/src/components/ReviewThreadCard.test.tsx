@@ -31,6 +31,16 @@ function thread(applied: boolean): ReviewThread {
 }
 
 describe('ReviewThreadCard suggestions', () => {
+  it('names a local agent note by its provider and uses the matching mark', () => {
+    const local = thread(false)
+    local.notes[0] = { ...local.notes[0], author: 'agent', agent_type: 'codex', origin: 'local_only' }
+    render(<ReviewThreadCard thread={local} actions={actions()} />)
+
+    expect(screen.getByText('Codex')).toBeInTheDocument()
+    expect(screen.queryByText('agent')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Codex').querySelector('path')).toHaveAttribute('fill-rule', 'evenodd')
+  })
+
   it('applies one suggestion by its comment number', async () => {
     const apply = vi.fn(async () => {})
     render(<ReviewThreadCard thread={thread(false)} actions={actions(apply)} />)

@@ -5,8 +5,10 @@ import (
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/forge"
+	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/reviewq"
 	"github.com/trolleyman/hydra/internal/reviewstore"
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
 func TestMergeLocalNotes(t *testing.T) {
@@ -27,7 +29,8 @@ func TestMergeLocalNotes(t *testing.T) {
 
 	root := t.TempDir()
 	srv := &Server{}
-	got := srv.mergeLocalNotes(root, "h1", threads, notes)
+	head := heads.Head{ID: "h1", AgentType: sandbox.AgentTypeCodex}
+	got := srv.mergeLocalNotes(root, head, threads, notes)
 	if len(got) != 2 {
 		t.Fatalf("got %d threads, want 2", len(got))
 	}
@@ -42,6 +45,11 @@ func TestMergeLocalNotes(t *testing.T) {
 	}
 	if first.Notes[1].Body != "first" || first.Notes[2].Body != "second" {
 		t.Errorf("local notes out of order: %+v", first.Notes)
+	}
+	for _, note := range first.Notes[1:] {
+		if note.AgentType == nil || *note.AgentType != "codex" {
+			t.Errorf("local Codex note has agent type %v, want codex", note.AgentType)
+		}
 	}
 	// A note whose thread has vanished is dropped, not shown as its own thread.
 	for _, th := range got {
@@ -70,7 +78,7 @@ func TestMergeLocalNotes(t *testing.T) {
 			seen[*n.Number] = true
 		}
 	}
-	again := srv.mergeLocalNotes(root, "h1", threads, notes)
+	again := srv.mergeLocalNotes(root, head, threads, notes)
 	if *again[0].Notes[0].Number != *got[0].Notes[0].Number {
 		t.Error("re-rendering renumbered the notes; the sequence would run away")
 	}
@@ -80,12 +88,31 @@ func TestMergeLocalNotes(t *testing.T) {
 	if err := reviewstore.SetThreadResolved(root, "h1", "t1", true, "2026-07-29T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	marked := srv.mergeLocalNotes(root, "h1", threads, notes)
+	marked := srv.mergeLocalNotes(root, head, threads, notes)
 	if !*marked[0].Resolved || !*marked[0].ResolvedLocally {
 		t.Errorf("local resolve mark not applied: %+v", marked[0])
 	}
 	if marked[1].ResolvedLocally != nil && *marked[1].ResolvedLocally {
 		t.Error("a forge-resolved thread was reported as locally resolved")
+	}
+}
+
+func TestCommentsResponseIdentifiesAgentProvider(t *testing.T) {
+	root := t.TempDir()
+	for _, author := range []string{reviewstore.AuthorAgent, reviewstore.AuthorReviewer, reviewstore.AuthorUser} {
+		if _, err := reviewstore.AppendComment(root, "h1", reviewstore.Comment{Author: author, Body: author}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp := commentsResponse(root, heads.Head{ID: "h1", AgentType: sandbox.AgentTypeCodex}, nil)
+	if got := resp.Comments[0].AgentType; got == nil || *got != "codex" {
+		t.Errorf("head comment agent type = %v, want codex", got)
+	}
+	if got := resp.Comments[1].AgentType; got == nil || *got != "codex" {
+		t.Errorf("reviewer comment agent type = %v, want codex", got)
+	}
+	if got := resp.Comments[2].AgentType; got != nil {
+		t.Errorf("user comment agent type = %v, want absent", got)
 	}
 }
 

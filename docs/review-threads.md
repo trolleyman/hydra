@@ -97,6 +97,11 @@ review refresh (an op discriminator on the request), so no new sandbox surface
 was needed. `get_review_comments` now includes each thread's id, which is what
 the agent passes back to the tool.
 
+Local agent notes keep `agent` / `reviewer` as their stored role, but the review
+API also returns the provider identity. The card therefore names the author
+Claude, Codex, and so on and uses that provider's brand mark; it never presents a
+generic `agent` label or assumes every reply came from Claude.
+
 ## Data flow
 
 ```

@@ -40,8 +40,8 @@ func TestReviewAgentTypeFollowsChatCapableHeadProvider(t *testing.T) {
 		{sandbox.AgentTypeBash, sandbox.AgentTypeClaude},
 	}
 	for _, tt := range tests {
-		if got := reviewAgentType(Head{AgentType: tt.head}); got != tt.want {
-			t.Errorf("reviewAgentType(%q) = %q, want %q", tt.head, got, tt.want)
+		if got := ReviewAgentType(Head{AgentType: tt.head}); got != tt.want {
+			t.Errorf("ReviewAgentType(%q) = %q, want %q", tt.head, got, tt.want)
 		}
 	}
 }

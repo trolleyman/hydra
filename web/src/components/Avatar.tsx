@@ -11,8 +11,8 @@ import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 //
 //   1. An AGENT gets its own brand mark - the same logomark the sidebar and the
 //      spawn form use, in the same accent colour, just larger and on a tinted
-//      tile. Nothing to fetch, it is already in the bundle, and it makes "an
-//      agent said this" readable at a glance rather than a name you have to read.
+//      tile. Nothing to fetch, it is already in the bundle, and the provider name
+//      and mark make the author readable at a glance.
 //   2. A FORGE user gets the picture the forge already hosts (GitHub/GitLab both
 //      return one with the comment). The browser loads it directly; if that fails
 //      - offline, a private instance, an avatar that moved - it falls back to (3)
@@ -93,8 +93,8 @@ export function Avatar({
   avatarUrl?: string | null
   /**
    * Render the agent's brand mark instead of a person. Any agent type name works;
-   * an unknown one (or a plain "agent") falls back to Claude's mark, since that is
-   * what a reviewer slot always is.
+   * an unknown one falls back to Claude's mark, since that is what a reviewer
+   * slot uses for providers without structured review support.
    */
   agentType?: string | null
   size?: AvatarSize

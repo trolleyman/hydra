@@ -18,6 +18,10 @@ export type ReviewThreadNote = {
      */
     avatar_url?: string;
     author?: string;
+    /**
+     * Provider identity for a local agent or reviewer author, e.g. "claude" or "codex". Absent for forge users and the local user.
+     */
+    agent_type?: string;
     body: string;
     url?: string;
     created_at?: string;

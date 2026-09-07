@@ -225,7 +225,7 @@ func (s *Server) reviewThreadsResponse(ctx context.Context, projectRoot string, 
 			resp.FetchedAt = ptr(fetchedAt)
 		}
 	}
-	resp.Threads = s.mergeLocalNotes(projectRoot, head.ID, threads, reviewstore.LoadNotes(projectRoot, head.ID))
+	resp.Threads = s.mergeLocalNotes(projectRoot, head, threads, reviewstore.LoadNotes(projectRoot, head.ID))
 	return resp
 }
 
@@ -233,7 +233,8 @@ func (s *Server) reviewThreadsResponse(ctx context.Context, projectRoot string, 
 // notes appended in time order. Notes whose thread has vanished from the forge
 // are dropped rather than orphaned into a thread of their own - they are replies
 // to something that no longer exists.
-func (s *Server) mergeLocalNotes(projectRoot, headID string, threads []forge.Thread, notes []reviewstore.LocalNote) []api.ReviewThread {
+func (s *Server) mergeLocalNotes(projectRoot string, head heads.Head, threads []forge.Thread, notes []reviewstore.LocalNote) []api.ReviewThread {
+	headID := head.ID
 	read := reviewstore.ReadSet(projectRoot, headID)
 	byThread := map[string][]reviewstore.LocalNote{}
 	for _, n := range notes {
@@ -293,6 +294,9 @@ func (s *Server) mergeLocalNotes(projectRoot, headID string, threads []forge.Thr
 			if n.Author != "" {
 				an.Author = ptr(n.Author)
 			}
+			if agentType := reviewAuthorAgentType(head, n.Author); agentType != "" {
+				an.AgentType = &agentType
+			}
 			if n.CreatedAt != "" {
 				an.CreatedAt = ptr(n.CreatedAt)
 			}
@@ -301,6 +305,20 @@ func (s *Server) mergeLocalNotes(projectRoot, headID string, threads []forge.Thr
 		out = append(out, at)
 	}
 	return out
+}
+
+// reviewAuthorAgentType turns a stored author ROLE into the provider identity the
+// UI should show. Roles stay generic on disk because they drive permissions and
+// read state; people see Claude, Codex, and so on rather than "agent".
+func reviewAuthorAgentType(head heads.Head, author string) string {
+	switch author {
+	case reviewstore.AuthorAgent:
+		return string(head.AgentType)
+	case reviewstore.AuthorReviewer:
+		return string(heads.ReviewAgentType(head))
+	default:
+		return ""
+	}
 }
 
 // cacheThreads stores a head's threads from a background poll, so the diff

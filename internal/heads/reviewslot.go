@@ -50,10 +50,10 @@ const ReviewSlot = "review"
 // "<head>@review". See SlotSep for why the separator matters.
 func ReviewSessionID(headID string) string { return SlotSessionID(headID, ReviewSlot) }
 
-// reviewAgentType follows the provider of the head being reviewed whenever that
+// ReviewAgentType follows the provider of the head being reviewed whenever that
 // provider supports Hydra's structured chat mode. Review predates chat support
 // outside Claude, so non-chat providers retain the existing Claude fallback.
-func reviewAgentType(head Head) sandbox.AgentType {
+func ReviewAgentType(head Head) sandbox.AgentType {
 	if head.AgentType == sandbox.AgentTypeCodex {
 		return sandbox.AgentTypeCodex
 	}
@@ -238,7 +238,7 @@ func KillReviewSession(reg *session.Registry, projectRoot, headID string) {
 // produces one.
 func StartReviewSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16) (string, error) {
 	id := ReviewSessionID(head.ID)
-	agentType := reviewAgentType(head)
+	agentType := ReviewAgentType(head)
 	if reg.IsLive(id) {
 		return id, nil
 	}
