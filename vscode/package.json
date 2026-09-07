@@ -32,11 +32,13 @@
   },
   "dependencies": {
     "dompurify": "^3.4.15",
+    "lucide-react": "^1.26.0",
     "marked": "^18.0.11",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -45,6 +47,7 @@
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.0",
     "openapi-typescript": "^7.13.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.0"
   },
   "contributes": {
@@ -128,17 +131,35 @@
               "provider": "codex",
               "prompt": "Analyze the request, inspect the workspace, and produce a concrete implementation plan. Do not modify files or Git state.",
               "filesystem": {
-                "readable": ["."],
+                "readable": [
+                  "."
+                ],
                 "writable": [],
-                "masked": [".env*"]
+                "masked": [
+                  ".env*"
+                ]
               },
-              "network": { "mode": "hard", "allowed_hosts": [], "blocked_hosts": [] },
+              "network": {
+                "mode": "hard",
+                "allowed_hosts": [],
+                "blocked_hosts": []
+              },
               "tools": {
-                "core": { "read": "allow", "search": "allow", "edit": "deny", "bash": "allow", "fetch": "allow" }
+                "core": {
+                  "read": "allow",
+                  "search": "allow",
+                  "edit": "deny",
+                  "bash": "allow",
+                  "fetch": "allow"
+                }
               },
               "git": {
                 "isolation": "readonly",
-                "protected_branches": ["main", "master", "release/*"],
+                "protected_branches": [
+                  "main",
+                  "master",
+                  "release/*"
+                ],
                 "operations": {}
               }
             },

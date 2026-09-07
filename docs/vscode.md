@@ -410,9 +410,24 @@ Provider deltas are batched from the extension host to the Webview at most once
 per animation frame rather than one message per token. The Go event store remains
 authoritative, so hiding or recreating the Webview cannot stop or lose a stream.
 
-The first implementation follows VS Code theme tokens and accessibility APIs.
-It does not copy Hydra's entire Tailwind/component system. Markdown parsing and
-sanitization are shared conceptually, with Webview-safe link and command routing.
+The Webview uses React components and a package-local Tailwind build. Its visual
+language follows Hydra's browser chat where that fits a narrow editor surface:
+restrained user bubbles, unboxed assistant prose, compact expandable activity
+cards, a bordered composer, and layered settings cards. Colours remain mapped to
+VS Code theme tokens, so the view belongs in the active editor theme instead of
+shipping a second light/dark palette.
+
+The extension owns its small `components/` tree rather than importing the web
+application's `AgentChat` component. That component also owns Hydra routes,
+stores, project/head state, responsive app shell, and server API bindings. The
+separate implementation preserves the lightweight product boundary. Portable
+headless behavior such as the normalized item model can move into a shared
+package later if both clients need to evolve it together.
+
+Markdown parsing and sanitization are shared conceptually, with Webview-safe
+link routing. Small reusable Webview primitives centralize buttons, fields, page
+headings, and theme treatments; chat, history, and profiles are separate React
+components rather than one sidebar-sized component.
 
 Question tools use one provider-neutral card. Claude's `AskUserQuestion` control
 request and Codex's `item/tool/requestUserInput` request normalize into the same
@@ -494,10 +509,11 @@ consumes that lock directly, so development and release jobs use the exact same
 dependency graph without an Aube-specific lockfile.
 
 The package generates one TypeScript type graph from `api/agent-host.yaml` with
-`openapi-typescript`, typechecks both extension and Webview code, and bundles
-them independently with esbuild. The initial contributed Activity Bar container,
-sidebar Webview, commands, registered `hydra.*` settings, profile resolution,
-native-host controller, and React shell are in `vscode/`.
+`openapi-typescript`, typechecks both extension and Webview code, bundles the two
+JavaScript entry points independently with esbuild, and compiles the Webview's
+Tailwind stylesheet with the local Tailwind CLI. The contributed Activity Bar
+container, sidebar Webview, commands, registered `hydra.*` settings, profile
+resolution, native-host controller, and React shell are in `vscode/`.
 
 The initial support matrix is:
 

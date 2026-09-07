@@ -9,8 +9,9 @@ Install dependencies with `aube install`. Aube consumes the committed
 Node entry points directly, so they do not depend on package-manager-specific
 `.bin` links.
 
-Use `aube run check` for generated types, TypeScript, and both bundles. Build the
-native helper for the current platform with `aube run build:host`. Create a
+Use `aube run check` for generated types, TypeScript, the React Webview's local
+Tailwind stylesheet, and both JavaScript bundles. Build the native helper for
+the current platform with `aube run build:host`. Create a
 platform-specific VSIX with `aube run package -- --target linux-x64` (also
 `linux-arm64`, `darwin-x64`, `darwin-arm64`, `win32-x64`, and `win32-arm64`).
 The VSIX contains a helper only for its declared target; Claude Code and Codex
