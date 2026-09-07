@@ -590,6 +590,43 @@ describe('running turn elapsed time', () => {
     dateNow.mockRestore()
   })
 
+  it('names context compaction in the live activity row until the summary arrives', async () => {
+    const agentId = `agent-${++agentSeq}`
+    useAgentStore.setState({
+      agents: [{ id: agentId, agent_status: { status: AgentStatus.RUNNING } } as AgentResponse],
+    })
+    renderChat(agentId)
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+
+    act(() => ws.emit({
+      type: 'chat_event',
+      event: {
+        seq: 1,
+        type: 'tool_started',
+        timestamp: '',
+        payload: { id: 'toolu_compact', name: 'ContextCompaction', input: {} },
+      },
+    }))
+    expect(await screen.findByText('Compacting...')).toBeInTheDocument()
+
+    act(() => ws.emit({
+      type: 'chat_event',
+      event: {
+        seq: 2,
+        type: 'user_message',
+        timestamp: '',
+        payload: {
+          id: 'compaction-summary',
+          content: 'This session is being continued from a previous conversation that ran out of context. Summary: work continues.',
+        },
+      },
+    }))
+    await screen.findByText('Continued from a previous conversation (ran out of context)')
+    expect(screen.queryByText('Compacting...')).not.toBeInTheDocument()
+  })
+
   it('shows a completed turn cost from projected API-key auth', async () => {
     renderChat()
     await connectedComposer()

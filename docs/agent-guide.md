@@ -86,6 +86,11 @@ The chat composer sends with Enter by default. Its browser-local "Enter sends"
 setting gives Enter back to multiline editing; in that mode Cmd/Ctrl+Enter sends.
 Shift+Enter always adds a newline in either mode.
 
+The live turn activity row normally uses a stable, playful verb for the duration
+of a turn. An open `ContextCompaction` call overrides that verb with
+`Compacting...` until the carried-forward context summary arrives, so a long
+compaction is identifiable from the chat view itself.
+
 ## Conventions
 
 ### No compatibility layers by default

@@ -7031,6 +7031,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // an abnormal end (max_tokens truncation / refusal). Reset when a turn starts.
   const turnStopReasonRef = useRef<string | null>(null)
   const [turnVerb, setTurnVerb] = useState(WORKING_VERBS[0])
+  // ContextCompaction is a real, potentially long-lived phase rather than an
+  // ordinary tool step. While its call is open, replace the playful turn verb
+  // with a precise activity label so the chat itself explains the pause.
+  const contextCompactionToolRef = useRef<string | null>(null)
+  const [contextCompacting, setContextCompacting] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [turnTokens, setTurnTokens] = useState(0)
   // Whether the CLI is authed with a real API key (system:init apiKeySource).
@@ -7411,6 +7416,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setItems([])
     setChatError(null)
     setApiKeyReal(false)
+    contextCompactionToolRef.current = null
+    setContextCompacting(false)
     itemTsRef.current = new Map()
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
@@ -8042,6 +8049,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
 
     const patchTool = (toolUseId: string, result: string, isError: boolean, images: string[], raw?: unknown, editPatch?: EditHunk[] | null, cwdAfter?: string) => {
+      if (contextCompactionToolRef.current === toolUseId) {
+        contextCompactionToolRef.current = null
+        setContextCompacting(false)
+      }
       const resultImages = images.length > 0 ? images : undefined
       // The tool/question card may still be in the un-flushed batch or already
       // rendered.
@@ -8149,6 +8160,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // tool isn't actually still running (item 42). Also clears the un-flushed
     // batch so replayed history doesn't briefly strobe "running".
     const endPendingTools = () => {
+      contextCompactionToolRef.current = null
+      setContextCompacting(false)
       for (const it of pending) if (it.kind === 'tool' && it.result === undefined) it.ended = true
       setItems((prev) =>
         prev.some((it) => it.kind === 'tool' && it.result === undefined && !it.ended)
@@ -8378,6 +8391,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // real user turn, so it doesn't anchor the working-clock or dedup.
       const ctxNote = detectContextNote(text)
       if (ctxNote) {
+        // The carried-forward summary is proof that ContextCompaction finished.
+        // It has no ordinary tool_result, so settle the old session's open call
+        // here rather than leaving both its card and the activity row running.
+        endPendingTools()
         push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
         return
       }
@@ -8640,6 +8657,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               } else if (todos) {
                 plan.applyTodoWrite(todos)
               } else {
+                if (block.name === 'ContextCompaction') {
+                  contextCompactionToolRef.current = block.id
+                  setContextCompacting(true)
+                }
                 plan.applyTaskTool(block.name, block.input, block.id)
                 if (block.name === 'SendMessage') {
                   const to = sendMessageRecipient(block.input)
@@ -11319,7 +11340,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-2xs select-none whitespace-nowrap animate-chat-item-in">
               <WorkSpark />
-              <span className="chat-text-shimmer font-medium shrink-0 optical-center">{turnVerb}...</span>
+              <span className="chat-text-shimmer font-medium shrink-0 optical-center">{contextCompacting ? 'Compacting' : turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}
               <span className="min-w-0 truncate text-stone-400 dark:text-stone-500 tabular-nums optical-center">
