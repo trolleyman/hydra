@@ -35,7 +35,7 @@ pre_prompt = '''
   - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available.
   - A screenshot you intend to SHOW the user: take it with `deviceScaleFactor: 2` on the browser context and save it as `<name>@2x.png`. The chat lays an image out at its logical size (pixels / the @Nx in its name), so a 2x shot is the same size as a 1x one but stays sharp on a HiDPI display. Measure, don't eyeball: an image is only crisp if its rendered content box is exactly natural px / density (getComputedStyle width vs naturalWidth) - a fractional ratio means it is being resampled.
   - For light + dark app captures, create a fresh context per theme and call `seedScreenshotTheme` from `web/scripts/lib/screenshotReady.ts` before navigation, then `settleScreenshot(page)` immediately before capture. Never toggle the `dark` class and immediately screenshot a live page: `transition-colors` can produce a mixed, half-transition frame.
-  - Show the user a relevant light + dark capture in chat for every visually reviewable UI change. Use the real simulation app when behavior, surrounding layout or state matters. For an isolated styling treatment, use `cd web && node scripts/capture-theme-snippet.ts --html <throwaway-file> --output /tmp/<name>` after the production build, then delete the throwaway HTML; see `docs/screenshots.md`.'''
+  - Show the user a relevant light + dark capture in chat for every visually reviewable UI change. Use the real simulation app when behavior, surrounding layout or state matters. For an isolated styling treatment, use `cd web && node scripts/capture-theme-snippet.ts --html <throwaway-file> --output /tmp/<name>` after the production build, then delete the throwaway HTML; see `docs/screenshots.md`. Add it as a table - two columns - light left, dark right, row for each screenshot you want to show.'''
 
 ## custom project icon shown in the web UI's project switcher and dropdown: an emoji, a lucide-react icon name (e.g. "Rocket"), or an image path/URL ending in .png/.svg/.ico/.jpg. Empty = the default folder icon.
 icon = "web/public/icon.png"
@@ -66,8 +66,7 @@ test_prefetch = false
 ## via masked_paths, so nothing here holds credentials. Prefer sandbox.cache for a
 ## disposable cache instead of making the user's host cache writable.
 ## Built-in defaults, always writable (agent state only; shared caches and toolchains are read-only):
-##     ~/.local/share/hydra/logs, plus only the selected provider's state
-##     (~/.claude + ~/.claude.json, ~/.gemini, ~/.copilot, or ~/.codex)
+##     ~/.local/share/hydra/logs
 ## Common per-project additions (NOT writable by default - add the ones you use
 ## here, or to cow_paths for per-head copy-on-write isolation):
 ##     ~/.cargo - Rust registry + toolchain cache
@@ -76,12 +75,9 @@ test_prefetch = false
 ##     ~/.local/share/kotlin - Kotlin compiler cache
 ##     ~/.local/share/JetBrains - JetBrains toolbox
 ##     ~/.local/state - XDG state (some tools persist logs/history here)
-# writable_paths = []
+# writable_paths = ["~/.local/share/hydra/logs"]
 
-## extra host paths exposed read-only in the sandbox, unioned on top of the
-## built-in developer/tool allow-list and across config layers. A path can be ~
-## (HOME), absolute, or a $VAR. Known credential paths remain masked even when
-## they sit below an allowed parent.
+## extra host paths exposed read-only in the sandbox, unioned on top of the built-in developer/tool allow-list and across config layers. A path can be ~ (HOME), absolute, or a $VAR. Known credential paths remain masked even when they sit below an allowed parent.
 ## Built-in readable paths (writable paths are also readable):
 ##     ~/.cache, ~/.gitconfig, ~/.gitignore_global, ~/.cargo, ~/.rustup
 ##     ~/.gradle, ~/.m2/repository, ~/.nuget/packages, ~/.npm, ~/.nvm
@@ -91,12 +87,14 @@ test_prefetch = false
 ##     ~/Library/Android/sdk, ~/Library/pnpm, ~/.config/git, ~/.config/mise/config.toml
 # readable_paths = ["~/.cache", "~/.gitconfig", "~/.gitignore_global", "~/.cargo", "~/.rustup", "~/.gradle", "~/.m2/repository", "~/.nuget/packages", "~/.npm", "~/.nvm", "~/.bun", "~/.deno", "~/.pyenv", "~/.rbenv", "~/.sdkman", "~/.jdks", "~/.local/bin", "~/.local/share/aube", "~/.local/share/claude", "~/.local/share/codex", "~/.local/share/kotlin", "~/.local/share/mise", "~/.local/share/pnpm", "~/.local/share/JetBrains", "~/Android/Sdk", "~/Library/Android/sdk", "~/Library/pnpm", "~/.config/git", "~/.config/mise/config.toml"]
 
-## extra paths hidden in the sandbox (added to the built-in fail-safe masks and
-## applied after all read/write allowances).
+## extra paths hidden in the sandbox (added to the built-in defense-in-depth defaults and applied after every read/write allowance).
 # masked_paths = ["~/.ssh", "~/.aws", "~/.azure", "~/.gnupg", "~/.docker", "~/.kube", "~/.password-store", "~/.config/gh", "~/.config/glab-cli", "~/.cargo/credentials", "~/.cargo/credentials.toml", "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc", "~/.zsh_history", "~/.bash_history", "~/.sh_history", "~/.config/mise/config.local.toml", "~/.dotfiles/mise/config.local.toml", "~/Library/Keychains", "~/Library/Mail", "~/Library/Messages", "/Volumes"]
 
 ## paths exposed copy-on-write (read source, writes kept per-head): worktree-relative paths are cloned/mirrored into the worktree. Linux can also overlay home/absolute paths like ~/.gradle in place; macOS cannot mount over those paths and rejects writable requests for them.
 # cow_paths = []
+
+## additional daemon environment variable names passed into heads (added across config layers). Heads otherwise receive only a fixed baseline plus authentication variables for their selected provider. Values are resolved at launch and never written to config or logs. Hydra-owned names, including every HYDRA_* variable, cannot be inherited.
+# inherit_env = []
 
 ## shell script run in the sandbox before every agent launch - spawn and resume, so it must be idempotent (e.g. mise trust). To set environment variables for the agent, append `KEY=value` lines to the file at $HYDRA_ENV (e.g. `echo "GRADLE_USER_HOME=/tmp/gradle-iso" >> "$HYDRA_ENV"`); each is exported into the agent and every command it runs, overriding any inherited value (the GitHub Actions $GITHUB_ENV model). Those same vars are also injected into the head's sandboxed bash shells (the terminal '+' tabs) so a shell shares the agent's environment - the script is not re-run there; the non-sandboxed 'Regular shell' is left out. It also gets the HYDRA_* head-context vars (HYDRA_HEAD_ID, HYDRA_WORKTREE, ...).
 # pre_spawn_script = ""
