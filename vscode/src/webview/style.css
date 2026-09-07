@@ -31,72 +31,74 @@
   --hydra-accent-soft: color-mix(in srgb, var(--vscode-textLink-foreground) 13%, transparent);
 }
 
-* {
-  box-sizing: border-box;
-}
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
 
-body {
-  overflow: hidden;
-}
+  body {
+    overflow: hidden;
+  }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
-  color: inherit;
-}
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
 
-button {
-  border: 0;
-  cursor: pointer;
-}
+  button {
+    border: 0;
+    cursor: pointer;
+  }
 
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-summary:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 1px;
-}
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  summary:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 1px;
+  }
 
-input:not([type='checkbox'], [type='radio']),
-select,
-textarea {
-  width: 100%;
-  border: 1px solid var(--vscode-input-border, var(--hydra-border));
-  border-radius: 5px;
-  padding: 5px 7px;
-  color: var(--vscode-input-foreground, var(--vscode-foreground));
-  background: var(--vscode-input-background);
-  outline: none;
-}
+  input:not([type='checkbox'], [type='radio']),
+  select,
+  textarea {
+    width: 100%;
+    border: 1px solid var(--vscode-input-border, var(--hydra-border));
+    border-radius: 5px;
+    padding: 5px 7px;
+    color: var(--vscode-input-foreground, var(--vscode-foreground));
+    background: var(--vscode-input-background);
+    outline: none;
+  }
 
-input:not([type='checkbox'], [type='radio']):focus,
-select:focus,
-textarea:focus {
-  border-color: var(--vscode-focusBorder);
-}
+  input:not([type='checkbox'], [type='radio']):focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--vscode-focusBorder);
+  }
 
-input::placeholder,
-textarea::placeholder {
-  color: var(--vscode-input-placeholderForeground);
-}
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+  }
 
-select {
-  min-height: 28px;
-}
+  select {
+    min-height: 28px;
+  }
 
-details > summary::-webkit-details-marker {
-  display: none;
+  details > summary::-webkit-details-marker {
+    display: none;
+  }
 }
 
 .activity-card,
