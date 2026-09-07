@@ -23,8 +23,8 @@ The initial extension includes:
 - inline profile prompts;
 - filesystem, tool, MCP, network, and Git policy;
 - one-shot, chat, workspace, and user/profile approval scopes;
-- a Markdown composer;
-- collapsed tool/reasoning steps with expandable details;
+- a Markdown composer with model selection, queued/immediate sends, and files;
+- browser-compatible thought disclosures and grouped, expandable tool steps;
 - inline expandable sub-agent activity;
 - read-only Git metadata plus guarded Git mutation tools; and
 - a profile editor and historical-chat list in the sidebar.
@@ -417,12 +417,27 @@ cards, a bordered composer, and layered settings cards. Colours remain mapped to
 VS Code theme tokens, so the view belongs in the active editor theme instead of
 shipping a second light/dark palette.
 
-The extension owns its small `components/` tree rather than importing the web
-application's `AgentChat` component. That component also owns Hydra routes,
-stores, project/head state, responsive app shell, and server API bindings. The
-separate implementation preserves the lightweight product boundary. Portable
-headless behavior such as the normalized item model can move into a shared
-package later if both clients need to evolve it together.
+The extension owns a small set of browser-compatible chat primitives rather
+than importing the web application's complete `AgentChat` component. That
+component also owns Hydra routes, stores, project/head state, responsive app
+shell, and server API bindings. Thought disclosures, working indicators, step
+groups, tool rows, question cards, commit and attachment chips, and composer
+controls intentionally use the same interaction contracts so they can move to
+a shared presentation package without pulling the full browser shell into the
+extension.
+
+The composer queues Enter submissions while a turn is running and exposes a
+separate immediate-send action for steering the active turn. Queued messages
+remain visible beneath the live response and are sent in order at normalized
+turn boundaries. The model picker uses the selected profile's provider models.
+The attachment picker stores readable file paths in the provider-neutral user
+message and renders them as chips; provider access to a selected path still
+passes through the active profile's filesystem sandbox.
+
+The Webview bundles the same Inter, Merriweather, and Fira Code typefaces as the
+browser chat for interface, prose, and code respectively. The
+`hydra.appearance.*FontFamily` and `hydra.appearance.*FontSize` settings can
+override all three roles without changing profile data.
 
 Markdown parsing and sanitization are shared conceptually, with Webview-safe
 link routing. Small reusable Webview primitives centralize buttons, fields, page
@@ -444,11 +459,20 @@ the next VS Code configuration layer, including the bundled Plan/Edit defaults.
 Advisory and unrestricted network profiles display a persistent warning in the
 chat rather than relying on a transient notification.
 
+Profile sections keep policy explanations behind compact information controls.
+The Core tools explanation distinguishes availability from sandbox authority:
+Allow suppresses a tool-level prompt, but Read/Search still require readable
+paths, Edit still requires writable paths, and Bash/Fetch still obey filesystem
+and network policy. Decision selectors render user-facing labels in title case
+while preserving lowercase schema values.
+
 ### Bash progress
 
-The initial Bash presentation uses the normalized tool start, output, and
-completion events plus the tool's description. It does not inject `echo`
-headings into user commands.
+The Bash presentation uses normalized tool start, output, and completion events
+plus the tool description and working directory. Simple `&&` chains are shown
+as individual command stages inside the expandable step. It does not inject
+`echo` headings into user commands. This provides useful progress for common
+generated commands without claiming shell-level instrumentation.
 
 Bash can expose the currently executing simple command through a `DEBUG` trap or
 through `set -x` with a dedicated `BASH_XTRACEFD` and machine-readable `PS4`.

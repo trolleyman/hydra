@@ -5,9 +5,10 @@ export type Projection = components['schemas']['ChatProjection']
 export type QuestionSpec = { question: string; header?: string; multiSelect: boolean; options: { label: string; description?: string }[] }
 export type Item =
   | { kind: 'message'; key: string; role: 'user' | 'assistant'; text: string }
-  | { kind: 'step'; key: string; title: string; input?: unknown; output?: unknown; status?: string; error?: boolean }
+  | { kind: 'step'; key: string; title: string; summary?: string; input?: unknown; output?: unknown; status?: string; error?: boolean }
   | { kind: 'subagent'; key: string; id: string; title: string; status: string; prompt?: string }
   | { kind: 'question'; key: string; requestID: string; toolID?: string; questions: QuestionSpec[]; active: boolean; expired?: boolean; answer?: string }
+  | { kind: 'commit'; key: string; sha: string; subject: string; additions?: number; deletions?: number }
   | { kind: 'notice'; key: string; text: string }
 
 export function conversationItems(events: Event[]): Item[] {
@@ -25,14 +26,15 @@ export function conversationItems(events: Event[]): Item[] {
     else if (event.type === 'tool_started' && payload.name !== 'AskUserQuestion') {
       const id = String(payload.id ?? event.seq)
       tools.set(id, items.length)
-      items.push({ kind: 'step', key: `tool-${id}`, title: toolTitle(payload), input: payload.input, status: 'Running' })
+      items.push({ kind: 'step', key: `tool-${id}`, title: String(payload.name || 'Tool'), summary: toolSummary(payload), input: payload.input, status: 'Running' })
     } else if (event.type === 'tool_completed' && payload.name === 'AskUserQuestion') {
       const prior = questionTools.get(String(payload.id ?? ''))
       if (prior !== undefined && items[prior]?.kind === 'question') items[prior] = { ...items[prior], active: false, answer: outputText(payload.output ?? payload.content) }
     } else if (event.type === 'tool_completed') {
       const id = String(payload.id ?? event.seq)
       const prior = tools.get(id)
-      const item: Item = { kind: 'step', key: `tool-${id}`, title: toolTitle(payload), input: payload.input, output: payload.output, status: payload.status ?? (payload.is_error ? 'Failed' : 'Completed'), error: Boolean(payload.is_error) }
+      const started = prior === undefined ? undefined : items[prior]?.kind === 'step' ? items[prior] : undefined
+      const item: Item = { kind: 'step', key: `tool-${id}`, title: String(payload.name || started?.title || 'Tool'), summary: toolSummary(payload) || started?.summary, input: payload.input ?? started?.input, output: payload.output, status: payload.is_error ? 'Failed' : undefined, error: Boolean(payload.is_error) }
       if (prior === undefined) {
         tools.set(id, items.length)
         items.push(item)
@@ -58,8 +60,10 @@ export function conversationItems(events: Event[]): Item[] {
       if (prior !== undefined && items[prior]?.kind === 'question') items[prior] = { ...items[prior], active: false, answer: resolvedAnswer(payload) }
     } else if (['turn_completed', 'turn_failed', 'turn_interrupted'].includes(event.type)) {
       for (const prior of questions.values()) if (items[prior]?.kind === 'question' && items[prior].active) items[prior] = { ...items[prior], active: false, expired: true }
-    } else if (event.type === 'notice' || event.type === 'commit_created') {
-      items.push({ kind: 'notice', key: `e${event.seq}`, text: String(payload.text ?? payload.summary ?? 'Git commit created') })
+    } else if (event.type === 'commit_created') {
+      items.push({ kind: 'commit', key: `e${event.seq}`, sha: String(payload.short_sha ?? payload.sha ?? '').slice(0, 8), subject: String(payload.subject ?? 'Git commit created'), additions: numberValue(payload.additions), deletions: numberValue(payload.deletions) })
+    } else if (event.type === 'notice') {
+      items.push({ kind: 'notice', key: `e${event.seq}`, text: String(payload.text ?? payload.summary ?? 'Notice') })
     }
   }
   return items
@@ -109,9 +113,31 @@ export function formatValue(value: unknown): string {
   return JSON.stringify(value, null, 2)
 }
 
+export function splitAttachments(text: string): { text: string; attachments: string[] } {
+  const marker = 'Attached files (read these paths):\n'
+  const index = text.lastIndexOf(`\n\n${marker}`)
+  const start = index >= 0 ? index + 2 : text.startsWith(marker) ? 0 : -1
+  if (start < 0) return { text, attachments: [] }
+  const attachments = text.slice(start + marker.length).split('\n').flatMap(line => {
+    if (!line.startsWith('- ')) return []
+    try { const value = JSON.parse(line.slice(2)); return typeof value === 'string' ? [value] : [] } catch { return [] }
+  })
+  if (!attachments.length) return { text, attachments: [] }
+  return { text: text.slice(0, index >= 0 ? index : 0), attachments }
+}
+
 function textFrom(payload: Record<string, any>): string { return typeof payload.text === 'string' ? payload.text : Array.isArray(payload.content) ? payload.content.map(item => item?.text ?? '').join('') : '' }
-function toolTitle(payload: Record<string, any>): string { const input = payload.input as Record<string, any> | undefined; return String(input?.description || payload.name || 'Tool') }
-function duration(milliseconds: unknown): string | undefined { return typeof milliseconds === 'number' ? milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s` : undefined }
+function toolSummary(payload: Record<string, any>): string | undefined {
+  const input = payload.input as Record<string, any> | undefined
+  if (!input) return undefined
+  for (const key of ['description', 'file_path', 'path', 'pattern', 'query', 'url', 'command', 'prompt']) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value.trim().split('\n')[0]
+  }
+  return undefined
+}
+function numberValue(value: unknown): number | undefined { return typeof value === 'number' ? value : undefined }
+function duration(milliseconds: unknown): string | undefined { return typeof milliseconds === 'number' ? `${Math.max(1, Math.ceil(milliseconds / 1000))}s` : undefined }
 function parseJSON(value: string): any { try { return JSON.parse(value) } catch { return undefined } }
 function outputText(value: unknown): string { if (typeof value === 'string') return value; if (Array.isArray(value)) return value.map(item => typeof item === 'string' ? item : item && typeof item === 'object' ? String((item as any).text ?? (item as any).content ?? '') : '').filter(Boolean).join('\n'); return value == null ? '' : JSON.stringify(value, null, 2) }
 function resolvedAnswer(payload: Record<string, any>): string {
