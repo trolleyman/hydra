@@ -212,7 +212,7 @@ describe('file header metadata', () => {
 })
 
 describe('viewed file changes', () => {
-  it('labels new changes before the file type and marks the latest blob when viewed', () => {
+  it('labels new changes between copy path and the language selector and marks the latest blob when viewed', () => {
     const onToggleViewed = vi.fn()
     const reviewedDelta = file({
       path: 'README.md',
@@ -229,8 +229,12 @@ describe('viewed file changes', () => {
     )
 
     const marker = screen.getByText('New changes')
-    const changeType = screen.getByLabelText('modified')
-    expect(marker.compareDocumentPosition(changeType) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const copyPath = screen.getByRole('button', { name: 'Copy path' })
+    const language = screen.getByRole('button', { name: 'Syntax highlighting: Markdown' })
+    expect(copyPath.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(marker.compareDocumentPosition(language) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(marker.parentElement).toHaveClass('ml-auto')
+    expect(copyPath.parentElement).not.toBe(marker.parentElement)
     fireEvent.click(screen.getByRole('button', { name: 'Mark README.md viewed' }))
     expect(onToggleViewed).toHaveBeenCalledWith('README.md', 'current-blob')
 

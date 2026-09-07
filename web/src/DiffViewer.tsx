@@ -121,6 +121,7 @@ function CopyButton({ text, what, idleLabel, idle }: {
   return (
     <Tooltip content={label}>
       <button
+        aria-label={label}
         onClick={(e) => { e.stopPropagation(); void copy(text, { what }) }}
         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
@@ -2348,10 +2349,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
         // overflow-hidden + rounded-t-lg instead, plus rounded-b-lg while collapsed.
         <div
           style={{ top: FILE_STICKY_TOP }}
-          className={`group flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
+          className={`group flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
           onClick={toggleCollapse}
         >
-          <div className="flex min-w-40 flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             {/* No onClick of its own: the header div handles the toggle, and a
               second handler here would fire too (bubbling) and toggle right
               back - the chevron was a no-op because of exactly that. */}
@@ -2362,10 +2363,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
             </button>
             {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <div className="flex min-w-0 items-center gap-1.5">
               {/* Keep the filename visible by progressively eliding middle path
                 components with the shared fitted-path treatment. */}
-              <span className="flex min-w-0 flex-1 items-center text-xs cursor-pointer hover:underline">
+              <span className="flex min-w-0 flex-[0_1_auto] items-center text-xs cursor-pointer hover:underline">
                 {file.change_type === 'renamed' && file.old_path ? (
                   <>
                     <FittedPathLabel path={file.old_path} lowlightDirectory />
@@ -2376,23 +2377,19 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                   <FittedPathLabel path={file.path} lowlightDirectory />
                 )}
               </span>
-              {hasNewChanges && (
-                <span className="shrink-0 text-2xs font-medium text-blue-500 dark:text-blue-400">New changes</span>
-              )}
               <ChangeTypeIcon type={file.change_type} />
               {generated && (
                 <Tooltip content={generated.kind === 'glob' ? `Matched auto-generated glob: ${generated.rule}` : generated.rule}>
                   <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">Auto-generated</span>
                 </Tooltip>
               )}
-              {/* Copy-path rides with the path itself rather than sitting out in the
-                header's right-hand action cluster: the flex-1 above pushed it all
-                the way over there, next to buttons that have nothing to do with the
-                path, which is what made "which of these copies what?" ambiguous. */}
               <CopyButton text={file.path} what="file path" idleLabel="Copy path" />
             </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            {hasNewChanges && (
+              <span className="shrink-0 text-2xs font-medium text-blue-500 dark:text-blue-400">New changes</span>
+            )}
             <LanguagePicker detected={detectedLang} selected={languageOverride} onSelect={setLanguageOverride} />
             {/* Copy the whole file's diff. A binary file has no text to copy. */}
             {!file.binary && file.hunks.length > 0 && (

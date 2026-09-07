@@ -12,8 +12,10 @@ count in the Files header. Steps 3-4 (promote storage to `internal/db`; the
 Marking a file viewed collapses its card. When that file changes again, the blob
 mismatch makes it unviewed and automatically expands it. Its card always renders
 the complete base-to-head diff, while the normal context controls fold unchanged
-lines. A "New changes" label beside the change-type indicator calls out the
-mismatch without replacing the real diff with a second comparison.
+lines. The copy-path control stays beside the path on the left. A "New changes"
+label starts the right-aligned controls, immediately before the language
+selector, and calls out the mismatch without replacing the real diff with a
+second comparison.
 
 ## Problem
 
