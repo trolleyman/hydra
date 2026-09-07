@@ -22,7 +22,7 @@ import {
   ChevronDown, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
-  CircleCheck, ArrowUp, ArrowDown, MailOpen, Paperclip,
+  CircleCheck, ArrowUp, ArrowDown, MailOpen, Paperclip, Eye, EyeOff,
   SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen, ArrowUpToLine, ArrowDownToLine,
 } from 'lucide-react'
@@ -42,6 +42,7 @@ import { useWhitespaceMarks } from './lib/whitespacePrefs'
 import { Tooltip } from './components/Tooltip'
 import { DirectoryTooltip } from './components/DirectoryTooltip'
 import { FilePathLabel } from './components/FilePathLabel'
+import { FittedPathLabel } from './components/ProjectPathLabel'
 import { CollapseSlide } from './components/CollapseSlide'
 import { ResizeGrip } from './components/ResizeGrip'
 import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
@@ -120,6 +121,7 @@ function CopyButton({ text, what, idleLabel, idle }: {
   return (
     <Tooltip content={label}>
       <button
+        aria-label={label}
         onClick={(e) => { e.stopPropagation(); void copy(text, { what }) }}
         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
@@ -1798,7 +1800,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, showingSinceViewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo, revealLine }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, hasNewChanges, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo, revealLine }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -1808,9 +1810,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // flips it (given the head blob sha to key on). Both omitted in the read-only
   // repo view, which has no per-agent review progress.
   viewed?: boolean
-  // True when this card is a delta from the version previously marked viewed,
-  // rather than the head's complete change against its base branch.
-  showingSinceViewed?: boolean
+  hasNewChanges?: boolean
   onToggleViewed?: (path: string, headBlobSha: string | null | undefined) => void
   fileRef?: (el: HTMLDivElement | null) => void
   onComment: (path: string, lineNum: number, isNew: boolean, text: string, attachments: string[]) => void
@@ -2349,10 +2349,10 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
         // overflow-hidden + rounded-t-lg instead, plus rounded-b-lg while collapsed.
         <div
           style={{ top: FILE_STICKY_TOP }}
-          className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
+          className={`group flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
           onClick={toggleCollapse}
         >
-          <div className="flex min-w-40 flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             {/* No onClick of its own: the header div handles the toggle, and a
               second handler here would fire too (bubbling) and toggle right
               back - the chevron was a no-op because of exactly that. */}
@@ -2363,17 +2363,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
             </button>
             {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              {/* The file-header path reads as sans (item 2); the diff body stays mono. */}
-              <span className="text-xs min-w-0 truncate cursor-pointer hover:underline">
+            <div className="flex min-w-0 items-center gap-1.5">
+              {/* Keep the filename visible by progressively eliding middle path
+                components with the shared fitted-path treatment. */}
+              <span className="flex min-w-0 flex-[0_1_auto] items-center text-xs cursor-pointer hover:underline">
                 {file.change_type === 'renamed' && file.old_path ? (
                   <>
-                    <PathName path={file.old_path} />
-                    <span className="text-gray-400 dark:text-gray-500"> → </span>
-                    <PathName path={file.path} />
+                    <FittedPathLabel path={file.old_path} lowlightDirectory />
+                    <span className="shrink-0 text-gray-400 dark:text-gray-500"> → </span>
+                    <FittedPathLabel path={file.path} lowlightDirectory />
                   </>
                 ) : (
-                  <PathName path={file.path} />
+                  <FittedPathLabel path={file.path} lowlightDirectory />
                 )}
               </span>
               <ChangeTypeIcon type={file.change_type} />
@@ -2382,14 +2383,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                   <span className="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">Auto-generated</span>
                 </Tooltip>
               )}
-              {/* Copy-path rides with the path itself rather than sitting out in the
-                header's right-hand action cluster: the flex-1 above pushed it all
-                the way over there, next to buttons that have nothing to do with the
-                path, which is what made "which of these copies what?" ambiguous. */}
               <CopyButton text={file.path} what="file path" idleLabel="Copy path" />
             </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            {hasNewChanges && (
+              <span className="shrink-0 text-2xs font-medium text-blue-500 dark:text-blue-400">New changes</span>
+            )}
             <LanguagePicker detected={detectedLang} selected={languageOverride} onSelect={setLanguageOverride} />
             {/* Copy the whole file's diff. A binary file has no text to copy. */}
             {!file.binary && file.hunks.length > 0 && (
@@ -2406,28 +2406,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
             {!file.binary && (
               <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-1 text-xs font-medium" />
             )}
-            {showingSinceViewed && (
-              <span className="shrink-0 text-2xs font-medium text-blue-500 dark:text-blue-400">New since viewed</span>
-            )}
             {onToggleViewed && (
-            // Marking a file viewed records its current head blob sha; when the
-            // agent later changes the file the sha no longer matches and it re-shows
-            // as unviewed. Stops propagation so ticking it doesn't also collapse the
-            // card (the header row toggles collapse).
-            <label
-              className="flex items-center gap-1 shrink-0 ml-1 pl-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none"
-              title={file.head_blob_sha ? 'Mark this file as reviewed' : 'Nothing to mark viewed (file deleted)'}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                className="cursor-pointer accent-blue-500"
-                checked={!!viewed}
+              <ViewedToggle
+                path={file.path}
+                viewed={!!viewed}
                 disabled={!file.head_blob_sha}
-                onChange={() => onToggleViewed(file.path, file.head_blob_sha)}
+                onToggle={() => onToggleViewed(file.path, file.head_blob_sha)}
               />
-              Viewed
-            </label>
             )}
           </div>
         </div>
@@ -2599,12 +2584,6 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
 // ── Commit selector types & helpers ───────────────────────────────────────────
 
 type DiffParams = { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean }
-type ViewedDeltaDiffFile = DiffFile & { viewed_delta?: true }
-
-function isViewedDelta(file: DiffFile): boolean {
-  return !!(file as ViewedDeltaDiffFile).viewed_delta
-}
-
 // buildDiffParams maps the left/right selectors to the getAgentDiff query
 // params. Shared by every diff fetch (initial load, silent refresh, per-file
 // full fetch, context expansion) so they stay in lock-step.
@@ -3224,34 +3203,24 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   const summary = diff?.uncommitted_summary
   if (!summary || (summary.tracked_count === 0 && summary.untracked_count === 0)) return null
 
-  const groups: { type: 'modified' | 'untracked'; count: number; files: string[] }[] = []
-  if (summary.tracked_count > 0) {
-    groups.push({
-      type: 'modified',
-      count: summary.tracked_count,
-      files: summary.tracked_files ?? [],
-    })
-  }
-  if (summary.untracked_count > 0) {
-    groups.push({
-      type: 'untracked',
-      count: summary.untracked_count,
-      files: summary.untracked_files ?? [],
-    })
-  }
+  const total = summary.tracked_count + summary.untracked_count
+  const files = [
+    ...(summary.tracked_files ?? []).map((path) => ({ path, type: 'modified' as const })),
+    ...(summary.untracked_files ?? []).map((path) => ({ path, type: 'untracked' as const })),
+  ].sort((a, b) => a.path.localeCompare(b.path))
+  const visibleFiles = files.slice(0, UNCOMMITTED_TOOLTIP_FILES)
 
   return (
     <Tooltip
       content={
         <div>
           <p className="font-semibold mb-1">Uncommitted changes</p>
-          {groups.map((g) => (
-            <div key={g.type}>
-              {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
+          <div>
+              {visibleFiles.map(({ path, type }) => {
                 // The per-filetype icon from the diff's file list stands in for the
                 // "- " bullet these rows used to carry: it marks the row just as
                 // well and additionally says what kind of file it is.
-                const { Icon, className } = getFileIcon(uncommittedIconName(f))
+                const { Icon, className } = getFileIcon(uncommittedIconName(path))
                 return (
                   // Icon and path as two flex cells rather than a prefix in the
                   // text: that hangs the indent, so a wrapped path lines up under
@@ -3259,28 +3228,27 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
                   // items-start keeps the filetype icon on the FIRST line of a
                   // wrapping path. The status mark rides in the path's inline
                   // flow, where its cap-based alignment centres it against text.
-                  <div key={f} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
+                  <div key={`${type}:${path}`} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
                     <span className="shrink-0">
                       <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
                     </span>
                     <span className="min-w-0 break-words">
-                      <WrappablePathName path={f} />
-                      <SharedChangeTypeIcon type={g.type} className="inline-block ml-1 h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)]" />
+                      <WrappablePathName path={path} />
+                      <SharedChangeTypeIcon type={type} className="inline-block ml-1 h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)]" />
                     </span>
                   </div>
                 )
               })}
-              {g.count > Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES) && (
+              {total > visibleFiles.length && (
                 // Empty first cell rather than a dash, so the count lines up with
                 // the filenames above it and nothing looks like a file that lost
                 // its icon.
                 <div className="flex items-start gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
                   <span aria-hidden className="shrink-0 w-[1em]" />
-                  <span>+{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more</span>
+                  <span>+{total - visibleFiles.length} more</span>
                 </div>
               )}
             </div>
-          ))}
           <p className="text-gray-400 dark:text-gray-500 mt-1.5 text-3xs">Click to view uncommitted changes</p>
         </div>
       }
@@ -3290,7 +3258,7 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
         className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
       >
         <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
-        <span>{summary.tracked_count + summary.untracked_count}</span>
+        <span>{total}</span>
       </button>
     </Tooltip>
   )
@@ -3602,46 +3570,85 @@ export type FileView = 'tree' | 'flat' | 'grouped'
 
 // ── Sidebar components ────────────────────────────────────────────────────────
 
-export function FileRow({ file, isActive, onClick, indent = 0 }: {
-  file: DiffFile; isActive: boolean; onClick: () => void; indent?: number
+function ViewedToggle({ path, viewed, disabled = false, onToggle }: {
+  path: string; viewed: boolean; disabled?: boolean; onToggle: () => void
 }) {
+  const label = disabled
+    ? `Cannot mark ${path} viewed because it was deleted`
+    : viewed ? `Mark ${path} unviewed` : `Mark ${path} viewed`
   return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-1.5 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group cursor-pointer ${isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-        }`}
-      style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
-    >
-      {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-      <span className="flex min-w-0 items-center gap-1.5">
-        <Tooltip
-          content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
-          align="left"
-          className="min-w-0"
-        >
-          <span className="min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">
-            {file.path.split('/').pop()}
-          </span>
-        </Tooltip>
-        <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
-      </span>
-      <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
-    </button>
+    <Tooltip content={label} className={`shrink-0 transition-opacity ${viewed || disabled ? '' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}>
+      <button
+        type="button"
+        aria-label={label}
+        disabled={disabled}
+        onClick={(event) => { event.stopPropagation(); onToggle() }}
+        className="flex h-6 w-6 items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-600 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-300 cursor-pointer transition-colors"
+      >
+        {viewed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+      </button>
+    </Tooltip>
   )
 }
 
-export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick, activeFilePath }: {
+export function FileRow({ file, isActive, viewed = false, onClick, onToggleViewed, indent = 0 }: {
+  file: DiffFile; isActive: boolean; viewed?: boolean; onClick: () => void
+  onToggleViewed?: (file: DiffFile) => void; indent?: number
+}) {
+  return (
+    <div
+      className={`group flex w-full items-center text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+      data-viewed={viewed || undefined}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className={`flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left cursor-pointer transition-opacity ${viewed ? 'opacity-50' : ''}`}
+        style={{ paddingLeft: `${10 + indent}px` }}
+      >
+        {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Tooltip
+            content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
+            align="left"
+            className="min-w-0"
+          >
+            <span className="min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">
+              {file.path.split('/').pop()}
+            </span>
+          </Tooltip>
+          <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
+        </span>
+        <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
+      </button>
+      {onToggleViewed && (
+        <ViewedToggle path={file.path} viewed={viewed} disabled={!file.head_blob_sha} onToggle={() => onToggleViewed(file)} />
+      )}
+      <span aria-hidden className="w-1 shrink-0" />
+    </div>
+  )
+}
+
+function treeNodeViewed(node: TreeNode, isFileViewed: (file: DiffFile) => boolean): boolean {
+  if (node.type === 'file') return !!node.file && isFileViewed(node.file)
+  return node.children.length > 0 && node.children.every((child) => treeNodeViewed(child, isFileViewed))
+}
+
+export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFileClick, activeFilePath, isFileViewed = () => false, onToggleViewed }: {
   node: TreeNode; depth: number; collapsedFolders: Set<string>
   toggleFolder: (path: string) => void; onFileClick: (path: string) => void; activeFilePath: string | null
+  isFileViewed?: (file: DiffFile) => boolean; onToggleViewed?: (file: DiffFile) => void
 }) {
   const indent = depth * 12
   if (node.type === 'dir') {
     const isOpen = !collapsedFolders.has(node.path)
+    const viewed = treeNodeViewed(node, isFileViewed)
     return (
       <div>
         <button
           onClick={() => toggleFolder(node.path)}
-          className="w-full flex items-center gap-1.5 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 text-left group cursor-pointer"
+          className={`w-full flex items-center gap-1.5 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 text-left group cursor-pointer transition-opacity ${viewed ? 'opacity-50' : ''}`}
+          data-viewed={viewed || undefined}
           style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
         >
           {isOpen
@@ -3661,7 +3668,8 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
           {node.children.map((child) => (
             <TreeNodeView key={child.path} node={child} depth={depth + 1}
               collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
-              onFileClick={onFileClick} activeFilePath={activeFilePath} />
+              onFileClick={onFileClick} activeFilePath={activeFilePath}
+              isFileViewed={isFileViewed} onToggleViewed={onToggleViewed} />
           ))}
         </CollapseSlide>
       </div>
@@ -3669,6 +3677,7 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
   }
   return (
     <FileRow file={node.file!} isActive={node.file!.path === activeFilePath}
+      viewed={isFileViewed(node.file!)} onToggleViewed={onToggleViewed}
       onClick={() => onFileClick(node.file!.path)} indent={indent} />
   )
 }
@@ -3862,6 +3871,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const toggleFileViewed = useCallback((path: string, headBlobSha: string | null | undefined) => {
     const wasViewed = !!headBlobSha && viewedFiles[path] === headBlobSha
     if (!wasViewed && headBlobSha) {
+      const card = fileRefs.current.get(path)
+      if (card) pinCardToTop(card)
       setCollapsedFiles((prev) => {
         if (prev.has(path)) return prev
         const next = new Set(prev)
@@ -3879,9 +3890,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       if (!headBlobSha) return prev
       return { ...prev, [path]: headBlobSha }
     })
-    // Unchecking a reviewed file restores the complete base-to-head diff. A
-    // newly checked file can keep its already-rendered body in place.
-    if (wasViewed) setRefreshKey((key) => key + 1)
   }, [viewedFiles])
 
   // A file is viewed iff the sha we stored equals its current head blob sha.
@@ -3889,51 +3897,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     (f: DiffFile) => !!f.head_blob_sha && viewedFiles[f.path] === f.head_blob_sha,
     [viewedFiles],
   )
+  const hasFileChangedSinceViewed = useCallback(
+    (f: DiffFile) => !!f.head_blob_sha && !!viewedFiles[f.path] && viewedFiles[f.path] !== f.head_blob_sha,
+    [viewedFiles],
+  )
   const viewedCount = useMemo(
     () => (diff ? diff.files.reduce((n, f) => n + (isFileViewed(f) ? 1 : 0), 0) : 0),
     [diff, isFileViewed],
   )
-
-  // Replace only files that changed after being marked viewed with a diff from
-  // their saved blob to the latest blob. The first response remains the source
-  // of truth for which files belong to the overall review; the scoped bulk
-  // response only replaces the bodies and stats of affected file cards.
-  // Historical commit ranges deliberately keep their literal selected diff.
-  const applyViewedDeltas = useCallback(async (d: DiffResponse, params: DiffParams): Promise<DiffResponse> => {
-    const liveRange = leftSel.type === 'base' && !leftSel.sha && rightSel.type !== 'commit'
-    if (!liveRange) return d
-    const viewed = viewedFilesRef.current
-    const candidates = d.files.filter((file) => {
-      const baseline = viewed[file.path]
-      return !file.binary && !!baseline && !!file.head_blob_sha && baseline !== file.head_blob_sha
-    })
-    if (candidates.length === 0) return d
-
-    const replacements = new Map<string, DiffFile>()
-    try {
-      const delta = await api.default.getAgentViewedDiff(projectId ?? '', agent.id, {
-        viewed_blobs: Object.fromEntries(candidates.map((file) => [file.path, viewed[file.path]])),
-        ignore_whitespace: params.ignoreWhitespace,
-        include_uncommitted: params.includeUncommitted,
-        context: contextLines,
-        full_context: true,
-        max_full_changes: HIDDEN_FILE_THRESHOLD,
-        max_full_lines: FULL_MAX_LINES,
-      })
-      for (const updated of delta.files) {
-        replacements.set(updated.path, { ...updated, viewed_delta: true } as ViewedDeltaDiffFile)
-      }
-      if (delta.failed_paths.length > 0) {
-        console.warn(`Could not load changes since these files were viewed: ${delta.failed_paths.join(', ')}`)
-      }
-    } catch (error) {
-      // A stale/pruned blob should not hide the file. Fall back to the complete
-      // base-to-head response and leave it unviewed.
-      console.warn('Could not load changes since files were viewed', error)
-    }
-    if (replacements.size === 0) return d
-    return { ...d, files: d.files.map((file) => replacements.get(file.path) ?? file) }
-  }, [agent.id, contextLines, leftSel, projectId, rightSel])
 
   // Tests-panel view modes - the two orthogonal cog checkboxes (see
   // TESTS_PLAN.md Feature 1), persisted per agent like collapsedFiles.
@@ -3978,6 +3949,21 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     })
   }, [])
 
+  // A viewed file is normally collapsed. If its current blob no longer matches
+  // the blob that was viewed, reopen it so the new work cannot stay hidden behind
+  // persisted collapse state. The card still renders the complete base-to-head
+  // diff; its ordinary context expanders fold only unchanged lines.
+  const expandFilesChangedSinceViewed = useCallback((files: DiffFile[]) => {
+    const viewed = viewedFilesRef.current
+    const changed = files.filter((file) => viewed[file.path] && file.head_blob_sha && viewed[file.path] !== file.head_blob_sha)
+    if (!changed.length) return
+    setCollapsedFiles((prev) => {
+      const next = new Set(prev)
+      for (const file of changed) next.delete(file.path)
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     if (!agent.branch_name && !projectDirectory) return
     api.default.getAgentCommits(projectId ?? '', agent.id)
@@ -4002,16 +3988,13 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // same response carries it at `context`, since the server falls back to the
   // requested windowed context when it declines to expand. So the fallback costs
   // no extra round-trip.
-  const expandFileDiff = useCallback(async (path: string, context: number = contextLines, baselineOverride?: string) => {
+  const expandFileDiff = useCallback(async (path: string, context: number = contextLines) => {
     if (!agent.branch_name && !projectDirectory) return
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
-    const displayed = diff?.files.find((file) => file.path === path)
-    const reviewedBaseline = baselineOverride ?? (displayed && isViewedDelta(displayed) ? viewedFiles[path] : undefined)
-
     try {
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, reviewedBaseline, context,
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, undefined, context,
         true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
 
       // Select by path rather than [0] - the backend may return more than the
@@ -4044,7 +4027,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, ignoreWhitespace, contextLines, viewedFiles, diff])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, ignoreWhitespace, contextLines])
 
   // Compute hidden-file state from a fresh diff response.
   // Large files (HIDDEN_FILE_THRESHOLD changed lines) start hidden, unless the user has explicitly shown them.
@@ -4123,11 +4106,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // per-file follow-up requests.
     api.default.getAgentDiff(projectId ?? '', agent.id,
       params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, undefined, contextLines, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
-      .then((d) => applyViewedDeltas(d, params))
       .then((d) => {
         if (!cancelled) {
           const { files } = reconcileFiles(d.files)
           applyGeneratedFileFolds(files)
+          expandFilesChangedSinceViewed(files)
           setDiff({ ...d, files })
           applyHiddenFiles(files)
           setLoadingDiff(false)
@@ -4136,7 +4119,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => { if (!cancelled) { setDiffError(formatError(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, contextLines, applyHiddenFiles, applyGeneratedFileFolds, applyViewedDeltas, reconcileFiles])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, contextLines, applyHiddenFiles, applyGeneratedFileFolds, expandFilesChangedSinceViewed, reconcileFiles])
 
   // Version params for the artifacts panel, mirroring the diff request logic.
   // Artifacts (e.g. screenshots) don't care about whitespace, so pass false.
@@ -4232,17 +4215,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     }
     setDiff({ ...d, files })
     applyGeneratedFileFolds(files)
+    expandFilesChangedSinceViewed(files)
     applyHiddenFiles(files)
     for (const path of promoted) {
       const file = files.find((candidate) => candidate.path === path)
       if (!file?.expanded) {
-        expandFileDiffRef.current(path, contextLines, file && isViewedDelta(file) ? viewedFilesRef.current[path] : undefined).catch(() => { })
+        expandFileDiffRef.current(path, contextLines).catch(() => { })
       }
     }
     for (const [path, ctx] of contexts) {
       if (ctx > contextLines && !promoted.has(path)) expandFileDiffRef.current(path, ctx).catch(() => { })
     }
-  }, [applyHiddenFiles, applyGeneratedFileFolds, reconcileFiles, contextLines])
+  }, [applyHiddenFiles, applyGeneratedFileFolds, expandFilesChangedSinceViewed, reconcileFiles, contextLines])
 
   // A background refresh deferred because the user had an active selection. Flushed
   // by the selectionchange listener once the selection clears. Latest fetch wins.
@@ -4303,7 +4287,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // Fetch full diff silently - preserves open comments since we diff against previous state.
       const diffP = api.default.getAgentDiff(projectId ?? '', agent.id,
         params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, undefined, undefined, contextLines, true, HIDDEN_FILE_THRESHOLD, FULL_MAX_LINES)
-        .then((d) => applyViewedDeltas(d, params))
         .then((d) => {
           // Defer applying while the user is selecting text - otherwise the re-render
           // wipes their selection. The selectionchange listener flushes it later.
@@ -5283,7 +5266,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       return tree.map((node) => (
         <TreeNodeView key={node.path} node={node} depth={0}
           collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
-          onFileClick={handleFileClick} activeFilePath={activeFilePath} />
+          onFileClick={handleFileClick} activeFilePath={activeFilePath}
+          isFileViewed={isFileViewed} onToggleViewed={(file) => toggleFileViewed(file.path, file.head_blob_sha)} />
       ))
     }
     if (fileView === 'grouped') {
@@ -5291,7 +5275,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       return groups.map(([folder, groupFiles]) => (
         <div key={folder || '__root__'}>
           {folder && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50 group">
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50 group transition-opacity ${groupFiles.every(isFileViewed) ? 'opacity-50' : ''}`}
+              data-viewed={groupFiles.every(isFileViewed) || undefined}
+            >
               <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
               <DirectoryTooltip path={folder} className="min-w-0 flex-1">
                 <span className="font-mono text-4xs text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
@@ -5301,6 +5288,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           {groupFiles.map((f) => {
             const idx = diff!.files.findIndex((df) => df.path === f.path)
             return <FileRow key={f.path} file={f} isActive={singleFile && idx === singleFileIdx}
+              viewed={isFileViewed(f)} onToggleViewed={(file) => toggleFileViewed(file.path, file.head_blob_sha)}
               onClick={() => handleFileClick(f.path)} indent={folder ? 4 : 0} />
           })}
         </div>
@@ -5308,6 +5296,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     }
     return files.map((f, i) => (
       <FileRow key={f.path} file={f} isActive={singleFile && i === singleFileIdx}
+        viewed={isFileViewed(f)} onToggleViewed={(file) => toggleFileViewed(file.path, file.head_blob_sha)}
         onClick={() => handleFileClick(f.path)} />
     ))
   }
@@ -5550,7 +5539,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               sideBySide={sideBySide}
               wordHighlight={wordHighlight}
               viewed={isFileViewed(diff.files[singleFileIdx])}
-              showingSinceViewed={isViewedDelta(diff.files[singleFileIdx]) && !isFileViewed(diff.files[singleFileIdx])}
+              hasNewChanges={hasFileChangedSinceViewed(diff.files[singleFileIdx])}
               onToggleViewed={toggleFileViewed}
               isCollapsed={collapsedFiles.has(diff.files[singleFileIdx].path)}
               onToggleCollapse={toggleFileCollapse}
@@ -5596,7 +5585,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             return (
               <FileDiff key={f.path} file={f} projectId={projectId} sideBySide={sideBySide} wordHighlight={wordHighlight}
                 viewed={isFileViewed(f)}
-                showingSinceViewed={isViewedDelta(f) && !isFileViewed(f)}
+                hasNewChanges={hasFileChangedSinceViewed(f)}
                 onToggleViewed={toggleFileViewed}
                 isCollapsed={collapsedFiles.has(f.path)}
                 onToggleCollapse={toggleFileCollapse}
@@ -5659,7 +5648,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       <span className="text-2xs font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
       {viewedCount > 0 && (
         <span className="text-2xs font-medium text-blue-500 dark:text-blue-400" title="Files you have marked viewed">
-          {viewedCount}/{diff.files.length} viewed
+          {viewedCount} viewed
         </span>
       )}
       <div className="ml-auto flex items-center gap-1.5">

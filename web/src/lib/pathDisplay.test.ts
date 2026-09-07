@@ -28,11 +28,9 @@ describe('fitPath', () => {
     expect(fitPath(path, maxChars(7))).toBe('../dir')
   })
 
-  it('clips the end with ... as the last resort', () => {
-    // '../di' + '...' would be 8; budget 5 fits '..' + '...' = '.....'? No -
-    // clipping shortens '../dir': the longest prefix whose length+3 <= budget.
-    expect(fitPath(path, maxChars(5))).toBe('.....') // '..' + '...'
-    expect(fitPath(path, maxChars(4))).toBe('....') // '.' + '...'
+  it('clips the start with ... as the last resort', () => {
+    expect(fitPath(path, maxChars(5))).toBe('...ir')
+    expect(fitPath(path, maxChars(4))).toBe('...r')
   })
 
   it('returns the bare ... marker when nothing at all fits', () => {
@@ -54,8 +52,7 @@ describe('fitPath', () => {
   it('goes straight to end-clipping for single-component and bare paths', () => {
     expect(fitPath('~', maxChars(1))).toBe('~')
     expect(fitPath('/', maxChars(1))).toBe('/')
-    // '/very-long-name' clipped: '/very-lo' + '...' = 11 chars
-    expect(fitPath('/very-long-name', maxChars(11))).toBe('/very-lo...')
+    expect(fitPath('/very-long-name', maxChars(11))).toBe('...ong-name')
   })
 
   it('ignores a trailing slash', () => {

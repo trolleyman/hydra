@@ -7,7 +7,7 @@ import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, singleFieldStorage, writeLocal } from './storage'
 
 export const DEFAULT_GENERATED_FILE_GLOBS = [
-  '{bun.lock,bun.lockb,Cargo.lock,composer.lock,flake.lock,Gemfile.lock,go.sum,mix.lock,npm-shrinkwrap.json,package-lock.json,Package.resolved,packages.lock.json,pdm.lock,Pipfile.lock,pnpm-lock.yaml,poetry.lock,pubspec.lock,uv.lock,yarn.lock}',
+  '{aube-lock.yaml,bun.lock,bun.lockb,Cargo.lock,composer.lock,flake.lock,Gemfile.lock,go.sum,mix.lock,npm-shrinkwrap.json,package-lock.json,Package.resolved,packages.lock.json,pdm.lock,Pipfile.lock,pnpm-lock.yaml,poetry.lock,pubspec.lock,uv.lock,yarn.lock}',
   '**/{generated,gen}/**',
   '{generated,gen}.*',
   '*{.,_,-}{generated,gen}.*',

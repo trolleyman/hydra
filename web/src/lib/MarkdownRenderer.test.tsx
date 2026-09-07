@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest'
-import { act, fireEvent, render } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { Markdown } from './MarkdownRenderer'
 
 // jsdom implements no media loading: the off-screen size probe behind a markdown
@@ -90,6 +90,17 @@ describe('Markdown', () => {
       filePath: '',
       worktreePath: '/work/hydra',
     }
+
+    it('shows a regular link destination only when its text differs', () => {
+      vi.useFakeTimers()
+      const { container, rerender } = render(<Markdown text="[OpenAI](https://openai.com/research)" />)
+      fireEvent.mouseEnter(container.querySelector('a')!.parentElement!)
+      act(() => void vi.advanceTimersByTime(600))
+      expect(screen.getByRole('tooltip')).toHaveTextContent('https://openai.com/research')
+
+      rerender(<Markdown text="<https://openai.com/research>" />)
+      expect(container.querySelector('a')!.parentElement).toBe(container.querySelector('p'))
+    })
 
     it('keeps a chat file link label exact and visibly linked', () => {
       const { container } = render(
