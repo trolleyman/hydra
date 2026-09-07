@@ -30,6 +30,7 @@ import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmBu
 import { IconButton } from './components/IconButton'
 import { CodePane } from './components/CodePane'
 import { Avatar } from './components/Avatar'
+import { agentTypeLabel } from './lib/agentDisplay'
 import { getFileIcon } from './lib/fileIcons'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { buildRepoSplat } from './lib/repoSplat'
@@ -270,6 +271,7 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
   // you, and has no controls that would lie about what is still possible.
   const sent = comment.published
   const mine = comment.author === 'user'
+  const authorName = mine ? 'You' : (comment.agentType ? agentTypeLabel(comment.agentType) : comment.author)
   // data-comment-card is what the jump scrolls to. The amber inset bar is a
   // short-lived focus cue for the comment the user just navigated to.
   const current = useIsCurrentComment(comment.number)
@@ -299,9 +301,9 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
             glyph when git has no name to draw on - "Y" for "You" is an initial
             that belongs to nobody. */}
         <Avatar
-          name={mine ? (you ?? '') : comment.author}
-          label={mine ? 'You' : comment.author}
-          agentType={mine ? undefined : 'claude'}
+          name={mine ? (you ?? '') : authorName}
+          label={authorName}
+          agentType={comment.agentType}
           className="mt-0.5"
         />
         <div className="min-w-0 flex-1">
@@ -314,7 +316,7 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
           <div className="mb-0.5 flex h-5 items-center gap-1.5 text-2xs text-stone-400 dark:text-stone-500">
             {/* "You" rather than your git name: the name is on the avatar's tip,
                   and in a list of comments what matters is which ones are yours. */}
-            <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
+            <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{authorName}</span>
             {!sent && (
               // A draft is the one state worth a chip: it is the difference
               // between something the agent has been told and something only you

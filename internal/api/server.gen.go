@@ -3211,6 +3211,9 @@ type ResourceLimits struct {
 
 // ReviewComment One durable, numbered review comment. The number is the handle everything else uses ("fix #3") - one token for a model, speakable by a person, and never reused.
 type ReviewComment struct {
+	// AgentType Provider identity for an agent or reviewer author, e.g. "claude" or "codex". Absent for the user.
+	AgentType *string `json:"agent_type,omitempty"`
+
 	// Attachments Absolute paths of files attached to the comment, under the project's uploads directory in Hydra's state root. A separate field rather than paths pasted into the body because a draft's body is edited in a textarea (raw paths would be in it) and because copy-as-markdown and the forge-publish path must not leak them. The path resolves identically on the host and inside every agent sandbox, so the agent reads the file directly; the browser renders it through the uploads blob endpoint.
 	Attachments *[]string `json:"attachments,omitempty"`
 
@@ -3502,7 +3505,9 @@ type ReviewThread struct {
 
 // ReviewThreadNote One comment in a review thread. Local notes never reach the forge.
 type ReviewThreadNote struct {
-	Author *string `json:"author,omitempty"`
+	// AgentType Provider identity for a local agent or reviewer author, e.g. "claude" or "codex". Absent for forge users and the local user.
+	AgentType *string `json:"agent_type,omitempty"`
+	Author    *string `json:"author,omitempty"`
 
 	// AvatarUrl The author's picture, hosted by the FORGE. Hydra stores no images and proxies nothing - the browser loads this directly, and a failure falls back to a monogram.
 	AvatarUrl *string `json:"avatar_url,omitempty"`

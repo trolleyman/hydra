@@ -11,6 +11,7 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import { renderCommentSource } from '../lib/mentionHighlight'
 import { copyWithToast } from '../lib/copyToast'
 import { Avatar } from './Avatar'
+import { agentTypeLabel } from '../lib/agentDisplay'
 import { commentAsMarkdown } from '../lib/reviewComments'
 import { VisitedCommentsContext } from '../lib/reviewCommentLink'
 
@@ -218,15 +219,15 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
             // hangs off it, and the footer below indents to match.
             <div key={n.id} data-review-note={n.number} className={`flex items-start gap-2 transition-[background-color,box-shadow] duration-700 ease-out ${i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''} ${n.number === focusedComment ? '-mx-4 px-4 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]' : ''}`}>
               <Avatar
-                name={n.author || 'someone'}
+                name={n.agent_type ? agentTypeLabel(n.agent_type) : (n.author || 'someone')}
                 avatarUrl={n.avatar_url}
-                agentType={n.author === 'agent' ? 'claude' : undefined}
+                agentType={n.agent_type}
                 className="mt-0.5"
               />
               <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="text-2xs font-medium text-gray-700 dark:text-gray-200 truncate">
-                  {n.author || 'someone'}
+                  {n.agent_type ? agentTypeLabel(n.agent_type) : (n.author || 'someone')}
                 </span>
                 {noteAgo(n.created_at) && (
                   // Clicking the date jumps to the comment, and the date IS the

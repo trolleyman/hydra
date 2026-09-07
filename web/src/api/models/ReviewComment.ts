@@ -20,6 +20,10 @@ export type ReviewComment = {
      * "user" | "reviewer" | "agent".
      */
     author: string;
+    /**
+     * Provider identity for an agent or reviewer author, e.g. "claude" or "codex". Absent for the user.
+     */
+    agent_type?: string;
     body: string;
     /**
      * The comment this replies to, which is how a thread forms without a separate thread object.

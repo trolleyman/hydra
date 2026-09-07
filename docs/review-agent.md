@@ -696,10 +696,10 @@ A comment carries a small rounded square saying who left it
 (`web/src/components/Avatar.tsx`). Three sources, each falling back to the next
 rather than to a broken frame, and **Hydra stores no images and proxies none**:
 
-1. **An agent** gets its own brand mark - the same logomark the sidebar and spawn
-   form use, in the same accent colour, on a tinted tile. Nothing to fetch, it is
-   already in the bundle, and "an agent said this" becomes readable at a glance
-   instead of a name you have to read.
+1. **An agent** is named by its provider (Claude, Codex, and so on) and gets that
+   provider's brand mark - the same logomark the sidebar and spawn form use, in
+   the same accent colour, on a tinted tile. The stored author remains a generic
+   role for permissions and read state; the API carries `agent_type` for display.
 2. **A forge user** gets the picture the forge already hosts. Both providers hand
    it over with the comment - GitHub's GraphQL `author { avatarUrl }`, GitLab's
    `author.avatar_url` - so this is a field on `forge.Note`, not a URL Hydra
