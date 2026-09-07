@@ -32,6 +32,8 @@ type Candidate struct {
 // Deps are the host-provided behaviours the tools call into, injected so the
 // server logic is testable without a sandbox or real files.
 type Deps struct {
+	// HideDiscovery omits Hydra daemon MCP discovery tools for focused embedders.
+	HideDiscovery bool
 	// ListAvailable returns candidate servers not yet on the allow-list.
 	ListAvailable func() []Candidate
 	// RequestAccess submits an approval request for server `name` and blocks until
@@ -79,6 +81,9 @@ type Deps struct {
 	// the sanctioned path - a write can't land on the main repo or a sibling head.
 	// Nil disables all the git_* tools.
 	GitOp func(GitOpRequest) GitOpResult
+	// GitAllowed limits which git operation names are advertised and callable.
+	// Nil permits every git operation when GitOp is wired.
+	GitAllowed func(op string) bool
 	// HostRun asks the user to run one command on the HOST, outside the sandbox,
 	// in the head's worktree, and blocks until they decide (and, on allow, until
 	// the command finishes). The sandbox escape hatch of last resort. Nil - no
@@ -298,27 +303,36 @@ func dispatch(deps Deps, req rpcRequest) (rpcResponse, bool) {
 // toolDefs is the advertised tool catalog (tools/list). The review tools are
 // advertised only when GetReview is wired (a review-capable head).
 func toolDefs(deps Deps) []map[string]any {
-	defs := []map[string]any{
-		{
-			"name":        "list_available_mcp_servers",
-			"description": "List MCP servers configured on the host that are NOT yet available to you. Use this to discover tools you could request access to.",
-			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
-			"annotations": map[string]any{"readOnlyHint": true},
-		},
-		{
-			"name":        "request_mcp_server",
-			"description": "Request access to a host-configured MCP server by name. This asks the user to approve it; if granted, the server is added to your allow-list and becomes available after your session reloads. Only servers from list_available_mcp_servers can be requested.",
-			"inputSchema": map[string]any{
-				"type":     "object",
-				"required": []string{"name"},
-				"properties": map[string]any{
-					"name": map[string]any{"type": "string", "description": "The MCP server name to request."},
+	defs := []map[string]any{}
+	if !deps.HideDiscovery {
+		defs = append(defs,
+			map[string]any{
+				"name":        "list_available_mcp_servers",
+				"description": "List MCP servers configured on the host that are NOT yet available to you. Use this to discover tools you could request access to.",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+				"annotations": map[string]any{"readOnlyHint": true},
+			},
+			map[string]any{
+				"name":        "request_mcp_server",
+				"description": "Request access to a host-configured MCP server by name. This asks the user to approve it; if granted, the server is added to your allow-list and becomes available after your session reloads. Only servers from list_available_mcp_servers can be requested.",
+				"inputSchema": map[string]any{
+					"type":     "object",
+					"required": []string{"name"},
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string", "description": "The MCP server name to request."},
+					},
 				},
 			},
-		},
+		)
 	}
 	if deps.GitOp != nil {
-		defs = append(defs, gitToolDefs()...)
+		for _, definition := range gitToolDefs() {
+			name, _ := definition["name"].(string)
+			operation := strings.TrimPrefix(name, "git_")
+			if (operation != "checkout" && deps.GitAllowed == nil) || (deps.GitAllowed != nil && deps.GitAllowed(operation)) {
+				defs = append(defs, definition)
+			}
+		}
 	}
 	if deps.HostRun != nil {
 		defs = append(defs, hostRunToolDef())
@@ -611,10 +625,14 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		msg, ok := deps.SendAgent(strings.TrimSpace(args.Target), strings.TrimSpace(args.Body), strings.TrimSpace(args.CorrelationID), strings.TrimSpace(args.InReplyTo))
 		return textResult(msg, !ok)
-	case "git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick",
+	case "git_checkout", "git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick",
 		"git_merge", "git_merge_continue", "git_merge_abort", "git_stash":
 		if deps.GitOp == nil {
 			return textResult(p.Name+" is not available in this session.", true)
+		}
+		operation := strings.TrimPrefix(p.Name, "git_")
+		if (operation == "checkout" && deps.GitAllowed == nil) || (deps.GitAllowed != nil && !deps.GitAllowed(operation)) {
+			return textResult(p.Name+" is disabled by the active profile.", true)
 		}
 		req, errMsg := parseGitOp(p.Name, p.Arguments)
 		if errMsg != "" {

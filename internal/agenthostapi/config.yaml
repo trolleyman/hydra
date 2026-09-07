@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/HEAD/configuration-schema.json
+package: agenthostapi
+output: models.gen.go
+generate:
+  models: true
+output-options:
+  skip-prune: true
+import-mapping:
+  ./chat.yaml: github.com/trolleyman/hydra/internal/api
+  ./policy.yaml: github.com/trolleyman/hydra/internal/policyapi

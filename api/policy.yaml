@@ -1,0 +1,248 @@
+openapi: 3.0.3
+info:
+  title: Hydra agent policy
+  version: 1.0.0
+
+paths: {}
+
+components:
+  schemas:
+    PolicyDecision:
+      type: string
+      description: Whether a capability proceeds, asks the user, or is refused.
+      enum: [allow, ask, deny]
+      x-enum-varnames: [PolicyAllow, PolicyAsk, PolicyDeny]
+
+    ProviderKind:
+      type: string
+      enum: [claude, codex]
+      x-enum-varnames: [ProviderClaude, ProviderCodex]
+
+    NetworkMode:
+      type: string
+      description: Enforcement posture for sandboxed outbound connections.
+      enum: [off, hard, advisory, unrestricted]
+      x-enum-varnames: [NetworkOff, NetworkHard, NetworkAdvisory, NetworkUnrestricted]
+
+    GitIsolation:
+      type: string
+      description: Whether the sandbox may mutate the resolved Git common directory.
+      enum: [readonly, off]
+      x-enum-varnames: [GitReadOnly, GitOff]
+
+    CoreToolPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        read:
+          $ref: '#/components/schemas/PolicyDecision'
+        search:
+          $ref: '#/components/schemas/PolicyDecision'
+        edit:
+          $ref: '#/components/schemas/PolicyDecision'
+        bash:
+          $ref: '#/components/schemas/PolicyDecision'
+        fetch:
+          $ref: '#/components/schemas/PolicyDecision'
+
+    MCPToolPolicy:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          $ref: '#/components/schemas/PolicyDecision'
+        description:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    MCPServerPolicy:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          $ref: '#/components/schemas/PolicyDecision'
+        transport:
+          type: string
+          description: Execution boundary used by this server.
+          enum: [local, remote]
+          x-enum-varnames: [MCPLocal, MCPRemote]
+        tools:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/MCPToolPolicy'
+          x-go-type-skip-optional-pointer: true
+
+    IntegrationPolicy:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          $ref: '#/components/schemas/PolicyDecision'
+        mutation_decision:
+          $ref: '#/components/schemas/PolicyDecision'
+
+    AuthoredFilesystemPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        readable:
+          type: array
+          items: { type: string }
+        writable:
+          type: array
+          items: { type: string }
+        copy_on_write:
+          type: array
+          items: { type: string }
+        masked:
+          type: array
+          items: { type: string }
+
+    EffectiveFilesystemPolicy:
+      type: object
+      additionalProperties: false
+      required: [readable, writable, copy_on_write, masked]
+      properties:
+        readable:
+          type: array
+          description: Canonical absolute paths exposed read-only.
+          items: { type: string }
+        writable:
+          type: array
+          description: Canonical absolute paths exposed read-write.
+          items: { type: string }
+        copy_on_write:
+          type: array
+          description: Canonical absolute paths with per-conversation write layers.
+          items: { type: string }
+        masked:
+          type: array
+          description: Canonical absolute paths hidden after all grants are applied.
+          items: { type: string }
+
+    AuthoredNetworkPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          $ref: '#/components/schemas/NetworkMode'
+        allowed_hosts:
+          type: array
+          items: { type: string }
+        blocked_hosts:
+          type: array
+          items: { type: string }
+
+    EffectiveNetworkPolicy:
+      type: object
+      additionalProperties: false
+      required: [mode, allowed_hosts, blocked_hosts]
+      properties:
+        mode:
+          $ref: '#/components/schemas/NetworkMode'
+        allowed_hosts:
+          type: array
+          items: { type: string }
+        blocked_hosts:
+          type: array
+          items: { type: string }
+
+    GitPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        isolation:
+          $ref: '#/components/schemas/GitIsolation'
+        protected_branches:
+          type: array
+          items: { type: string }
+        operations:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/PolicyDecision'
+          x-go-type-skip-optional-pointer: true
+
+    ToolPolicy:
+      type: object
+      additionalProperties: false
+      properties:
+        core:
+          $ref: '#/components/schemas/CoreToolPolicy'
+        mcp:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/MCPServerPolicy'
+          x-go-type-skip-optional-pointer: true
+        integrations:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/IntegrationPolicy'
+          x-go-type-skip-optional-pointer: true
+
+    Profile:
+      type: object
+      description: Portable user-authored profile stored in VS Code configuration.
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: User-facing label; the containing settings key remains the stable profile ID.
+          x-go-type-skip-optional-pointer: true
+        provider:
+          $ref: '#/components/schemas/ProviderKind'
+        model:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        effort:
+          type: string
+          description: Provider-specific reasoning effort.
+          x-go-type-skip-optional-pointer: true
+        prompt:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        filesystem:
+          $ref: '#/components/schemas/AuthoredFilesystemPolicy'
+        network:
+          $ref: '#/components/schemas/AuthoredNetworkPolicy'
+        tools:
+          $ref: '#/components/schemas/ToolPolicy'
+        git:
+          $ref: '#/components/schemas/GitPolicy'
+
+    EffectivePolicy:
+      type: object
+      description: Resolved and canonical policy accepted by the native host.
+      additionalProperties: false
+      required: [profile, provider, workspace, user_home, filesystem, network, tools, git]
+      properties:
+        profile:
+          type: string
+        provider:
+          $ref: '#/components/schemas/ProviderKind'
+        model:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        effort:
+          type: string
+          description: Provider-specific reasoning effort.
+          x-go-type-skip-optional-pointer: true
+        prompt:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        workspace:
+          type: string
+          description: Canonical absolute workspace directory.
+        user_home:
+          type: string
+          description: Canonical absolute host home used to validate resolved authored paths.
+        filesystem:
+          $ref: '#/components/schemas/EffectiveFilesystemPolicy'
+        network:
+          $ref: '#/components/schemas/EffectiveNetworkPolicy'
+        tools:
+          $ref: '#/components/schemas/ToolPolicy'
+        git:
+          $ref: '#/components/schemas/GitPolicy'

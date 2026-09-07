@@ -1,0 +1,308 @@
+openapi: 3.0.3
+info:
+  title: Hydra agent host protocol
+  version: 1.0.0
+
+paths: {}
+
+components:
+  schemas:
+    HostCommand:
+      description: One newline-delimited command sent to hydra-agent-host stdin.
+      oneOf:
+        - $ref: '#/components/schemas/InitializeCommand'
+        - $ref: '#/components/schemas/UserMessageCommand'
+        - $ref: '#/components/schemas/InterruptCommand'
+        - $ref: '#/components/schemas/SetModelCommand'
+        - $ref: '#/components/schemas/ControlResponseCommand'
+        - $ref: '#/components/schemas/ApprovalResponseCommand'
+        - $ref: '#/components/schemas/LoadEventsBeforeCommand'
+        - $ref: '#/components/schemas/LoadSubagentCommand'
+        - $ref: '#/components/schemas/UpdatePolicyCommand'
+        - $ref: '#/components/schemas/ShutdownCommand'
+      discriminator:
+        propertyName: type
+        mapping:
+          initialize: '#/components/schemas/InitializeCommand'
+          user_message: '#/components/schemas/UserMessageCommand'
+          interrupt: '#/components/schemas/InterruptCommand'
+          set_model: '#/components/schemas/SetModelCommand'
+          control_response: '#/components/schemas/ControlResponseCommand'
+          approval_response: '#/components/schemas/ApprovalResponseCommand'
+          load_events_before: '#/components/schemas/LoadEventsBeforeCommand'
+          load_subagent: '#/components/schemas/LoadSubagentCommand'
+          update_policy: '#/components/schemas/UpdatePolicyCommand'
+          shutdown: '#/components/schemas/ShutdownCommand'
+
+    HostFrame:
+      description: One newline-delimited frame emitted by hydra-agent-host stdout.
+      oneOf:
+        - $ref: '#/components/schemas/HelloFrame'
+        - $ref: '#/components/schemas/ReadyFrame'
+        - $ref: '#/components/schemas/StateSnapshotFrame'
+        - $ref: '#/components/schemas/ChatHistoryFrame'
+        - $ref: '#/components/schemas/ChatEventFrame'
+        - $ref: '#/components/schemas/SubagentEventsFrame'
+        - $ref: '#/components/schemas/ReplayDoneFrame'
+        - $ref: '#/components/schemas/ApprovalRequestFrame'
+        - $ref: '#/components/schemas/OperationResultFrame'
+        - $ref: '#/components/schemas/HostErrorFrame'
+      discriminator:
+        propertyName: type
+        mapping:
+          hello: '#/components/schemas/HelloFrame'
+          ready: '#/components/schemas/ReadyFrame'
+          state_snapshot: '#/components/schemas/StateSnapshotFrame'
+          chat_history: '#/components/schemas/ChatHistoryFrame'
+          chat_event: '#/components/schemas/ChatEventFrame'
+          subagent_events: '#/components/schemas/SubagentEventsFrame'
+          replay_done: '#/components/schemas/ReplayDoneFrame'
+          approval_request: '#/components/schemas/ApprovalRequestFrame'
+          operation_result: '#/components/schemas/OperationResultFrame'
+          host_error: '#/components/schemas/HostErrorFrame'
+
+    InitializeCommand:
+      type: object
+      additionalProperties: false
+      required: [type, protocol_version, workspace, conversation_dir, policy]
+      properties:
+        type:
+          type: string
+          enum: [initialize]
+        protocol_version:
+          type: integer
+        workspace:
+          type: string
+        conversation_dir:
+          type: string
+        policy:
+          $ref: './policy.yaml#/components/schemas/EffectivePolicy'
+        provider_executable:
+          type: string
+          description: Executable name or absolute path selected by the workspace extension.
+          x-go-type-skip-optional-pointer: true
+        resume_session_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    UserMessageCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, id, content]
+      properties:
+        type: { type: string, enum: [user_message] }
+        request_id: { type: string }
+        id: { type: string }
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    InterruptCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id]
+      properties:
+        type: { type: string, enum: [interrupt] }
+        request_id: { type: string }
+
+    SetModelCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, model]
+      properties:
+        type: { type: string, enum: [set_model] }
+        request_id: { type: string }
+        model: { type: string }
+
+    ControlResponseCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, response]
+      properties:
+        type: { type: string, enum: [control_response] }
+        request_id: { type: string }
+        response:
+          type: object
+          additionalProperties: true
+
+    ApprovalResponseCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, decision, scope]
+      properties:
+        type: { type: string, enum: [approval_response] }
+        request_id: { type: string }
+        decision:
+          type: string
+          enum: [allow, deny]
+        scope:
+          type: string
+          enum: [once, chat, workspace, profile]
+
+    LoadEventsBeforeCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, limit]
+      properties:
+        type: { type: string, enum: [load_events_before] }
+        request_id: { type: string }
+        cursor:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+
+    LoadSubagentCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, agent_id]
+      properties:
+        type: { type: string, enum: [load_subagent] }
+        request_id: { type: string }
+        agent_id: { type: string }
+
+    UpdatePolicyCommand:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, policy, behavior]
+      properties:
+        type: { type: string, enum: [update_policy] }
+        request_id: { type: string }
+        policy:
+          $ref: './policy.yaml#/components/schemas/EffectivePolicy'
+        provider_executable:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        behavior:
+          type: string
+          enum: [interrupt, next_turn]
+
+    ShutdownCommand:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { type: string, enum: [shutdown] }
+
+    HelloFrame:
+      type: object
+      additionalProperties: false
+      required: [type, protocol_version, host_version]
+      properties:
+        type: { type: string, enum: [hello] }
+        protocol_version: { type: integer }
+        host_version: { type: string }
+
+    ReadyFrame:
+      type: object
+      additionalProperties: false
+      required: [type, provider]
+      properties:
+        type: { type: string, enum: [ready] }
+        provider:
+          $ref: './policy.yaml#/components/schemas/ProviderKind'
+        session_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    StateSnapshotFrame:
+      type: object
+      additionalProperties: false
+      required: [type, projection]
+      properties:
+        type: { type: string, enum: [state_snapshot] }
+        projection:
+          $ref: './chat.yaml#/components/schemas/ChatProjection'
+
+    ChatHistoryFrame:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, events, done]
+      properties:
+        type: { type: string, enum: [chat_history] }
+        request_id: { type: string }
+        events:
+          type: array
+          items:
+            $ref: './chat.yaml#/components/schemas/ChatEvent'
+        next_cursor:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        done: { type: boolean }
+
+    ChatEventFrame:
+      type: object
+      additionalProperties: false
+      required: [type, event]
+      properties:
+        type: { type: string, enum: [chat_event] }
+        event:
+          $ref: './chat.yaml#/components/schemas/ChatEvent'
+
+    SubagentEventsFrame:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, agent_id, events]
+      properties:
+        type: { type: string, enum: [subagent_events] }
+        request_id: { type: string }
+        agent_id: { type: string }
+        events:
+          type: array
+          items:
+            $ref: './chat.yaml#/components/schemas/ChatEvent'
+
+    ReplayDoneFrame:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { type: string, enum: [replay_done] }
+
+    ApprovalRequestFrame:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, kind, target, summary]
+      properties:
+        type: { type: string, enum: [approval_request] }
+        request_id: { type: string }
+        kind:
+          type: string
+          enum: [filesystem_read, filesystem_write, core_tool, network, mcp, mcp_tool, git, integration]
+        target: { type: string }
+        canonical_target:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        summary: { type: string }
+        reason:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    OperationResultFrame:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, ok]
+      properties:
+        type: { type: string, enum: [operation_result] }
+        request_id: { type: string }
+        ok: { type: boolean }
+        error:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    HostErrorFrame:
+      type: object
+      additionalProperties: false
+      required: [type, code, message, fatal]
+      properties:
+        type: { type: string, enum: [host_error] }
+        request_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        code: { type: string }
+        message: { type: string }
+        fatal: { type: boolean }

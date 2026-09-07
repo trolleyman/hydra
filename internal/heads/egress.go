@@ -318,9 +318,9 @@ func (e *egressApprover) liveAllowedHost(host string) bool {
 
 // approve is the egress.ApproveFunc: it blocks until the user decides (or the
 // timeout/cancel fires), returning whether the connection to host may proceed.
-func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
+func (e *egressApprover) approve(host string, cancel <-chan struct{}) egress.Approval {
 	if e.projectRoot == "" {
-		return false // no channel to ask over (e.g. tests) → deny, as before
+		return egress.Approval{} // no channel to ask over (e.g. tests) -> deny, as before
 	}
 	// A host allow-listed in config.toml after this head launched isn't in the
 	// proxy's launch-time snapshot, so it would be parked for a prompt even though
@@ -329,7 +329,7 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
 	// returned host, so this read happens once per host.
 	if e.liveAllowedHost(host) {
 		log.Printf("hydra egress[%s]: %q is on the current config allow-list; allowing without prompt", e.id, host)
-		return true
+		return egress.Approval{Allow: true, Remember: true}
 	}
 	dir := paths.GetApprovalsDirFromProjectRoot(e.projectRoot, e.id)
 	// A host the user already allowed this session must not prompt again.
@@ -340,7 +340,7 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
 	// connection reaches the proxy.
 	if gate.HostAllowed(gate.LoadGrantedHosts(dir), host) {
 		log.Printf("hydra egress[%s]: %q was already allowed this session; allowing without prompt", e.id, host)
-		return true
+		return egress.Approval{Allow: true, Remember: true}
 	}
 	reqid := "egress-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	summary := "wants to connect to " + strconv.Quote(host)
@@ -355,7 +355,7 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
 	}
 	if err := gate.WriteRequest(dir, req); err != nil {
 		log.Printf("hydra egress[%s]: write approval request for %q: %v", e.id, host, err)
-		return false
+		return egress.Approval{}
 	}
 
 	e.enter(summary)
@@ -365,15 +365,16 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) bool {
 	deadline := time.Now().Add(egressApprovalTimeout)
 	for {
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
-			return d.Decision == gate.Allow
+			allowed := d.Decision == gate.Allow
+			return egress.Approval{Allow: allowed, Remember: allowed}
 		}
 		if time.Now().After(deadline) {
 			log.Printf("hydra egress[%s]: approval for %q timed out; denying", e.id, host)
-			return false
+			return egress.Approval{}
 		}
 		select {
 		case <-cancel:
-			return false
+			return egress.Approval{}
 		case <-time.After(egressApprovalPoll):
 		}
 	}

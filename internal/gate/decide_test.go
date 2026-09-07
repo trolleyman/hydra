@@ -160,6 +160,21 @@ func TestDecideMCPBlockLists(t *testing.T) {
 	}
 }
 
+func TestDecideCoreToolProfilePolicy(t *testing.T) {
+	policy := Policy{GateEnabled: true, ToolDecisions: map[string]Decision{
+		"read": Deny, "edit": Ask, "bash": Allow,
+	}}
+	if got := Decide(policy, "Read", map[string]any{"file_path": "/tmp/a"}); got.Decision != Deny || got.Kind != "read" {
+		t.Fatalf("Read decision = %+v", got)
+	}
+	if got := Decide(policy, "apply_patch", map[string]any{"patch": "..."}); got.Decision != Ask || got.Kind != "edit" {
+		t.Fatalf("apply_patch decision = %+v", got)
+	}
+	if got := Decide(policy, "Bash", map[string]any{"command": "git push"}); got.Decision != Deny {
+		t.Fatalf("explicit Bash allow bypassed invariant Git check: %+v", got)
+	}
+}
+
 func TestDecideGateDisabledAllowsEverything(t *testing.T) {
 	p := basePolicy()
 	p.GateEnabled = false

@@ -58,6 +58,22 @@ func TestInitializeAndToolsList(t *testing.T) {
 	}
 }
 
+func TestFocusedGitCatalogHidesDiscoveryAndDeniedOperations(t *testing.T) {
+	deps := Deps{
+		HideDiscovery: true,
+		GitOp:         func(GitOpRequest) GitOpResult { return GitOpResult{OK: true} },
+		GitAllowed:    func(operation string) bool { return operation == "checkout" || operation == "commit" },
+	}
+	names := toolNames(toolDefs(deps))
+	if strings.Join(names, ",") != "git_checkout,git_commit" {
+		t.Fatalf("focused catalog = %v", names)
+	}
+	response := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git_reset","arguments":{}}}`)
+	if response[0]["result"].(map[string]any)["isError"] != true {
+		t.Fatal("a hidden Git operation must also be rejected if called directly")
+	}
+}
+
 func TestListAvailableTool(t *testing.T) {
 	deps := Deps{
 		ListAvailable: func() []Candidate {

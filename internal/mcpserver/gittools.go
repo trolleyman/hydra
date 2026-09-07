@@ -15,6 +15,11 @@ func gitToolDefs() []map[string]any {
 	strArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	return []map[string]any{
 		{
+			"name":        "git_checkout",
+			"description": "Switch this VS Code workspace to an existing local branch. It refuses a dirty worktree and revalidates the current branch and HEAD immediately before changing the checkout.",
+			"inputSchema": map[string]any{"type": "object", "required": []string{"branch"}, "properties": map[string]any{"branch": map[string]any{"type": "string", "description": "Existing local branch to check out."}}},
+		},
+		{
 			"name":        "git_commit",
 			"description": "Commit your work onto YOUR branch, inside your worktree. By default stages ALL your changes (tracked + untracked, like `git add -A`) then commits; pass `paths` to stage only specific files, `staged` to commit what you already staged with git_add, or `amend` to amend your last commit. Raw `git commit` in the shell is blocked, so a commit can never land on the main repo or another branch.",
 			"inputSchema": map[string]any{
@@ -173,6 +178,15 @@ func withDesc(schema map[string]any, desc string) map[string]any {
 // the required fields. A non-empty error string is an agent-readable rejection.
 func parseGitOp(name string, raw json.RawMessage) (GitOpRequest, string) {
 	switch name {
+	case "git_checkout":
+		var a struct {
+			Branch string `json:"branch"`
+		}
+		_ = json.Unmarshal(raw, &a)
+		if strings.TrimSpace(a.Branch) == "" {
+			return GitOpRequest{}, "git_checkout requires a non-empty \"branch\"."
+		}
+		return GitOpRequest{Op: "checkout", Ref: a.Branch}, ""
 	case "git_commit":
 		var a struct {
 			Message string   `json:"message"`

@@ -68,6 +68,7 @@ func reviewAgentType(head Head) sandbox.AgentType {
 // isolation deliberately leaves open. Mirrors the git tool set in
 // internal/mcpserver/server.go.
 var reviewBlockedTools = []string{
+	"hydra__git_checkout",
 	"hydra__git_commit",
 	"hydra__git_add",
 	"hydra__git_reset",

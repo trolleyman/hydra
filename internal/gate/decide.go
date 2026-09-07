@@ -307,6 +307,14 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 	if !p.GateEnabled {
 		return Result{Decision: Allow}
 	}
+	if category := coreToolCategory(toolName); category != "" {
+		switch p.ToolDecisions[category] {
+		case Deny:
+			return Result{Decision: Deny, Kind: category, Target: toolName, Reason: "core tool " + quote(category) + " is disabled by the active profile"}
+		case Ask:
+			return Result{Decision: Ask, Kind: category, Target: toolName, ArgsPreview: previewArgs(toolInput), Reason: "core tool " + quote(category) + " requires approval in the active profile"}
+		}
+	}
 
 	// MCP tool calls: mcp__<server>__<tool> (plugins: mcp__plugin_<p>_<server>__).
 	if server, tool, ok := mcpServerTool(toolName); ok {
@@ -492,6 +500,23 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 	return Result{
 		Decision: Ask, Kind: "tool", Target: toolName,
 		Reason: "tool " + quote(toolName) + " is not recognized by Hydra's security gate - it may be an un-vetted MCP/connector tool. It has been parked for approval. If this is a legitimate built-in tool, ask the user to add it to policy.known_tools in .hydra/config.toml (or, for a new built-in that should ship recognized, defaultKnownToolNames in internal/gate/decide.go) so Hydra stops gating it.",
+	}
+}
+
+func coreToolCategory(toolName string) string {
+	switch toolName {
+	case "Read", "NotebookRead", "read_file", "view_image":
+		return "read"
+	case "Glob", "Grep", "LS", "WebSearch", "search", "search_files":
+		return "search"
+	case "Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch", "write_file":
+		return "edit"
+	case "Bash", "BashOutput", "KillBash", "KillShell", "exec", "exec_command", "write_stdin", "wait":
+		return "bash"
+	case "WebFetch", "fetch":
+		return "fetch"
+	default:
+		return ""
 	}
 }
 

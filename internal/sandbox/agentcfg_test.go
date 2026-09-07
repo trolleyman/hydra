@@ -47,6 +47,17 @@ func TestBuildClaudeSettingsRegistersGateWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestBuildStandaloneClaudeSettingsContainsOnlyGateHook(t *testing.T) {
+	data, err := BuildStandaloneClaudeSettings("/tmp/hydra-agent-host", []string{"github"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "gate claude") || strings.Contains(text, "trigger-hook") || strings.Contains(text, "SessionStart") {
+		t.Fatalf("standalone Claude settings:\n%s", data)
+	}
+}
+
 func TestBuildClaudeSettingsNoGateWhenDisabled(t *testing.T) {
 	data, err := BuildClaudeSettings(nil, "/tmp/hydra-internal", false, nil)
 	if err != nil {
@@ -241,6 +252,25 @@ func TestBuildStrictMCPConfig(t *testing.T) {
 	}
 	if hydra := cfg.MCPServers[gate.HydraControlServer]; hydra["command"] != "/tmp/hydra-internal" {
 		t.Errorf("control server = %+v, want command /tmp/hydra-internal", hydra)
+	}
+}
+
+func TestBuildStrictMCPConfigCanOmitHydraControlServer(t *testing.T) {
+	data, err := BuildStrictMCPConfig([]byte(`{"mcpServers":{"github":{"command":"gh"}}}`), nil, []string{"github"}, "", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Servers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := config.Servers["github"]; !ok {
+		t.Fatalf("filtered config omitted allowed server: %s", data)
+	}
+	if _, ok := config.Servers[gate.HydraControlServer]; ok {
+		t.Fatalf("standalone config injected Hydra control server: %s", data)
 	}
 }
 

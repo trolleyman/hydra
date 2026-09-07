@@ -36,6 +36,7 @@ type Op string
 
 const (
 	OpCommit         Op = "commit"          // stage + commit
+	OpCheckout       Op = "checkout"        // switch the current workspace branch
 	OpReset          Op = "reset"           // move HEAD (soft/mixed/hard) or unstage paths
 	OpRevert         Op = "revert"          // revert a commit (new commit)
 	OpAdd            Op = "add"             // stage whole files or specific line ranges

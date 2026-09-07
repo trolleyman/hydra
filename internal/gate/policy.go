@@ -51,6 +51,11 @@ type Policy struct {
 	// GateEnabled toggles the runtime decision gate. When false, Decide always
 	// allows (pre-launch MCP stripping still applies separately).
 	GateEnabled bool `json:"gate_enabled"`
+	// ToolDecisions applies profile-level allow/ask/deny decisions to the five
+	// sandboxed core capability groups: read, search, edit, bash, and fetch.
+	// An explicit allow still passes through the gate's invariant credential,
+	// policy-tamper, process-kill, and Git checks below.
+	ToolDecisions map[string]Decision `json:"tool_decisions,omitempty"`
 	// HostMediatedGit is true when git_isolation=readonly, i.e. .git is read-only in
 	// the sandbox so raw git writes fail at the OS. The gate then redirects raw git
 	// write-subcommands (add/reset/revert/rebase/cherry-pick/commit) to the

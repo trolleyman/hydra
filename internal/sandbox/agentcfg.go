@@ -130,6 +130,25 @@ func BuildClaudeSettings(existing []byte, hydraBin string, gateEnabled bool, mcp
 	return data, nil
 }
 
+// BuildStandaloneClaudeSettings installs only the decision gate used by the
+// daemon-free agent host. It deliberately omits Hydra status/control hooks.
+func BuildStandaloneClaudeSettings(agentHostBin string, mcpAllowed []string) ([]byte, error) {
+	hooks := map[string]interface{}{
+		"PreToolUse": []matcherGroup{{Hooks: []hookHandler{{Type: "command", Command: GateCommand(agentHostBin, "claude")}}}},
+	}
+	settings := map[string]interface{}{
+		"skipDangerousModePermissionPrompt": true,
+		"hooks":                             hooks,
+		"enableAllProjectMcpServers":        false,
+		"enabledMcpjsonServers":             append([]string{}, mcpAllowed...),
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal standalone Claude settings: %w", err))
+	}
+	return data, nil
+}
+
 // BuildClaudeConfig generates the .claude.json content with project trust
 // settings, and strips any MCP server (user-scope or per-project) not on
 // mcpAllowed so non-allow-listed servers never spawn (a stdio MCP server is code
@@ -410,8 +429,9 @@ func HydraMCPServer(hydraBin, agentType string) (name, command string, args []st
 	return gate.HydraControlServer, hydraBin, []string{"mcp", agentType}
 }
 
-// BuildStrictMCPConfig renders the head's WHOLE MCP config - the allow-listed
-// servers plus Hydra's control server - as a standalone {"mcpServers": {...}}
+// BuildStrictMCPConfig renders the caller's WHOLE MCP config - the allow-listed
+// servers plus Hydra's control server when hydraBin is non-empty - as a
+// standalone {"mcpServers": {...}}
 // document, for launching with --mcp-config <file> --strict-mcp-config.
 //
 // Under strict, this file is the agent's only source of MCP servers: the host's
@@ -467,10 +487,13 @@ func BuildStrictMCPConfig(claudeJSON, mcpJSON []byte, keep []string, hydraBin, a
 			}
 		}
 	}
-	// Injected last and unconditionally, so the head keeps its git/status tools
-	// even if the allow-list is empty or a source was unreadable.
-	name, command, args := HydraMCPServer(hydraBin, agentType)
-	servers[name] = map[string]any{"type": "stdio", "command": command, "args": args}
+	// Hydra heads pass hydraBin to retain their git/status control tools. Other
+	// clients of the shared sandbox (notably hydra-agent-host) deliberately leave
+	// it empty so no daemon/head authority leaks into their provider process.
+	if hydraBin != "" {
+		name, command, args := HydraMCPServer(hydraBin, agentType)
+		servers[name] = map[string]any{"type": "stdio", "command": command, "args": args}
+	}
 
 	data, err := json.MarshalIndent(map[string]any{"mcpServers": servers}, "", "  ")
 	if err != nil {
@@ -605,8 +628,26 @@ func BuildCodexHooks(existing []byte, hydraBin string, gateEnabled bool) ([]byte
 	return data, nil
 }
 
+// BuildStandaloneCodexHooks installs only the decision gate used by the
+// daemon-free agent host. It deliberately omits Hydra status/control hooks.
+func BuildStandaloneCodexHooks(agentHostBin string) ([]byte, error) {
+	group, err := json.Marshal(matcherGroup{Hooks: []hookHandler{{Type: "command", Command: GateCommand(agentHostBin, "codex")}}})
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	data, err := json.MarshalIndent(map[string]any{
+		"description": "Hydra VS Code profile gate",
+		"hooks":       map[string][]json.RawMessage{"PreToolUse": {json.RawMessage(group)}},
+	}, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal standalone Codex hooks: %w", err))
+	}
+	return data, nil
+}
+
 // BuildCodexConfig filters the user's Codex MCP servers to keep, injects Hydra's
-// control server, and preserves every non-MCP setting (model, auth, etc.).
+// control server when hydraBin is non-empty, and preserves every non-MCP setting
+// (model, auth, etc.).
 // Codex reads MCP servers from ~/.codex/config.toml. A malformed host config is
 // a hard error so the caller can skip seeding rather than clobber it.
 var codexHydraMCPEnvVars = []string{
@@ -617,6 +658,7 @@ var codexHydraMCPEnvVars = []string{
 	"HYDRA_BRANCH",
 	"HYDRA_BASE_BRANCH",
 	"HYDRA_GITOPS_DIR",
+	"HYDRA_VSCODE_GIT_OPERATIONS",
 	"HYDRA_REVIEW_PATH",
 	"HYDRA_REVIEW_REQ_DIR",
 	"HYDRA_AGENT_REQ_DIR",
@@ -626,6 +668,16 @@ var codexHydraMCPEnvVars = []string{
 }
 
 func BuildCodexConfig(existing []byte, hydraBin string, keep []string) ([]byte, error) {
+	return errtrace.Wrap2(buildCodexConfig(existing, hydraBin, keep, hydraBin != ""))
+}
+
+// BuildStandaloneCodexConfig filters MCP servers without adding Hydra's
+// control server and explicitly enables the standalone gate hooks file.
+func BuildStandaloneCodexConfig(existing []byte, keep []string) ([]byte, error) {
+	return errtrace.Wrap2(buildCodexConfig(existing, "", keep, true))
+}
+
+func buildCodexConfig(existing []byte, hydraBin string, keep []string, hooksEnabled bool) ([]byte, error) {
 	cfg := map[string]interface{}{}
 	if len(existing) > 0 {
 		if err := toml.Unmarshal(existing, &cfg); err != nil {
@@ -636,7 +688,10 @@ func BuildCodexConfig(existing []byte, hydraBin string, keep []string) ([]byte, 
 	if features == nil {
 		features = map[string]interface{}{}
 	}
-	features["hooks"] = true
+	// Callers choose this explicitly: Hydra heads and the standalone agent host
+	// each inject their own trusted hooks.json; plain filtered-config callers do
+	// not activate hooks copied from the host provider profile.
+	features["hooks"] = hooksEnabled
 	cfg["features"] = features
 	servers, _ := cfg["mcp_servers"].(map[string]interface{})
 	if servers == nil {
@@ -651,11 +706,13 @@ func BuildCodexConfig(existing []byte, hydraBin string, keep []string) ([]byte, 
 			delete(servers, name)
 		}
 	}
-	name, command, args := HydraMCPServer(hydraBin, "codex")
-	servers[name] = map[string]interface{}{
-		"command":  command,
-		"args":     args,
-		"env_vars": codexHydraMCPEnvVars,
+	if hydraBin != "" {
+		name, command, args := HydraMCPServer(hydraBin, "codex")
+		servers[name] = map[string]interface{}{
+			"command":  command,
+			"args":     args,
+			"env_vars": codexHydraMCPEnvVars,
+		}
 	}
 	cfg["mcp_servers"] = servers
 
