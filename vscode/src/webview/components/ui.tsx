@@ -1,4 +1,5 @@
-import React, { type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { BadgeInfo } from 'lucide-react'
+import React, { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 export function Button({ className = '', variant = 'primary', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' }) {
   const variants = {
@@ -20,4 +21,9 @@ export function PageHeading({ title, detail, actions }: { title: string; detail?
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return <label className="flex flex-col gap-1.5 text-xs font-medium text-[var(--vscode-foreground)]"><span>{label}</span>{children}{hint && <span className="font-normal leading-relaxed text-[var(--vscode-descriptionForeground)]">{hint}</span>}</label>
+}
+
+export function InfoTip({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return <span className="relative inline-flex" onClick={event => event.stopPropagation()}><button type="button" aria-label="More information" aria-expanded={open} className="rounded-full text-[var(--vscode-descriptionForeground)] hover:text-[var(--vscode-foreground)]" onClick={() => setOpen(value => !value)}><BadgeInfo className="size-3.5" /></button>{open && <span role="tooltip" className="info-popover">{children}</span>}</span>
 }

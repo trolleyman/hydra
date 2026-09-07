@@ -10,6 +10,15 @@ export type ViewState = {
   networkMode?: string
   running: boolean
   hasConversation: boolean
+  queuedMessages?: { id: string; text: string }[]
+  appearance?: {
+    interfaceFontFamily: string
+    chatFontFamily: string
+    codeFontFamily: string
+    interfaceFontSize: number
+    chatFontSize: number
+    codeFontSize: number
+  }
 }
 
 export type HistoryEntry = {

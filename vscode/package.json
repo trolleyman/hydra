@@ -253,6 +253,48 @@
           "default": "",
           "scope": "machine-overridable",
           "description": "Development override for the packaged hydra-agent-host executable."
+        },
+        "hydra.appearance.interfaceFontFamily": {
+          "type": "string",
+          "default": "Inter",
+          "scope": "window",
+          "description": "CSS font family used by Hydra controls and metadata."
+        },
+        "hydra.appearance.chatFontFamily": {
+          "type": "string",
+          "default": "Merriweather",
+          "scope": "window",
+          "description": "CSS font family used by chat messages."
+        },
+        "hydra.appearance.codeFontFamily": {
+          "type": "string",
+          "default": "Fira Code",
+          "scope": "window",
+          "description": "CSS font family used by code and tool details."
+        },
+        "hydra.appearance.interfaceFontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 11,
+          "maximum": 18,
+          "scope": "window",
+          "description": "Interface font size in pixels."
+        },
+        "hydra.appearance.chatFontSize": {
+          "type": "number",
+          "default": 14,
+          "minimum": 11,
+          "maximum": 20,
+          "scope": "window",
+          "description": "Chat message font size in pixels."
+        },
+        "hydra.appearance.codeFontSize": {
+          "type": "number",
+          "default": 12,
+          "minimum": 10,
+          "maximum": 18,
+          "scope": "window",
+          "description": "Code and tool detail font size in pixels."
         }
       }
     }
