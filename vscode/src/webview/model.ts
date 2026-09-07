@@ -8,7 +8,7 @@ export type Item =
   | { kind: 'step'; key: string; title: string; summary?: string; input?: unknown; output?: unknown; status?: string; error?: boolean }
   | { kind: 'subagent'; key: string; id: string; title: string; status: string; prompt?: string }
   | { kind: 'question'; key: string; requestID: string; toolID?: string; questions: QuestionSpec[]; active: boolean; expired?: boolean; answer?: string }
-  | { kind: 'commit'; key: string; sha: string; subject: string; additions?: number; deletions?: number }
+  | { kind: 'commit'; key: string; sha: string; shortSha: string; subject: string; additions?: number; deletions?: number }
   | { kind: 'notice'; key: string; text: string }
 
 export function conversationItems(events: Event[]): Item[] {
@@ -61,7 +61,8 @@ export function conversationItems(events: Event[]): Item[] {
     } else if (['turn_completed', 'turn_failed', 'turn_interrupted'].includes(event.type)) {
       for (const prior of questions.values()) if (items[prior]?.kind === 'question' && items[prior].active) items[prior] = { ...items[prior], active: false, expired: true }
     } else if (event.type === 'commit_created') {
-      items.push({ kind: 'commit', key: `e${event.seq}`, sha: String(payload.short_sha ?? payload.sha ?? '').slice(0, 8), subject: String(payload.subject ?? 'Git commit created'), additions: numberValue(payload.additions), deletions: numberValue(payload.deletions) })
+      const sha = String(payload.sha ?? payload.short_sha ?? '')
+      items.push({ kind: 'commit', key: `e${event.seq}`, sha, shortSha: String(payload.short_sha ?? sha.slice(0, 7)), subject: String(payload.subject ?? 'Git commit created'), additions: numberValue(payload.additions), deletions: numberValue(payload.deletions) })
     } else if (event.type === 'notice') {
       items.push({ kind: 'notice', key: `e${event.seq}`, text: String(payload.text ?? payload.summary ?? 'Notice') })
     }
@@ -94,9 +95,9 @@ export function parseInteraction(payload: Record<string, any>): { requestID: str
   return questions.length ? { requestID, ...(toolID ? { toolID } : {}), questions } : undefined
 }
 
-export function buildQuestionResponse(requestID: string, questions: QuestionSpec[], answers: Record<string, string[]>, other: Record<string, string>, notes: Record<string, string>): Record<string, unknown> | undefined {
+export function buildQuestionResponse(requestID: string, questions: QuestionSpec[], answers: Record<string, string[]>, other: Record<string, string>, notes: Record<string, string>, emptyAnswers = new Set<string>()): Record<string, unknown> | undefined {
   const values = Object.fromEntries(questions.map(question => [question.question, [...(answers[question.question] ?? []), ...(other[question.question]?.trim() ? [other[question.question].trim()] : [])].join(', ')]))
-  if (Object.values(values).some(value => !value)) return undefined
+  if (Object.entries(values).some(([question, value]) => !value && !emptyAnswers.has(question))) return undefined
   const annotations = Object.fromEntries(Object.entries(notes).filter(([, note]) => note.trim()).map(([question, note]) => [question, { notes: note.trim() }]))
   const updatedInput = { answers: values, ...(Object.keys(annotations).length ? { annotations } : {}) }
   return { subtype: 'success', request_id: requestID, response: { behavior: 'allow', updatedInput } }

@@ -35,7 +35,8 @@
     "lucide-react": "^1.26.0",
     "marked": "^18.0.11",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "refractor": "^5.0.0"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
@@ -236,8 +237,14 @@
         },
         "hydra.defaultProvider": {
           "type": "string",
-          "enum": ["codex", "claude"],
-          "enumItemLabels": ["Codex", "Claude"],
+          "enum": [
+            "codex",
+            "claude"
+          ],
+          "enumItemLabels": [
+            "Codex",
+            "Claude"
+          ],
           "default": "codex",
           "scope": "window",
           "description": "Provider selected for new conversations. Provider selection is independent of permission profiles."
@@ -287,24 +294,70 @@
         "hydra.appearance.interfaceFont": {
           "type": "string",
           "default": "inter",
-          "enum": ["system-sans", "inter", "roboto-flex", "ibm-plex-sans", "system-serif", "merriweather", "source-serif"],
-          "enumItemLabels": ["System sans", "Inter", "Roboto Flex", "IBM Plex Sans", "System serif", "Merriweather", "Source Serif 4"],
+          "enum": [
+            "system-sans",
+            "inter",
+            "roboto-flex",
+            "ibm-plex-sans",
+            "system-serif",
+            "merriweather",
+            "source-serif"
+          ],
+          "enumItemLabels": [
+            "System sans",
+            "Inter",
+            "Roboto Flex",
+            "IBM Plex Sans",
+            "System serif",
+            "Merriweather",
+            "Source Serif 4"
+          ],
           "scope": "window",
           "description": "Font used by Hydra controls and metadata."
         },
         "hydra.appearance.chatFont": {
           "type": "string",
           "default": "merriweather",
-          "enum": ["system-serif", "merriweather", "source-serif", "system-sans", "inter", "roboto-flex", "ibm-plex-sans"],
-          "enumItemLabels": ["System serif", "Merriweather", "Source Serif 4", "System sans", "Inter", "Roboto Flex", "IBM Plex Sans"],
+          "enum": [
+            "system-serif",
+            "merriweather",
+            "source-serif",
+            "system-sans",
+            "inter",
+            "roboto-flex",
+            "ibm-plex-sans"
+          ],
+          "enumItemLabels": [
+            "System serif",
+            "Merriweather",
+            "Source Serif 4",
+            "System sans",
+            "Inter",
+            "Roboto Flex",
+            "IBM Plex Sans"
+          ],
           "scope": "window",
           "description": "Font used by assistant prose and the composer. User messages remain sans serif."
         },
         "hydra.appearance.codeFont": {
           "type": "string",
           "default": "fira-code",
-          "enum": ["system-mono", "iosevka", "fira-code", "jetbrains-mono", "ibm-plex-mono", "source-code-pro"],
-          "enumItemLabels": ["System mono", "Iosevka", "Fira Code", "JetBrains Mono", "IBM Plex Mono", "Source Code Pro"],
+          "enum": [
+            "system-mono",
+            "iosevka",
+            "fira-code",
+            "jetbrains-mono",
+            "ibm-plex-mono",
+            "source-code-pro"
+          ],
+          "enumItemLabels": [
+            "System mono",
+            "Iosevka",
+            "Fira Code",
+            "JetBrains Mono",
+            "IBM Plex Mono",
+            "Source Code Pro"
+          ],
           "scope": "window",
           "description": "Font used by code and tool details."
         },
