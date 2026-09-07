@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildQuestionResponse, conversationItems, dedupe, foldStream, parseInteraction } from '../src/webview/model.ts'
+import { buildQuestionResponse, conversationItems, dedupe, foldStream, parseInteraction, splitAttachments } from '../src/webview/model.ts'
 
 const event = (seq, type, payload = {}) => ({ seq, type, timestamp: '2026-09-07T00:00:00Z', payload })
 
@@ -23,7 +23,7 @@ test('conversation projection pairs tool and sub-agent lifecycle events', () => 
     event(5, 'subagent_completed', { id: 'agent-1', description: 'Review', status: 'completed' }),
   ])
   assert.equal(items.length, 3)
-  assert.deepEqual(items[1], { kind: 'step', key: 'tool-tool-1', title: 'Bash', input: undefined, output: 'ok', status: 'completed', error: false })
+  assert.deepEqual(items[1], { kind: 'step', key: 'tool-tool-1', title: 'Bash', summary: 'Run check', input: { description: 'Run check' }, output: 'ok', status: undefined, error: false })
   assert.equal(items[2].kind, 'subagent')
   assert.equal(items[2].status, 'completed')
 })
@@ -83,4 +83,11 @@ test('question responses preserve multi-select choices, free text, and notes', (
 
 test('history event deduplication is sequence ordered', () => {
   assert.deepEqual(dedupe([event(2, 'notice'), event(1, 'notice'), event(2, 'notice')]).map(value => value.seq), [1, 2])
+})
+
+test('attachment references round-trip as presentation metadata', () => {
+  assert.deepEqual(splitAttachments('Review this\n\nAttached files (read these paths):\n- "src/a.ts"\n- "/tmp/image.png"'), {
+    text: 'Review this',
+    attachments: ['src/a.ts', '/tmp/image.png'],
+  })
 })
