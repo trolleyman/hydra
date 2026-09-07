@@ -202,8 +202,17 @@ func run(ctx context.Context, in io.Reader, out, logOutput io.Writer, version st
 				continue
 			}
 			notice := chat.Notice{}
-			notice.Text = fmt.Sprintf("Profile changed from %s to %s", previous.Profile, policy.Profile)
-			_, _ = manager.Append(providerSessionID, notice)
+			switch {
+			case previous.Profile != policy.Profile:
+				notice.Text = fmt.Sprintf("Profile changed from %s to %s", previous.Profile, policy.Profile)
+			case previous.Provider != policy.Provider:
+				notice.Text = fmt.Sprintf("Provider changed from %s to %s", previous.Provider, policy.Provider)
+			case previous.Effort != policy.Effort:
+				notice.Text = "Thinking effort changed"
+			}
+			if notice.Text != "" {
+				_, _ = manager.Append(providerSessionID, notice)
+			}
 			_ = w.write(agenthostapi.ReadyFrame{Type: agenthostapi.Ready, Provider: policy.Provider, SessionId: resumeID})
 			_ = writeResult(w, command.RequestId, nil)
 		case agenthostapi.ShutdownCommand:

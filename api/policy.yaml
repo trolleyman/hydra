@@ -191,15 +191,6 @@ components:
           type: string
           description: User-facing label; the containing settings key remains the stable profile ID.
           x-go-type-skip-optional-pointer: true
-        provider:
-          $ref: '#/components/schemas/ProviderKind'
-        model:
-          type: string
-          x-go-type-skip-optional-pointer: true
-        effort:
-          type: string
-          description: Provider-specific reasoning effort.
-          x-go-type-skip-optional-pointer: true
         prompt:
           type: string
           x-go-type-skip-optional-pointer: true

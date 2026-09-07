@@ -11,9 +11,9 @@ const gitOperations = ['checkout', 'add', 'commit', 'reset', 'revert', 'cherry_p
 export function ProfilesView({ state }: { state: ViewState }) {
   const [selected, setSelected] = useState(state.profile)
   const [scope, setScope] = useState<'user' | 'workspace'>('user')
-  const source = state.profileValues?.[selected] ?? {}
+  const source = policyOnly(state.profileValues?.[selected] ?? {})
   const [draft, setDraft] = useState<any>(() => structuredClone(source))
-  useEffect(() => { setDraft(structuredClone(state.profileValues?.[selected] ?? {})) }, [selected, state.profileValues])
+  useEffect(() => { setDraft(structuredClone(policyOnly(state.profileValues?.[selected] ?? {}))) }, [selected, state.profileValues])
   useEffect(() => { if (!state.profiles.includes(selected)) setSelected(state.profile) }, [selected, state.profile, state.profiles])
   const set = (path: string[], value: unknown) => setDraft((current: any) => {
     const next = structuredClone(current)
@@ -25,12 +25,11 @@ export function ProfilesView({ state }: { state: ViewState }) {
 
   return <section className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
     <div className="mx-auto max-w-3xl">
-      <PageHeading title="Profiles" detail="Configure each agent's provider, prompt, tools, and sandbox." actions={<><Button variant="ghost" className="px-2" onClick={() => postMessage({ type: 'openSettings' })}><ExternalLink className="size-3.5" />Raw</Button><Button className="px-2" onClick={() => postMessage({ type: 'createProfile' })}><Plus className="size-3.5" />New</Button></>} />
+      <PageHeading title="Profiles" detail="Configure prompts, tools, and sandbox policy independently of the provider and model." actions={<><Button variant="ghost" className="px-2" onClick={() => postMessage({ type: 'openSettings' })}><ExternalLink className="size-3.5" />Raw</Button><Button className="px-2" onClick={() => postMessage({ type: 'createProfile' })}><Plus className="size-3.5" />New</Button></>} />
       <div className="mb-3 rounded-lg border border-[var(--hydra-border)] bg-[var(--hydra-surface)] p-3"><Field label="Profile"><select value={selected} onChange={event => setSelected(event.target.value)}>{state.profiles.map(id => <option key={id} value={id}>{state.profileLabels?.[id] ?? id}{id === state.profile ? ' (active)' : ''}</option>)}</select></Field></div>
       <div className="flex flex-col gap-2.5">
-        <SettingsSection icon={<Settings2 />} title="Identity" explanation="The standing prompt is loaded as session instructions when the provider starts. It is not appended to every user turn." open>
+        <SettingsSection icon={<Settings2 />} title="Identity" explanation="The profile name is presentation only. Its standing prompt is loaded as session instructions when the provider starts and is not appended to every user turn. Provider, model, and thinking effort are conversation controls, not profile permissions." open>
           <Field label="Name"><input value={draft.name ?? ''} placeholder={selected} onChange={event => set(['name'], event.target.value)} /></Field>
-          <div className="grid grid-cols-2 gap-2.5"><Field label="Provider"><select value={draft.provider ?? 'codex'} onChange={event => set(['provider'], event.target.value)}><option value="codex">Codex</option><option value="claude">Claude</option></select></Field><Field label="Model"><input value={draft.model ?? ''} placeholder="Provider default" onChange={event => set(['model'], event.target.value || undefined)} /></Field></div>
           <Field label="Standing prompt"><textarea rows={5} value={draft.prompt ?? ''} onChange={event => set(['prompt'], event.target.value)} /></Field>
         </SettingsSection>
         <SettingsSection icon={<Wrench />} title="Core tools" explanation="Allow makes a tool available without a tool-level prompt; Ask requests approval; Deny removes it. These decisions never bypass the sandbox: Read and Search still require readable paths, Edit requires writable paths, and Bash and Fetch still obey filesystem and network policy." open>
@@ -68,3 +67,4 @@ function ListField({ label, values, onChange }: { label: string; values?: string
 
 function capitalize(value: string): string { return value[0].toUpperCase() + value.slice(1) }
 function sentenceCase(value: string): string { return value[0].toUpperCase() + value.slice(1).replaceAll('_', ' ') }
+function policyOnly(value: any): any { const { provider: _provider, model: _model, effort: _effort, ...policy } = value; return policy }

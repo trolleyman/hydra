@@ -7,14 +7,17 @@ export type ViewState = {
   profiles: string[]
   profileLabels?: Record<string, string>
   profileValues?: Record<string, any>
+  provider?: 'claude' | 'codex'
+  model?: string
+  effort?: string
   networkMode?: string
   running: boolean
   hasConversation: boolean
   queuedMessages?: { id: string; text: string }[]
   appearance?: {
-    interfaceFontFamily: string
-    chatFontFamily: string
-    codeFontFamily: string
+    interfaceFont: string
+    chatFont: string
+    codeFont: string
     interfaceFontSize: number
     chatFontSize: number
     codeFontSize: number

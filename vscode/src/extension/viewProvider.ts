@@ -8,6 +8,7 @@ import { defaultProfileName, profiles, resolveProfile, validateProfile, type Aut
 
 type Page = 'chat' | 'history' | 'profiles'
 type ChatEvent = Extract<HostFrame, { type: 'chat_event' }>['event']
+type Provider = 'claude' | 'codex'
 
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view?: vscode.WebviewView
@@ -18,6 +19,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private conversationID?: string
   private workspace?: vscode.WorkspaceFolder
   private pendingProfile?: string
+  private runtimeProvider: Provider
+  private runtimeModel: string
+  private runtimeEffort: string
   private readonly queuedMessages: { id: string; text: string }[] = []
   private readonly approvals = new Map<string, Extract<HostFrame, { type: 'approval_request' }>>()
   private readonly disposables: vscode.Disposable[] = []
@@ -26,8 +30,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private metadataUpdate = Promise.resolve()
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
+    this.runtimeProvider = vscode.workspace.getConfiguration('hydra').get<Provider>('defaultProvider', 'codex')
+    const runtime = this.configuredRuntime(this.runtimeProvider)
+    this.runtimeModel = runtime.model
+    this.runtimeEffort = runtime.effort
     this.disposables.push(vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('hydra')) void this.reloadProfile().catch(error => this.reportError(error))
+      if (event.affectsConfiguration('hydra.appearance')) {
+        this.postState()
+        return
+      }
+      if (event.affectsConfiguration('hydra.profiles') || event.affectsConfiguration('hydra.defaultProfile')) {
+        void this.reloadProfile().catch(error => this.reportError(error))
+      }
     }))
   }
 
@@ -58,6 +72,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       title: 'New chat',
       workspace: workspace.uri.fsPath,
       provider: policy.provider,
+      model: policy.model,
+      effort: policy.effort,
       profile: this.profile,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -157,7 +173,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
           this.postState()
         } else await this.sendUserMessage(text)
         break
-      case 'selectModel': this.client?.send({ type: 'set_model', request_id: randomUUID(), model: String(message.model ?? '') }); break
+      case 'selectProvider': await this.selectProvider(String(message.provider)); break
+      case 'selectModel':
+        this.runtimeModel = String(message.model ?? '')
+        this.client?.send({ type: 'set_model', request_id: randomUUID(), model: this.runtimeModel })
+        await this.updateRuntimeMetadata()
+        this.postState()
+        break
+      case 'selectEffort': await this.selectEffort(String(message.effort ?? '')); break
       case 'pickFiles': await this.pickFiles(); break
       case 'interrupt': this.client?.send({ type: 'interrupt', request_id: randomUUID() }); break
       case 'approval':
@@ -182,7 +205,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case 'saveProfile': {
         const name = String(message.name)
         if (!name.trim() || typeof message.profile !== 'object' || !message.profile) break
-        const profile = message.profile as AuthoredProfile
+        const profile = policyOnly(message.profile as AuthoredProfile)
         validateProfile(name, profile)
         const configuration = vscode.workspace.getConfiguration('hydra')
         const target = message.scope === 'workspace' ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global
@@ -226,6 +249,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     }
     const configured = profiles()
     const profile = configured[metadata.profile] ? metadata.profile : defaultProfileName(configured)
+    this.runtimeProvider = metadata.provider === 'claude' || metadata.provider === 'codex' ? metadata.provider : this.runtimeProvider
+    const configuredRuntime = this.configuredRuntime(this.runtimeProvider)
+    this.runtimeModel = typeof metadata.model === 'string' ? metadata.model : configuredRuntime.model
+    this.runtimeEffort = typeof metadata.effort === 'string' ? metadata.effort : configuredRuntime.effort
     const policy = await this.resolvePolicy(profile, workspace)
     let resumeSessionID: string | undefined
     try {
@@ -309,7 +336,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       const metadata = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID, 'metadata.json')
       try {
         const current = JSON.parse(await fs.readFile(metadata, 'utf8'))
-        await fs.writeFile(metadata, JSON.stringify({ ...current, profile: name, provider: policy.provider, updatedAt: new Date().toISOString() }, null, 2))
+        await fs.writeFile(metadata, JSON.stringify({ ...current, profile: name, provider: policy.provider, model: policy.model, effort: policy.effort, updatedAt: new Date().toISOString() }, null, 2))
       } catch {}
     }
     this.postState()
@@ -361,6 +388,49 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.post({ type: 'selectedFiles', files: references })
   }
 
+  private async selectProvider(value: string): Promise<void> {
+    if (value !== 'claude' && value !== 'codex') return
+    if (this.running) {
+      void vscode.window.showInformationMessage('Stop the running response before changing providers.')
+      return
+    }
+    if (value === this.runtimeProvider) return
+    this.runtimeProvider = value
+    const runtime = this.configuredRuntime(value)
+    this.runtimeModel = runtime.model
+    this.runtimeEffort = runtime.effort
+    if (this.client) await this.applyProfile(this.profile)
+    else this.postState()
+  }
+
+  private async selectEffort(effort: string): Promise<void> {
+    if (this.running) {
+      void vscode.window.showInformationMessage('Stop the running response before changing thinking effort.')
+      return
+    }
+    if (effort === this.runtimeEffort) return
+    this.runtimeEffort = effort
+    if (this.client) await this.applyProfile(this.profile)
+    else this.postState()
+  }
+
+  private configuredRuntime(provider: Provider): { model: string; effort: string } {
+    const settings = vscode.workspace.getConfiguration(`hydra.providers.${provider}`)
+    return {
+      model: settings.get('defaultModel', provider === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
+      effort: settings.get('defaultEffort', provider === 'codex' ? 'medium' : ''),
+    }
+  }
+
+  private async updateRuntimeMetadata(): Promise<void> {
+    if (!this.conversationID) return
+    const metadata = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID, 'metadata.json')
+    try {
+      const current = JSON.parse(await fs.readFile(metadata, 'utf8'))
+      await fs.writeFile(metadata, JSON.stringify({ ...current, provider: this.runtimeProvider, model: this.runtimeModel, effort: this.runtimeEffort, updatedAt: new Date().toISOString() }, null, 2))
+    } catch {}
+  }
+
   private async answerApproval(requestID: string, decision: 'allow' | 'deny', scope: 'once' | 'chat' | 'workspace' | 'profile'): Promise<void> {
     const request = this.approvals.get(requestID)
     if (!request || !this.client) return
@@ -380,7 +450,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private resolvePolicy(name: string, workspace: vscode.WorkspaceFolder) {
-    return resolveProfile(name, workspace, this.context.workspaceState.get(this.workspaceGrantKey(name, workspace), {}))
+    return resolveProfile(name, workspace, this.context.workspaceState.get(this.workspaceGrantKey(name, workspace), {}), { provider: this.runtimeProvider, model: this.runtimeModel || undefined, effort: this.runtimeEffort || undefined })
   }
 
   private workspaceGrantKey(profile: string, workspace: vscode.WorkspaceFolder): string {
@@ -393,14 +463,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const networkMode = configured[this.profile]?.network?.mode ?? 'hard'
     const settings = vscode.workspace.getConfiguration('hydra.appearance')
     const appearance = {
-      interfaceFontFamily: settings.get('interfaceFontFamily', 'Inter'),
-      chatFontFamily: settings.get('chatFontFamily', 'Merriweather'),
-      codeFontFamily: settings.get('codeFontFamily', 'Fira Code'),
+      interfaceFont: settings.get('interfaceFont', 'inter'),
+      chatFont: settings.get('chatFont', 'merriweather'),
+      codeFont: settings.get('codeFont', 'fira-code'),
       interfaceFontSize: settings.get('interfaceFontSize', 13),
       chatFontSize: settings.get('chatFontSize', 14),
       codeFontSize: settings.get('codeFontSize', 12),
     }
-    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(configured), profileLabels, profileValues: JSON.parse(JSON.stringify(configured)), networkMode, running: this.running, hasConversation: Boolean(this.conversationID), queuedMessages: [...this.queuedMessages], appearance })
+    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(configured), profileLabels, profileValues: JSON.parse(JSON.stringify(configured)), provider: this.runtimeProvider, model: this.runtimeModel, effort: this.runtimeEffort, networkMode, running: this.running, hasConversation: Boolean(this.conversationID), queuedMessages: [...this.queuedMessages], appearance })
   }
 
   private async createProfile(): Promise<void> {
@@ -413,7 +483,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     if (!id) return
     const label = await vscode.window.showInputBox({ title: 'Create Hydra profile', prompt: 'Display name', value: id[0].toUpperCase() + id.slice(1) })
     if (!label) return
-    const source = profiles()[this.profile] ?? {}
+    const source = policyOnly(profiles()[this.profile] ?? {})
     const profile = JSON.parse(JSON.stringify({ ...source, name: label })) as AuthoredProfile
     validateProfile(id, profile)
     const configuration = vscode.workspace.getConfiguration('hydra')
@@ -501,4 +571,12 @@ function messageText(text: string, attachments: string[]): string {
   if (!paths.length) return text
   const references = `Attached files (read these paths):\n${paths.map(value => `- ${JSON.stringify(value)}`).join('\n')}`
   return `${text.trim()}${text.trim() ? '\n\n' : ''}${references}`
+}
+
+function policyOnly(value: AuthoredProfile): AuthoredProfile {
+  const copy = { ...value }
+  delete copy.provider
+  delete copy.model
+  delete copy.effort
+  return copy
 }

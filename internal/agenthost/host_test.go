@@ -146,6 +146,13 @@ func TestRunRebuildsProviderForPolicyUpdate(t *testing.T) {
 	if len(events) != 1 || events[0].Type != "notice" {
 		t.Fatalf("profile transition events = %+v", events)
 	}
+	var notice chat.Notice
+	if err := json.Unmarshal(events[0].Payload, &notice); err != nil {
+		t.Fatal(err)
+	}
+	if notice.Text != "Profile changed from implement to review" {
+		t.Fatalf("profile transition notice = %q", notice.Text)
+	}
 }
 
 func mapsClone(source map[string]any) map[string]any {

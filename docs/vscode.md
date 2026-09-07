@@ -229,14 +229,21 @@ settings key and an optional user-facing `name`; the bundled `plan` and `edit`
 profiles render as Plan and Edit. The editor can save to user settings, which
 are eligible for Settings Sync, or workspace settings.
 
-The initial profile policy contains:
+Each authored profile contains:
 
 - core tool decisions (`allow`, `ask`, or `deny`);
 - readable, writable, copy-on-write, and masked paths;
 - network mode, allowed hosts, and blocked hosts;
 - Git isolation and protected branch patterns;
 - MCP server and individual-tool decisions; and
-- provider/model/prompt configuration.
+- a standing prompt loaded once when the provider session starts.
+
+Provider, model, and thinking effort are conversation runtime state rather than
+permission-profile fields. The composer controls them independently, so moving
+between Plan and Edit does not unexpectedly change the model.
+`hydra.defaultProvider` and the per-provider `defaultModel` and `defaultEffort`
+settings seed a new extension session; chat metadata records the actual runtime
+selection for resume.
 
 Relative paths resolve against the chat's selected workspace folder. Arbitrary
 environment-variable substitution is not supported initially. The UI shows the
@@ -347,8 +354,10 @@ During a running turn, `hydra.profileChangeBehavior` supports:
 - `interrupt`: interrupt, settle the turn, rebuild the sandbox, and switch; or
 - `nextTurn`: retain the current policy until the next turn.
 
-Changes from `onDidChangeConfiguration` use the same behavior. The event log
-records the transition and which turn first used the new effective policy.
+Profile configuration changes from `onDidChangeConfiguration` use the same
+behavior. Appearance changes redraw the Webview without rebuilding the sandbox
+or restarting the provider. The event log records policy, provider, and thinking
+effort transitions when they require a provider restart.
 
 The extension validates authored profile value kinds and decisions before path
 resolution. The native host then verifies provider/network/Git enums, tool and
@@ -429,15 +438,25 @@ extension.
 The composer queues Enter submissions while a turn is running and exposes a
 separate immediate-send action for steering the active turn. Queued messages
 remain visible beneath the live response and are sent in order at normalized
-turn boundaries. The model picker uses the selected profile's provider models.
+turn boundaries. Provider, thinking, and model selectors sit in the composer and
+remain independent of the permission profile switcher.
 The attachment picker stores readable file paths in the provider-neutral user
 message and renders them as chips; provider access to a selected path still
 passes through the active profile's filesystem sandbox.
 
-The Webview bundles the same Inter, Merriweather, and Fira Code typefaces as the
-browser chat for interface, prose, and code respectively. The
-`hydra.appearance.*FontFamily` and `hydra.appearance.*FontSize` settings can
-override all three roles without changing profile data.
+The Webview imports the browser's font catalogue directly and offers the same
+interface/chat/code choices: the system stacks and bundled Inter, Roboto Flex,
+IBM Plex Sans, Merriweather, Source Serif 4, Iosevka, Fira Code, JetBrains Mono,
+IBM Plex Mono, and Source Code Pro faces appropriate to each role. The
+`hydra.appearance.interfaceFont`, `chatFont`, and `codeFont` settings select by
+stable catalogue ID; the adjacent `*FontSize` settings control their pixel size.
+User messages deliberately stay on the interface's sans treatment.
+
+Font binaries are generated, not committed. The extension's check and package
+steps invoke `web/scripts/build-fonts.ts`, reuse its content-addressed
+`FONT_BUILD_CACHE_DIR`, and copy the required outputs into the ignored
+`vscode/media/fonts` directory. This keeps the catalogue and build cache common
+without coupling the Webview to the browser application shell at runtime.
 
 Markdown parsing and sanitization are shared conceptually, with Webview-safe
 link routing. Small reusable Webview primitives centralize buttons, fields, page
@@ -532,8 +551,9 @@ The package commits `package-lock.json`; Aube is the primary package manager and
 consumes that lock directly, so development and release jobs use the exact same
 dependency graph without an Aube-specific lockfile.
 
-The package generates one TypeScript type graph from `api/agent-host.yaml` with
-`openapi-typescript`, typechecks both extension and Webview code, bundles the two
+The package materializes shared generated fonts, then generates one TypeScript
+type graph from `api/agent-host.yaml` with `openapi-typescript`, typechecks both
+extension and Webview code, bundles the two
 JavaScript entry points independently with esbuild, and compiles the Webview's
 Tailwind stylesheet with the local Tailwind CLI. The contributed Activity Bar
 container, sidebar Webview, commands, registered `hydra.*` settings, profile

@@ -6,6 +6,7 @@ import { HistoryView } from './components/HistoryView'
 import { ProfilesView } from './components/ProfilesView'
 import { dedupe, foldStream, type Event, type Projection } from './model'
 import type { Approval, HistoryEntry, HostFrame, QuestionResult, ViewState } from './types'
+import { fontFeaturesFor, fontStackFor } from '../../../web/src/lib/fonts'
 
 function App() {
   const [state, setState] = useState<ViewState>({ page: 'chat', profile: '', profiles: [], running: false, hasConversation: false })
@@ -78,9 +79,11 @@ function App() {
 function applyAppearance(value?: ViewState['appearance']): void {
   const style = document.getElementById('hydra-appearance')
   if (!style) return
-  const family = (input: string | undefined, fallback: string) => input && /^[\w ,"'-]+$/.test(input) ? input : fallback
   const size = (input: number | undefined, fallback: number) => `${Number.isFinite(input) ? Math.max(10, Math.min(20, input!)) : fallback}px`
-  style.textContent = `:root{--hydra-ui-font:${family(value?.interfaceFontFamily, 'Inter')},var(--vscode-font-family,sans-serif);--hydra-chat-font:${family(value?.chatFontFamily, 'Merriweather')},serif;--hydra-code-font:${family(value?.codeFontFamily, 'Fira Code')},var(--vscode-editor-font-family,monospace);--hydra-ui-size:${size(value?.interfaceFontSize, 13)};--hydra-chat-size:${size(value?.chatFontSize, 14)};--hydra-code-size:${size(value?.codeFontSize, 12)}}`
+  const ui = value?.interfaceFont ?? 'inter'
+  const chat = value?.chatFont ?? 'merriweather'
+  const code = value?.codeFont ?? 'fira-code'
+  style.textContent = `:root{--hydra-ui-font:${fontStackFor('ui', ui)};--hydra-ui-features:${fontFeaturesFor('ui', ui)};--hydra-chat-font:${fontStackFor('chat', chat)};--hydra-chat-features:${fontFeaturesFor('chat', chat)};--hydra-code-font:${fontStackFor('code', code)};--hydra-code-features:${fontFeaturesFor('code', code)};--hydra-ui-size:${size(value?.interfaceFontSize, 13)};--hydra-chat-size:${size(value?.chatFontSize, 14)};--hydra-code-size:${size(value?.codeFontSize, 12)}}`
 }
 
 function Banner({ kind, children }: { kind: 'warning' | 'error'; children: React.ReactNode }) {
