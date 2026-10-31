@@ -824,3 +824,10 @@ horizontal padding on narrow layouts.
 
 Chat commit pills align their hash and change counts with the first subject line.
 Their vertical padding gives wrapped subjects room above and below the text.
+
+Attachment atoms expose only before/after caret positions. The editable surface
+includes native ProseMirror whitespace and zero-size separator rules, so a
+trailing attachment keeps its caret on the same line when there is room.
+Chat remeasures its composer when an editor view mounts, including the fresh
+empty editor after sending. Automatic growth returns to the saved minimum
+without requiring another keystroke.

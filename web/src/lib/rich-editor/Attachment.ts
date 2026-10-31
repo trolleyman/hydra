@@ -24,7 +24,7 @@ export const Attachment = Node.create<AttachmentOptions>({
   group: 'inline',
   inline: true,
   atom: true,
-  selectable: true,
+  selectable: false,
   draggable: true,
 
   addOptions() {

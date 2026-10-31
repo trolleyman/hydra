@@ -251,3 +251,48 @@ test.describe('phone composers', () => {
     })
   }
 })
+
+test('chat shrinks immediately after sending a long prompt', async ({ page }) => {
+  const composer = await openChatComposer(page)
+  const host = page.locator('[data-rich-chat-composer]')
+  const initialHeight = (await host.boundingBox())!.height
+  await composer.fill('d'.repeat(1600))
+  await expect.poll(async () => (await host.boundingBox())!.height).toBeGreaterThan(initialHeight + 40)
+  expect(await composer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  await composer.press('Enter')
+  await expect(composer).toHaveText('')
+  await expect.poll(async () => (await host.boundingBox())!.height).toBeLessThanOrEqual(initialHeight + 1)
+})
+
+test('a trailing image stays inline and only has outer caret positions', async ({ page }) => {
+  const composer = await openChatComposer(page)
+  await composer.fill('before ')
+  await page.locator('input[type="file"]').last().setInputFiles({
+    name: 'caret.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a28kAAAAASUVORK5CYII=', 'base64'),
+  })
+  const chip = composer.locator('[data-composer-attachment]')
+  await expect(chip).toBeVisible()
+  const geometry = await composer.evaluate((element) => {
+    const chip = element.querySelector('[data-composer-attachment]')!.getBoundingClientRect()
+    const trailing = element.querySelector('.ProseMirror-trailingBreak')!.getBoundingClientRect()
+    return { chipTop: chip.top, chipBottom: chip.bottom, caretTop: trailing.top, caretBottom: trailing.bottom, editorBottom: element.getBoundingClientRect().bottom }
+  })
+  expect(geometry.chipBottom).toBeLessThanOrEqual(geometry.editorBottom)
+  expect(geometry.caretTop).toBeLessThan(geometry.chipBottom)
+  expect(geometry.caretBottom).toBeGreaterThan(geometry.chipTop)
+  await composer.press('End')
+  await composer.press('ArrowLeft')
+  await page.keyboard.type('left')
+  expect(await composer.locator('p').evaluate((element) => element.firstChild?.textContent)).toBe('before left')
+  await composer.press('End')
+  await page.keyboard.type(' right')
+  expect(await composer.locator('p').evaluate((element) => element.lastChild?.textContent)).toBe(' right')
+  await expect(chip).toHaveCount(1)
+  expect(await composer.evaluate(() => {
+    const anchor = window.getSelection()?.anchorNode
+    const element = anchor instanceof Element ? anchor : anchor?.parentElement
+    return !!element?.closest('[data-composer-attachment]')
+  })).toBe(false)
+})

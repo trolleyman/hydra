@@ -1,3 +1,4 @@
+import type { Editor } from '@tiptap/core'
 import { richTextEditorEnabled } from '../lib/composerPrefs'
 import { flushSync } from 'react-dom'
 import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type CSSProperties, type ReactNode } from 'react'
@@ -7297,6 +7298,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const richComposerRef = useRef<MarkdownComposerHandle>(null)
   const richComposerHostRef = useRef<HTMLDivElement>(null)
+  const [richComposerEditor, setRichComposerEditor] = useState<Editor | null>(null)
   const focusComposer = useCallback((position: 'start' | 'end' | number = 'end') => {
     if (!richTextEditorEnabled || inputRef.current.startsWith('!')) {
       const textarea = textareaRef.current
@@ -10411,8 +10413,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const MAX_ROWS = 10
 
   const composerElement = useCallback((): HTMLElement | null => (
-    sourceComposer ? textareaRef.current : richComposerRef.current?.editor?.view.dom ?? null
-  ), [sourceComposer])
+    sourceComposer ? textareaRef.current : richComposerEditor?.view.dom ?? null
+  ), [sourceComposer, richComposerEditor])
 
   // Grow/shrink the textarea one whole line at a time with its content,
   // respecting the user-dragged minimum.
@@ -10427,7 +10429,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // is empty but the content overflows, so scrollHeight reports the true content
     // height. Restore to '' afterwards to hand sizing back to the wrapper.
     element.style.height = '0px'
-    const contentRows = Math.max(1, Math.round((element.scrollHeight - pad) / lineHeight))
+    // Inline image chips can be taller than one prose line. Round up so their
+    // border and the trailing caret fit inside the measured editor height.
+    const contentRows = Math.max(1, Math.ceil((element.scrollHeight - pad) / lineHeight))
     element.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
     element.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
@@ -11769,6 +11773,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       setRichAttachmentIds(ids)
                     }}
                     onEditor={(editor) => {
+                      setRichComposerEditor(editor)
                       if (editor) syncAttachmentsIntoDocument(editor)
                     }}
                     attachmentRegistry={attachmentRegistry}
