@@ -19,10 +19,9 @@ describe('normalizeIconName', () => {
     for (const f of forms) expect(normalizeIconName(f)).toBe('folderdot')
   })
 
-  // The whole scheme rests on this: if two lucide icons collapsed onto the same
-  // key, a typed name would be ambiguous.
-  it('keeps every lucide icon name distinct', () => {
-    expect(normalizedLucideNames.size).toBe(Object.keys(icons).length)
+  it('limits normalized collisions to names canonical spelling disambiguates', () => {
+    expect(Object.keys(icons).length - normalizedLucideNames.size).toBe(1)
+    expect(normalizeIconName('LetterS')).toBe(normalizeIconName('Letters'))
   })
 })
 
@@ -30,7 +29,7 @@ describe('kebabIconName', () => {
   it('spells a PascalCase export the way lucide.dev does', () => {
     expect(kebabIconName('FolderDot')).toBe('folder-dot')
     expect(kebabIconName('ALargeSmall')).toBe('a-large-small')
-    expect(kebabIconName('Building2')).toBe('building-2')
+    expect(kebabIconName('BuildingComplex')).toBe('building-complex')
   })
 
   it('round-trips through normalization for every icon', () => {
@@ -98,6 +97,8 @@ describe('lucideIcon', () => {
     expect(lucideIconsLoaded()).toBe(true)
     expect(lucideIcon('popcorn')).toBe(icons.Popcorn)
     expect(lucideIcon('Popcorn')).toBe(icons.Popcorn)
+    expect(lucideIcon('letter-s')).toBe(icons.LetterS)
+    expect(lucideIcon('letters')).toBe(icons.Letters)
     // A name-shaped value that is still unresolved after the load is settled -
     // it is not an icon, and nothing should keep waiting on it.
     expect(lucideIcon('not-an-icon-at-all')).toBeUndefined()
