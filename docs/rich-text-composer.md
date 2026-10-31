@@ -806,3 +806,14 @@ input or cancel an upload. Markdown drafts and uploaded attachment manifests are
 shared by both modes. An unchanged structured snapshot retains exact attachment
 positions when rich editing is enabled again; source edits load through Markdown
 and restore attachments at their filename markers.
+
+## Mobile focus
+
+Rich editors settle structural plugins when their view mounts, before autofocus
+or host commands run. This establishes trailing paragraphs and table headers
+without adding an undo step or emitting a draft edit. Synchronous iOS/Android
+focus events then operate on the same document as the enclosing focus command.
+
+The application viewport fixes its scale at 1 and disables user scaling to
+prevent phone focus zoom from shifting the composer. Composer text retains its
+configured size.

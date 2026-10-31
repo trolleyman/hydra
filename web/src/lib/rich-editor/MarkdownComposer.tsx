@@ -5,7 +5,7 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import { TextSelection } from '@tiptap/pm/state'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import { createRichEditorExtensions, parseRichMarkdown, serializeRichMarkdown } from './RichEditorCore'
+import { createRichEditorExtensions, normalizeInitialRichDocument, parseRichMarkdown, serializeRichMarkdown } from './RichEditorCore'
 import type { AttachmentRegistry } from './AttachmentRegistry'
 import { registerMountedEditor } from './mountedEditors'
 import { insertReference, type ComposerReference, type ReferenceKind } from './Reference'
@@ -209,6 +209,7 @@ const RichMarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownComposer
     immediatelyRender: false,
     injectCSS: false,
     editable,
+    onMount: ({ editor: mounted }) => normalizeInitialRichDocument(mounted),
     editorProps: {
       attributes: {
         class: `rich-text-surface outline-none ${className}`.trim(),

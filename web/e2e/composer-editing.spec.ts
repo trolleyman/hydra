@@ -222,3 +222,32 @@ test('question notes use a visible source textarea when rich editing is disabled
   await expect(note).toHaveValue('**Keep this note** in Markdown')
   expect((await note.boundingBox())!.height).toBeGreaterThan(12)
 })
+
+
+test.describe('phone composers', () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+  })
+
+  for (const draft of ['', '## Saved task']) {
+    test(`opens and edits a project task on iPhone with ${draft ? 'a saved' : 'an empty'} draft`, async ({ page }) => {
+      await page.addInitScript((value) => {
+        Object.defineProperty(navigator, 'platform', { get: () => 'iPhone' })
+        localStorage.setItem('hydra-prompt-draft-full-sim-project', value)
+      }, draft)
+      await page.goto(PROJECT)
+      const composer = page.getByRole('textbox', { name: 'Describe what you need' })
+      await expect(composer).toBeVisible()
+      await expect(composer).toHaveText(draft.replace(/^## /, ''))
+      await composer.tap()
+      await page.keyboard.type(' edited')
+      await expect(composer).toContainText('edited')
+      await expect(page.getByText('Something went wrong', { exact: true })).toHaveCount(0)
+      await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /maximum-scale=1.0, user-scalable=no/)
+    })
+  }
+})

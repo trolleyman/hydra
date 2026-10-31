@@ -66,6 +66,13 @@ export function serializeRichMarkdown(document: JSONContent): string {
   return markdownManager.serialize(document)
 }
 
+// Settle structural plugins before a focus command captures its transaction.
+// Mobile focus fires synchronously: its nested focus-event transaction must not
+// be the first transaction that adds a trailing paragraph or fixes table headers.
+export function normalizeInitialRichDocument(editor: Editor): void {
+  editor.view.dispatch(editor.state.tr.setMeta('addToHistory', false).setMeta('preventUpdate', true))
+}
+
 export interface RichEditorOptions {
   element?: Element
   markdown?: string
@@ -86,6 +93,7 @@ export function createRichEditor(options: RichEditorOptions = {}): Editor {
     editable: options.editable ?? true,
     injectCSS: false,
     autofocus: false,
+    onMount: ({ editor: mounted }) => normalizeInitialRichDocument(mounted),
     editorProps: { attributes: options.attributes ?? {} },
   })
   if (options.attachmentRegistry) {

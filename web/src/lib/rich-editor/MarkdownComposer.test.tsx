@@ -6,6 +6,21 @@ import { createRef } from 'react'
 afterEach(cleanup)
 
 describe('MarkdownComposer', () => {
+  describe.each(['Android', 'iPhone'])('%s focus', (platform) => {
+    it.each(['', '## Draft', '```ts\nconst a = 1\n```'])('autofocuses draft %j without a stale transaction', async (value) => {
+      vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(platform)
+      vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue(platform)
+      const ref = createRef<MarkdownComposerHandle>()
+      try {
+        render(<MarkdownComposer ref={ref} value={value} onChange={() => {}} autoFocus />)
+        await waitFor(() => expect(ref.current?.editor?.view.hasFocus()).toBe(true))
+        expect(ref.current!.editor!.commands.undo()).toBe(false)
+      } finally {
+        vi.restoreAllMocks()
+      }
+    })
+  })
+
   it('exposes Markdown as its controlled value', async () => {
     const changed = vi.fn()
     const ref = createRef<MarkdownComposerHandle>()
