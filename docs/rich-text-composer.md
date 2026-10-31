@@ -817,3 +817,10 @@ focus events then operate on the same document as the enclosing focus command.
 The application viewport fixes its scale at 1 and disables user scaling to
 prevent phone focus zoom from shifting the composer. Composer text retains its
 configured size.
+
+The full-page Spawn footer keeps attachment, agent/model and options controls
+beside the Spawn Agent button on phone screens. The button uses tighter
+horizontal padding on narrow layouts.
+
+Chat commit pills align their hash and change counts with the first subject line.
+Their vertical padding gives wrapped subjects room above and below the text.

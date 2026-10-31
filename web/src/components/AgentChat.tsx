@@ -247,14 +247,9 @@ export function mergeChipLabel(subject: string, count: number, mergedRef?: strin
   return m ? `Merged ${m[1]} - ${n}` : `${subject} - ${n}`
 }
 
-// Shared styling for commit/merge pills - the same centered notification look as
-// notice/cmdout chips.
-// py-[3px], not py-0.5: the labels inside carry .optical-center, which trims each
-// one to its cap-to-baseline ink so the monospace sha and the sans subject share a
-// baseline. That trim also takes the line box's spare ascender/descender out of the
-// pill's height (~4px), which left the text sitting tight against the border - so
-// the padding gives back what the trim removed rather than leaving the chip shorter.
-const COMMIT_PILL = 'flex items-center gap-1.5 border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-2xs text-stone-500 dark:text-stone-400 select-none'
+// Commit metadata follows the subject's first line when a message wraps.
+// Optical trimming aligns the labels' ink; padding gives it room inside the pill.
+const COMMIT_PILL = 'flex items-start gap-1.5 border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-1.5 text-2xs text-stone-500 dark:text-stone-400 select-none'
 const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
 
 // MergeCommitChip renders a merge as a single pill that expands to list the commits
@@ -283,7 +278,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
           {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
           <GitMerge className="w-3 h-3 shrink-0" />
           <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{label}</span>
-          <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
+          <span className="shrink-0 optical-center"><ChangeStats additions={item.additions} deletions={item.deletions} /></span>
         </button>
       </Tooltip>
       <Expandable open={expanded && shown > 0} className="-mt-px w-full">
@@ -11116,14 +11111,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 className={`${COMMIT_PILL} relative min-w-0 max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
               >
                 <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[16px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
-                <span className="relative flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
+                <span className="relative flex h-[1cap] w-3 shrink-0 items-center justify-center" aria-hidden="true">
                   <span data-commit-graph-dot className="h-1.5 w-1.5 rounded-full border border-stone-400 bg-stone-100 dark:border-stone-500 dark:bg-stone-800" />
                 </span>
-                {/* The sha is monospace and the subject is not, so their line boxes
-                    differ and `items-center` would centre each one separately. */}
+                {/* Keep the hash and counts aligned with the first subject line. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{item.subject}</span>
-                <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
+                <span className="shrink-0 optical-center"><ChangeStats additions={item.additions} deletions={item.deletions} /></span>
               </div>
             </Tooltip>
           </div>

@@ -1581,10 +1581,9 @@ export const SpawnForm = memo(function SpawnForm({
               </div>
 
 
-              {/* Footer bar - stacks the controls above the Spawn button on
-                  narrow screens instead of overflowing the card */}
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-3 shrink-0">
-                <div className="flex items-center gap-2 min-w-0 flex-wrap sm:flex-1">
+              {/* Keep options and the primary action together on phone screens. */}
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 gap-3 shrink-0">
+                <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-wrap flex-1">
                   {/* Attach files */}
                   <Tooltip content="Attach files" side="top">
                     <button
@@ -1600,7 +1599,7 @@ export const SpawnForm = memo(function SpawnForm({
                   <AgentModelPicker agent={agentType} model={model} effort={effort} onChange={handleAgentModelChange} onEffortChange={setEffort} agents={projectDirectoryOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
                   {renderSpawnSettings()}
                 </div>
-                <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+                <div className="flex items-center gap-3 shrink-0">
                   <span className="hidden sm:inline-flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
                     {submitKeys.map((k, i) => <Kbd key={i} size="sm">{k}</Kbd>)}
                     <span className="optical-center">to spawn</span>
@@ -1608,7 +1607,7 @@ export const SpawnForm = memo(function SpawnForm({
                   <button
                     type="submit"
                     disabled={!canSubmit || loading}
-                    className="relative overflow-hidden flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 animate-gradient shadow-md shadow-blue-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98]"
+                    className="relative overflow-hidden flex items-center gap-2 whitespace-nowrap px-3 sm:px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 animate-gradient shadow-md shadow-blue-500/30 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98]"
                   >
                     {loading ? (
                       <>
