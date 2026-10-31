@@ -95,9 +95,12 @@ export function parseInteraction(payload: Record<string, any>): { requestID: str
   return questions.length ? { requestID, ...(toolID ? { toolID } : {}), questions } : undefined
 }
 
-export function buildQuestionResponse(requestID: string, questions: QuestionSpec[], answers: Record<string, string[]>, other: Record<string, string>, notes: Record<string, string>, emptyAnswers = new Set<string>()): Record<string, unknown> | undefined {
-  const values = Object.fromEntries(questions.map(question => [question.question, [...(answers[question.question] ?? []), ...(other[question.question]?.trim() ? [other[question.question].trim()] : [])].join(', ')]))
-  if (Object.entries(values).some(([question, value]) => !value && !emptyAnswers.has(question))) return undefined
+export function buildQuestionResponse(requestID: string, questions: QuestionSpec[], answers: Record<string, string[]>, other: Record<string, string>, otherSelected: Record<string, boolean>, notes: Record<string, string>): Record<string, unknown> | undefined {
+  const values = Object.fromEntries(questions.map(({ question }) => {
+    const custom = otherSelected[question] ? other[question]?.trim() : ''
+    return [question, [...(answers[question] ?? []), ...(custom ? [custom] : [])].join(', ')]
+  }))
+  if (Object.entries(values).some(([question, value]) => !value && !(otherSelected[question] && notes[question]?.trim()))) return undefined
   const annotations = Object.fromEntries(Object.entries(notes).filter(([, note]) => note.trim()).map(([question, note]) => [question, { notes: note.trim() }]))
   const updatedInput = { answers: values, ...(Object.keys(annotations).length ? { annotations } : {}) }
   return { subtype: 'success', request_id: requestID, response: { behavior: 'allow', updatedInput } }

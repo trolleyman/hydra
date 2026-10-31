@@ -67,8 +67,8 @@ test('question responses preserve multi-select choices, free text, and notes', (
     { question: 'Which?', multiSelect: true, options: [{ label: 'A' }, { label: 'B' }] },
     { question: 'Why?', multiSelect: false, options: [] },
   ]
-  assert.equal(buildQuestionResponse('q1', questions, { 'Which?': ['A', 'B'] }, {}, {}), undefined)
-  assert.deepEqual(buildQuestionResponse('q1', questions, { 'Which?': ['A', 'B'] }, { 'Why?': 'Because' }, { 'Which?': 'except in prod' }), {
+  assert.equal(buildQuestionResponse('q1', questions, { 'Which?': ['A', 'B'] }, {}, {}, {}), undefined)
+  assert.deepEqual(buildQuestionResponse('q1', questions, { 'Which?': ['A', 'B'] }, { 'Why?': 'Because' }, { 'Why?': true }, { 'Which?': 'except in prod' }), {
     subtype: 'success',
     request_id: 'q1',
     response: {
@@ -90,4 +90,23 @@ test('attachment references round-trip as presentation metadata', () => {
     text: 'Review this',
     attachments: ['src/a.ts', '/tmp/image.png'],
   })
+})
+
+
+test('deselected custom answers stay out of single and multi-select responses', () => {
+  for (const multiSelect of [false, true]) {
+    const questions = [{ question: 'Which?', multiSelect, options: [{ label: 'A' }] }]
+    const response = buildQuestionResponse('q1', questions, { 'Which?': ['A'] }, { 'Which?': 'previous custom answer' }, { 'Which?': false }, {})
+    assert.deepEqual(response.response.updatedInput, { answers: { 'Which?': 'A' } })
+    assert.equal(buildQuestionResponse('q1', questions, {}, { 'Which?': 'previous custom answer' }, { 'Which?': false }, {}), undefined)
+  }
+})
+
+test('selected custom answers preserve their draft and support a note-only answer', () => {
+  const questions = [{ question: 'Why?', multiSelect: false, options: [] }]
+  const custom = buildQuestionResponse('q1', questions, {}, { 'Why?': '  Because  ' }, { 'Why?': true }, {})
+  assert.deepEqual(custom.response.updatedInput, { answers: { 'Why?': 'Because' } })
+  assert.equal(buildQuestionResponse('q1', questions, {}, {}, { 'Why?': true }, {}), undefined)
+  const noteOnly = buildQuestionResponse('q1', questions, {}, {}, { 'Why?': true }, { 'Why?': '  Explanation  ' })
+  assert.deepEqual(noteOnly.response.updatedInput, { answers: { 'Why?': '' }, annotations: { 'Why?': { notes: 'Explanation' } } })
 })

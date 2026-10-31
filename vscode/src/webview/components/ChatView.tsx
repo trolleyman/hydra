@@ -616,7 +616,9 @@ function QuestionCard({
     [noteRow, setNoteRow] = useState<Record<string, string>>({}),
     [submitted, setSubmitted] = useState(false);
   const active = item.active && !submitted;
-  const toggle = (question: QuestionSpec, label: string) =>
+  const toggle = (question: QuestionSpec, label: string) => {
+    if (!question.multiSelect)
+      setOtherSelected((values) => ({ ...values, [question.question]: false }));
     setAnswers((current) => {
       const selected = current[question.question] ?? [];
       const next = question.multiSelect
@@ -624,13 +626,9 @@ function QuestionCard({
           ? selected.filter((value) => value !== label)
           : [...selected, label]
         : [label];
-      if (!question.multiSelect)
-        setOtherSelected((values) => ({
-          ...values,
-          [question.question]: false,
-        }));
       return { ...current, [question.question]: next };
     });
+  };
   const selectOther = (question: QuestionSpec, selected = true) => {
     setOtherSelected((current) => ({
       ...current,
@@ -642,32 +640,22 @@ function QuestionCard({
   useEffect(() => {
     if (result?.error) setSubmitted(false);
   }, [result]);
-  const complete = item.questions.every(
-    (question) =>
-      (answers[question.question]?.length ?? 0) > 0 ||
-      (otherSelected[question.question] &&
-        Boolean(
-          other[question.question]?.trim() || notes[question.question]?.trim(),
-        )),
+  const selectedNotes = Object.fromEntries(
+    Object.entries(notes).filter(([question]) =>
+      noteRow[question] === "other"
+        ? otherSelected[question]
+        : answers[question]?.includes(noteRow[question]),
+    ),
+  );
+  const response = buildQuestionResponse(
+    item.requestID,
+    item.questions,
+    answers,
+    other,
+    otherSelected,
+    selectedNotes,
   );
   const submit = () => {
-    const response = buildQuestionResponse(
-      item.requestID,
-      item.questions,
-      answers,
-      other,
-      notes,
-      new Set(
-        item.questions
-          .filter(
-            (question) =>
-              otherSelected[question.question] &&
-              !other[question.question]?.trim() &&
-              Boolean(notes[question.question]?.trim()),
-          )
-          .map((question) => question.question),
-      ),
-    );
     if (!response) return;
     postMessage({
       type: "controlResponse",
@@ -706,6 +694,7 @@ function QuestionCard({
               row === "other"
                 ? selectOther(question)
                 : toggle(question, row);
+            setNotes((current) => ({ ...current, [question.question]: "" }));
             setNoteRow((current) => ({
               ...current,
               [question.question]:
@@ -802,6 +791,7 @@ function QuestionCard({
                   className="sr-only"
                   type={question.multiSelect ? "checkbox" : "radio"}
                   name={`${item.requestID}-${index}`}
+                  aria-label={question.options.length ? "Other" : "Answer"}
                   checked={Boolean(otherSelected[question.question])}
                   onChange={() =>
                     selectOther(
@@ -826,6 +816,7 @@ function QuestionCard({
                 </span>
                 <input
                   className="min-w-0 flex-1! border-0! bg-transparent! p-0!"
+                  aria-label={question.options.length ? "Other answer" : "Answer text"}
                   value={other[question.question] ?? ""}
                   placeholder={question.options.length ? "Other..." : "Answer..."}
                   onFocus={() => selectOther(question)}
@@ -836,11 +827,6 @@ function QuestionCard({
                       ...current,
                       [question.question]: value,
                     }));
-                    if (value && !question.multiSelect)
-                      setAnswers((current) => ({
-                        ...current,
-                        [question.question]: [],
-                      }));
                   }}
                 />
               </label>
@@ -865,7 +851,7 @@ function QuestionCard({
       )}
       {active && (
         <div className="mt-3 flex justify-end">
-          <Button disabled={!complete} onClick={submit}>
+          <Button disabled={!response} onClick={submit}>
             {item.questions.length > 1 ? "Submit all" : "Submit"}
           </Button>
         </div>

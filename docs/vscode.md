@@ -467,10 +467,13 @@ Question tools use one provider-neutral card. Claude's `AskUserQuestion` control
 request and Codex's `item/tool/requestUserInput` request normalize into the same
 multi-question representation. Cards support single-select and multi-select
 options, option descriptions, free-text answers, and optional notes. Single
-choice and free text are mutually exclusive; every question needs an answer
-before submission. The response is sent through `control_response`, a failed
-provider write makes the card retryable, and terminal or resolved historical
-questions render read-only rather than pretending they can still be answered.
+choice and free text are mutually exclusive; only selected answers are submitted.
+Deselecting Other preserves its draft for reselection without sending it. Notes
+are sent only with their selected option, and discarding a note clears its text.
+Every question needs an answer or a selected Other note before submission. The
+response is sent through `control_response`, a failed provider write makes the
+card retryable, and terminal or resolved historical questions render read-only
+rather than pretending they can still be answered.
 
 Profiles can be created, edited, and removed from the Profiles page. Saving can
 target user or workspace settings; removing a definition at one scope reveals
