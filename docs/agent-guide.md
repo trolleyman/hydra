@@ -65,7 +65,11 @@ stable lookup key.
 
 ### Markdown composers
 
-`MarkdownComposer` is the shared Tiptap/ProseMirror editor used by spawn forms,
+Settings -> Browser -> Rich text editor selects rich editing (the default) or
+highlighted Markdown source. The browser-local choice applies after a page
+reload and keeps drafts and uploaded attachments in either mode.
+
+`MarkdownComposer` is the shared editor used by spawn forms,
 chat, review replies, image notes, and question notes. Markdown remains the
 controlled value and persisted source of truth; the editor parses it into a
 structured live document and serializes transactions back to Markdown. Keep

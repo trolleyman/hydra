@@ -107,6 +107,8 @@ export const StorageKeys = {
   // Cmd/Ctrl+Enter as send. Absent/'1' = Enter sends (the default). Shift+Enter
   // always adds a newline. See lib/composerPrefs.ts + AgentChat.
   enterSends: 'hydra-enter-sends',
+  // Rich editing is on unless disabled; editor choice applies after reload.
+  richTextEditor: 'hydra-rich-text-editor',
   // '0' when the user turned OFF auto-pairing in the composers: typing an opener
   // (` ( [ { " ') inserts its closer, Enter on a "```" line opens a fenced
   // block, and a mark typed over a selection wraps it. Absent/'1' = on (the default). See

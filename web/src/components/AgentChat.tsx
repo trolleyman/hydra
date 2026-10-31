@@ -1,3 +1,4 @@
+import { richTextEditorEnabled } from '../lib/composerPrefs'
 import { flushSync } from 'react-dom'
 import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import {
@@ -7167,6 +7168,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const { present, commit, reconcile, reset: resetHistory, undo, redo } = useComposerHistory(initialComposer.current)
   const input = present.prompt
   const shellComposer = input.startsWith('!')
+  const sourceComposer = shellComposer || !richTextEditorEnabled
   const attachments = present.attachments
   const [richComposerGeneration, setRichComposerGeneration] = useState(0)
   const [initialRichDocument] = useState(() => loadAgentViewPrefs(projectId, stateId).chatRichDraft?.document)
@@ -7187,9 +7189,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       if (state?.status === 'failed') reconcile(attachment.id, { uploading: false, error: formatError(state.error) })
     }
   }), [attachmentRegistry, reconcile])
-  const documentAttachments = useMemo(() => shellComposer
+  const documentAttachments = useMemo(() => sourceComposer
     ? attachments
-    : attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id))), [attachments, richAttachmentIds, shellComposer])
+    : attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id))), [attachments, richAttachmentIds, sourceComposer])
   const inputRef = useRef(input)
   useEffect(() => {
     inputRef.current = input
@@ -7311,7 +7313,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const richComposerRef = useRef<MarkdownComposerHandle>(null)
   const richComposerHostRef = useRef<HTMLDivElement>(null)
   const focusComposer = useCallback((position: 'start' | 'end' | number = 'end') => {
-    if (inputRef.current.startsWith('!')) {
+    if (!richTextEditorEnabled || inputRef.current.startsWith('!')) {
       const textarea = textareaRef.current
       textarea?.focus()
       if (textarea && position === 'end') textarea.selectionStart = textarea.selectionEnd = textarea.value.length
@@ -10079,7 +10081,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   )
 
   const syncAttachmentsIntoDocument = useCallback((editor = richComposerRef.current?.editor) => {
-    if (!editor || shellComposer) return
+    if (!editor || sourceComposer) return
     for (const attachment of attachmentsRef.current) {
       const metadata = composerAttachment(attachment)
       if (attachment.path) attachmentRegistry.registerUploaded(metadata, { path: attachment.path }, attachment.previewUrl)
@@ -10088,7 +10090,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         restoredAttachmentIdsRef.current.add(metadata.id)
       }
     }
-  }, [attachmentRegistry, shellComposer])
+  }, [attachmentRegistry, sourceComposer])
 
   useEffect(() => {
     syncAttachmentsIntoDocument()
@@ -10424,8 +10426,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const MAX_ROWS = 10
 
   const composerElement = useCallback((): HTMLElement | null => (
-    shellComposer ? textareaRef.current : richComposerRef.current?.editor?.view.dom ?? null
-  ), [shellComposer])
+    sourceComposer ? textareaRef.current : richComposerRef.current?.editor?.view.dom ?? null
+  ), [sourceComposer])
 
   // Grow/shrink the textarea one whole line at a time with its content,
   // respecting the user-dragged minimum.
@@ -10740,7 +10742,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!snap) return
     const ta = textareaRef.current
     requestAnimationFrame(() => {
-      if (snap.prompt.startsWith('!') && ta) {
+      if ((!richTextEditorEnabled || snap.prompt.startsWith('!')) && ta) {
         ta.focus()
         ta.selectionStart = snap.selStart
         ta.selectionEnd = snap.selEnd
@@ -10765,6 +10767,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   function onMarkdownComposerKeyDown(e: KeyboardEvent, context: MarkdownComposerKeyContext): boolean {
+    if (!context.editor) return false
     // Tiptap owns rich-document undo/redo, including inline attachment nodes.
     // The explicit snapshot history remains for the dedicated shell textarea.
     if (slashMatches.length > 0) {
@@ -11730,7 +11733,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             }`}
           >
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
-            {shellComposer && (
+            {sourceComposer && (
               <AttachmentChips
                 attachments={attachments}
                 size="sm"
@@ -11742,7 +11745,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 }}
               />
             )}
-            {shellComposer ? (
+            {sourceComposer ? (
               <HighlightedTextarea
                 ref={textareaRef}
                 value={input}
@@ -11751,7 +11754,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 onPaste={handlePaste}
                 data-desktop-image-paste
                 renderContent={renderComposerBackdrop}
-                placeholder={connected ? 'Run a shell command...' : 'Connecting...'}
+                placeholder={connected ? (shellComposer ? 'Run a shell command...' : 'Write a message...') : 'Connecting...'}
+                aria-label="Message"
                 disabled={!connected}
                 rows={1}
                 wrapperClassName="w-full"

@@ -1,3 +1,6 @@
+import { HighlightedTextarea } from './HighlightedTextarea'
+import { AttachmentChips } from './AttachmentChips'
+import { richTextEditorEnabled } from '../lib/composerPrefs'
 import { useState, useRef, useEffect, useEffectEvent, useCallback, useMemo, memo, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
@@ -546,7 +549,18 @@ export const SpawnForm = memo(function SpawnForm({
     void refreshBranches(false)
   }, [refreshBranches])
 
+  const sourcePromptRef = useRef<HTMLTextAreaElement>(null)
   const richComposerRef = useRef<MarkdownComposerHandle>(null)
+  const focusPrompt = useCallback((position: 'end' | number = 'end') => {
+    if (richTextEditorEnabled) richComposerRef.current?.focus(typeof position === 'number' ? position + 1 : position)
+    else {
+      const textarea = sourcePromptRef.current
+      if (!textarea) return
+      textarea.focus()
+      const offset = position === 'end' ? textarea.value.length : position
+      textarea.setSelectionRange(offset, offset)
+    }
+  }, [])
   const [draftSession, setDraftSession] = useState<{ key: string | null; document?: JSONContent; generation: number }>({ key: null, generation: 0 })
   const [promptEditor, setPromptEditor] = useState<Editor | null>(null)
   const [richAttachmentIds, setRichAttachmentIds] = useState<Set<string>>(new Set())
@@ -645,8 +659,8 @@ export const SpawnForm = memo(function SpawnForm({
   }
 
   useEffect(() => {
-    if (!compact) richComposerRef.current?.focus()
-  }, [compact])
+    if (!compact) focusPrompt()
+  }, [compact, focusPrompt])
 
   // Spawning blurs the composer: the editor is disabled while the request is
   // in flight, and clicking the Spawn button put focus on the button (also
@@ -659,13 +673,14 @@ export const SpawnForm = memo(function SpawnForm({
     if (loading || !refocusRef.current) return
     refocusRef.current = false
     const promptElement = promptElementRef.current
-    if (!promptElement || promptElement.getAttribute('contenteditable') !== 'true') return
+    if (!promptElement) return
+    if (richTextEditorEnabled ? promptElement.getAttribute('contenteditable') !== 'true' : (promptElement as HTMLTextAreaElement).disabled) return
     // Don't steal focus if the user moved on during the spawn (clicked another
     // control, or navigation focused something on the new agent's page).
     const active = document.activeElement
     if (active && active !== document.body && !cardRef.current?.contains(active)) return
-    richComposerRef.current?.focus()
-  }, [loading])
+    focusPrompt()
+  }, [loading, focusPrompt])
 
   // Persist the in-progress prompt as a per-project draft so it survives page
   // reloads and project switches. The compact (sidebar) and full-page boxes use
@@ -701,6 +716,10 @@ export const SpawnForm = memo(function SpawnForm({
   // because the editor's scrollable range only exists after that load commits
   // the new text to the DOM.
   useEffect(() => {
+    if (!richTextEditorEnabled) promptElementRef.current = sourcePromptRef.current
+  }, [compact, projectId])
+
+  useEffect(() => {
     const saved = scrollKey ? Number(readLocal(scrollKey)) || 0 : 0
     const raf = requestAnimationFrame(() => {
       if (promptElementRef.current) promptElementRef.current.scrollTop = saved
@@ -713,8 +732,8 @@ export const SpawnForm = memo(function SpawnForm({
   // localStorage like before.
   function handlePromptChange(value: string) {
     const selection = richComposerRef.current?.editor?.state.selection
-    const selStart = selection?.from ?? value.length
-    const selEnd = selection?.to ?? value.length
+    const selStart = selection?.from ?? sourcePromptRef.current?.selectionStart ?? value.length
+    const selEnd = selection?.to ?? sourcePromptRef.current?.selectionEnd ?? value.length
     commit((prev) => makeSnapshot(value, prev.attachments, selStart, selEnd), true)
     if (draftKey) writeLocal(draftKey, value || null)
     const editor = richComposerRef.current?.editor
@@ -736,11 +755,11 @@ export const SpawnForm = memo(function SpawnForm({
           const next = appendToComposer(prev.prompt, formatAnnotation(note))
           return makeSnapshot(next, prev.attachments, next.length, next.length)
         }, false)
-        requestAnimationFrame(() => richComposerRef.current?.focus())
+        requestAnimationFrame(() => focusPrompt())
       },
     })
     return () => registerPinTargets({ annotate: null })
-  }, [registerPinTargets, commit])
+  }, [registerPinTargets, commit, focusPrompt])
 
 
   // Per-project attachments + image counter, swapped in/out as the project (or
@@ -809,7 +828,7 @@ export const SpawnForm = memo(function SpawnForm({
       mirroredKeyRef.current = storeKey
       return
     }
-    const visible = attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id)))
+    const visible = richTextEditorEnabled ? attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id))) : attachments
     persistedAttachmentsRef.current = visible
     saveAttachments(projectId, compact, visible)
   }, [attachments, richAttachmentIds, projectId, compact, storeKey])
@@ -902,8 +921,8 @@ export const SpawnForm = memo(function SpawnForm({
   // they never carry a trailing one, so the caret stays against the "]".
   function insertPasteMarkers(names: string[]) {
     const selection = richComposerRef.current?.editor?.state.selection
-    const start = Math.max(0, Math.min(prompt.length, (selection?.from ?? prompt.length) - 1))
-    const end = Math.max(start, Math.min(prompt.length, (selection?.to ?? prompt.length) - 1))
+    const start = Math.max(0, Math.min(prompt.length, (selection ? selection.from - 1 : sourcePromptRef.current?.selectionStart ?? prompt.length)))
+    const end = Math.max(start, Math.min(prompt.length, (selection ? selection.to - 1 : sourcePromptRef.current?.selectionEnd ?? prompt.length)))
     const insert = pasteMarkerText(names, prompt.slice(0, start))
     const caret = start + insert.length
     const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
@@ -913,7 +932,7 @@ export const SpawnForm = memo(function SpawnForm({
     )
     if (draftKey) writeLocal(draftKey, nextPrompt || null)
     requestAnimationFrame(() => {
-      richComposerRef.current?.focus(caret + 1)
+      focusPrompt(caret)
     })
   }
 
@@ -925,6 +944,7 @@ export const SpawnForm = memo(function SpawnForm({
     // Pasted files (screenshots, copied files) keep their upload behavior -
     // plus, with the preference on, "[filename]" markers at the caret so the
     // prompt references them explicitly.
+    if (literal) return
     const files = extractFiles(e.clipboardData)
     if (files.length > 0) {
       e.preventDefault()
@@ -932,10 +952,6 @@ export const SpawnForm = memo(function SpawnForm({
       if (!richComposerRef.current?.editor && pasteMarkers && names.length > 0) insertPasteMarkers(names)
       return
     }
-
-    // A Shift-held paste means "paste for real" - let the editor insert the
-    // text as-is, never attaching it.
-    if (literal) return
 
     // Small pastes go straight into the box like normal.
     const text = getClipboardText(e.clipboardData)
@@ -969,8 +985,8 @@ export const SpawnForm = memo(function SpawnForm({
         return
       }
       const selection = richComposerRef.current?.editor?.state.selection
-      let start = Math.max(0, Math.min(prompt.length, (selection?.from ?? prompt.length) - 1))
-      let end = Math.max(start, Math.min(prompt.length, (selection?.to ?? prompt.length) - 1))
+      let start = Math.max(0, Math.min(prompt.length, (selection ? selection.from - 1 : sourcePromptRef.current?.selectionStart ?? prompt.length)))
+      let end = Math.max(start, Math.min(prompt.length, (selection ? selection.to - 1 : sourcePromptRef.current?.selectionEnd ?? prompt.length)))
       const stripped = stripPasteMarker(prompt, last.filename)
       if (stripped) {
         if (stripped.index < start) start = Math.max(stripped.index, start - stripped.length)
@@ -993,7 +1009,7 @@ export const SpawnForm = memo(function SpawnForm({
       )
       if (draftKey) writeLocal(draftKey, nextPrompt || null)
       requestAnimationFrame(() => {
-        richComposerRef.current?.focus(caret + 1)
+        focusPrompt(caret)
       })
       lastPasteRef.current = null
       return
@@ -1013,7 +1029,7 @@ export const SpawnForm = memo(function SpawnForm({
   const handleDesktopImagePaste = useEffectEvent((file: File) => {
     const rich = richComposerRef.current?.editor?.view.dom
     const active = document.activeElement
-    if (!rich || !active || !rich.contains(active)) return
+    if (active !== sourcePromptRef.current && (!rich || !active || !rich.contains(active))) return
     // Native paste is dispatched on window rather than by the disabled
     // editor, so the browser cannot enforce the form's no-project guard for
     // us. Ignore it when there is genuinely no selected project.
@@ -1036,7 +1052,7 @@ export const SpawnForm = memo(function SpawnForm({
     e.target.value = ''
   }
 
-  const documentAttachments = attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id)))
+  const documentAttachments = richTextEditorEnabled ? attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id))) : attachments
   const uploading = documentAttachments.some((a) => a.uploading)
   const readyAttachments = documentAttachments.filter((a) => a.path && !a.error)
   // Every attachment that has bytes behind it, in chip order - the lightbox
@@ -1340,7 +1356,7 @@ export const SpawnForm = memo(function SpawnForm({
       if (snapshot) {
         e.preventDefault()
         if (draftKey) writeLocal(draftKey, snapshot.prompt || null)
-        requestAnimationFrame(() => richComposerRef.current?.focus(snapshot.selStart + 1))
+        requestAnimationFrame(() => focusPrompt(snapshot.selStart))
         return true
       }
     }
@@ -1370,6 +1386,37 @@ export const SpawnForm = memo(function SpawnForm({
       />
     ) : null
 
+  function renderSourcePrompt() {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <AttachmentChips
+          attachments={attachments}
+          size={compact ? 'sm' : 'md'}
+          className="px-3 pt-2"
+          onRemove={(id) => commit((previous) => makeSnapshot(previous.prompt, previous.attachments.filter((attachment) => attachment.id !== id), previous.selStart, previous.selEnd), false)}
+          onOpen={(id, origin) => {
+            setLightboxOrigin(origin)
+            setLightboxIndex(documentAttachments.findIndex((attachment) => attachment.id === id))
+          }}
+        />
+        <HighlightedTextarea
+          ref={sourcePromptRef}
+          value={prompt}
+          onChange={(event) => handlePromptChange(event.target.value)}
+          onKeyDown={(event) => { if (handleRichKeyDown(event.nativeEvent)) event.preventDefault() }}
+          onPaste={handlePaste}
+          disabled={loading || disabled}
+          autoFocus={!compact}
+          placeholder={disabled ? 'Select a project first...' : compact ? 'Describe a task...' : 'Describe what you need...'}
+          aria-label={compact ? 'Describe a task' : 'Describe what you need'}
+          data-desktop-image-paste
+          wrapperClassName="min-h-0 w-full flex-1"
+          textClassName={compact ? 'px-3 pt-2.5 pb-1 text-xs leading-relaxed' : 'px-4 pt-4 pb-2 text-sm leading-relaxed'}
+        />
+      </div>
+    )
+  }
+
   if (compact) {
     return (
       <>
@@ -1384,7 +1431,7 @@ export const SpawnForm = memo(function SpawnForm({
               className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
             >
               <Suspense fallback={<div className="h-full px-3 pt-2.5 text-xs text-gray-400">Loading editor...</div>}>
-                <MarkdownComposer
+                {richTextEditorEnabled ? <MarkdownComposer
                   key={`${draftSession.key}:${draftSession.generation}`}
                   initialDocument={draftSession.document}
                   ref={richComposerRef}
@@ -1423,7 +1470,7 @@ export const SpawnForm = memo(function SpawnForm({
                   ariaLabel="Describe a task"
                   dataDesktopImagePaste
                   className="h-full overflow-y-auto px-3 pt-2.5 pb-1 text-xs leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
-                />
+                /> : renderSourcePrompt()}
               </Suspense>
             </div>
             <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
@@ -1489,7 +1536,7 @@ export const SpawnForm = memo(function SpawnForm({
                 className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
               >
                 <Suspense fallback={<div className="h-full px-4 pt-4 text-sm text-gray-400">Loading editor...</div>}>
-                  <MarkdownComposer
+                  {richTextEditorEnabled ? <MarkdownComposer
                     key={`${draftSession.key}:${draftSession.generation}`}
                     initialDocument={draftSession.document}
                     ref={richComposerRef}
@@ -1529,7 +1576,7 @@ export const SpawnForm = memo(function SpawnForm({
                     ariaLabel="Describe what you need"
                     dataDesktopImagePaste
                     className="h-full overflow-y-auto px-4 pt-4 pb-2 text-sm leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
-                  />
+                  /> : renderSourcePrompt()}
                 </Suspense>
               </div>
 

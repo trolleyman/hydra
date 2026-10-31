@@ -1,3 +1,5 @@
+import { richTextEditorEnabled } from '../composerPrefs'
+import { SourceMarkdownComposer } from './SourceMarkdownComposer'
 import type { Editor, JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
@@ -15,7 +17,7 @@ export interface MarkdownComposerHandle {
 }
 
 export interface MarkdownComposerKeyContext {
-  editor: Editor
+  editor: Editor | null
   markdown: string
   empty: boolean
 }
@@ -132,7 +134,7 @@ function discoveryState(editor: Editor, references: ComposerReference[], onReque
  * editor keeps its live document and selection internally, only accepting an
  * external value when it actually differs from its own serialization.
  */
-export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownComposerProps>(function MarkdownComposer({
+const RichMarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownComposerProps>(function MarkdownComposer({
   value,
   onChange,
   initialDocument,
@@ -504,4 +506,10 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
     </div>
   )
+})
+
+export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownComposerProps>(function MarkdownComposer(props, ref) {
+  return richTextEditorEnabled
+    ? <RichMarkdownComposer {...props} ref={ref} />
+    : <SourceMarkdownComposer {...props} ref={ref} />
 })

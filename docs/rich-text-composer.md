@@ -128,8 +128,8 @@ Completed 2026-08-29:
   tinting and zebra rows communicate structure without bold header text.
   The behavior fixture runs in Chromium, Firefox and WebKit (engine-unsupported
   clipboard-permission checks are skipped). The lazy `MarkdownComposer` chunk,
-  including reference discovery and the command menu, is 290.89 KB minified /
-  94.08 KB gzip in the current production build. The shared attachment/core
+  including reference discovery and the command menu, is 292.03 KB minified /
+  94.61 KB gzip in the current production build. The shared attachment/core
   chunk is 304.93 KB minified / 95.74 KB gzip.
 
 The spike found two browser facts now captured in the design. Chrome does not
@@ -792,3 +792,17 @@ The code language picker measures its displayed width and reserves that footprin
 on the first source line with a presentation-only float. Narrow composers wrap
 source around the picker without covering characters or adding a toolbar row.
 Code surfaces disable spellcheck independently of the surrounding prose setting.
+
+## Browser editor choice
+
+Settings -> Browser -> Rich text editor selects rich editing or highlighted
+Markdown source for chat, both Spawn layouts, review replies, image-pin notes
+and question notes/Other answers. The setting is local to this browser and is
+enabled by default. Reset to defaults includes it.
+
+The saved choice applies after reloading the page. Every composer uses the same
+choice for that page lifetime, so changing the setting cannot replace an active
+input or cancel an upload. Markdown drafts and uploaded attachment manifests are
+shared by both modes. An unchanged structured snapshot retains exact attachment
+positions when rich editing is enabled again; source edits load through Markdown
+and restore attachments at their filename markers.
