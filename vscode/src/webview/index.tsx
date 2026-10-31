@@ -6,6 +6,7 @@ import { HistoryView } from './components/HistoryView'
 import { ProfilesView } from './components/ProfilesView'
 import { dedupe, foldStream, type Event, type Projection } from './model'
 import type { Approval, HistoryEntry, HostFrame, QuestionResult, ViewState } from './types'
+import { fontFeaturesFor, fontStackFor } from '../../../web/src/lib/fonts'
 
 function App() {
   const [state, setState] = useState<ViewState>({ page: 'chat', profile: '', profiles: [], running: false, hasConversation: false })
@@ -17,6 +18,7 @@ function App() {
   const [error, setError] = useState('')
   const [approvals, setApprovals] = useState<Approval[]>([])
   const [questionResults, setQuestionResults] = useState<Record<string, QuestionResult>>({})
+  const [attachments, setAttachments] = useState<{ path: string; name: string }[]>([])
 
   useEffect(() => {
     const consume = (frame: HostFrame) => {
@@ -40,12 +42,13 @@ function App() {
     }
     const listener = (message: MessageEvent<any>) => {
       const data = message.data
-      if (data.type === 'state') setState(data)
+      if (data.type === 'state') { setState(data); applyAppearance(data.appearance) }
       if (data.type === 'clearConversation') { setEvents([]); setProjection(undefined); setSubagents({}); setApprovals([]); setQuestionResults({}); setError('') }
       if (data.type === 'history') setHistory(data.entries)
       if (data.type === 'hostExit') setError(data.message)
       if (data.type === 'hostFrame') consume(data.frame as HostFrame)
       if (data.type === 'hostFrames') for (const frame of data.frames as HostFrame[]) consume(frame)
+      if (data.type === 'selectedFiles') setAttachments(current => [...new Map([...current, ...data.files].map(file => [file.path, file])).values()])
     }
     window.addEventListener('message', listener)
     postMessage({ type: 'ready' })
@@ -53,11 +56,12 @@ function App() {
   }, [])
 
   useEffect(() => { vscode.setState({ draft }) }, [draft])
-  const send = () => {
+  const send = (queued = false) => {
     const text = draft.trim()
-    if (!text) return
-    postMessage({ type: 'sendMessage', text })
+    if (!text && !attachments.length) return
+    postMessage({ type: 'sendMessage', text, attachments: attachments.map(file => file.path), queued })
     setDraft('')
+    setAttachments([])
   }
 
   return <main className="flex h-full min-h-0 flex-col bg-[var(--vscode-sideBar-background,var(--vscode-editor-background))] text-[var(--vscode-foreground)]">
@@ -68,8 +72,18 @@ function App() {
       ? <HistoryView entries={history} labels={state.profileLabels ?? {}} />
       : state.page === 'profiles'
         ? <ProfilesView state={state} />
-        : <ChatView state={state} events={events} projection={projection} subagents={subagents} approvals={approvals} questionResults={questionResults} draft={draft} onDraftChange={setDraft} onSend={send} />}
+        : <ChatView state={state} events={events} projection={projection} subagents={subagents} approvals={approvals} questionResults={questionResults} draft={draft} attachments={attachments} onRemoveAttachment={path => setAttachments(current => current.filter(file => file.path !== path))} onDraftChange={setDraft} onSend={send} />}
   </main>
+}
+
+function applyAppearance(value?: ViewState['appearance']): void {
+  const style = document.getElementById('hydra-appearance')
+  if (!style) return
+  const size = (input: number | undefined, fallback: number) => `${Number.isFinite(input) ? Math.max(10, Math.min(20, input!)) : fallback}px`
+  const ui = value?.interfaceFont ?? 'inter'
+  const chat = value?.chatFont ?? 'merriweather'
+  const code = value?.codeFont ?? 'fira-code'
+  style.textContent = `:root{--hydra-ui-font:${fontStackFor('ui', ui)};--hydra-ui-features:${fontFeaturesFor('ui', ui)};--hydra-chat-font:${fontStackFor('chat', chat)};--hydra-chat-features:${fontFeaturesFor('chat', chat)};--hydra-code-font:${fontStackFor('code', code)};--hydra-code-features:${fontFeaturesFor('code', code)};--hydra-ui-size:${size(value?.interfaceFontSize, 13)};--hydra-chat-size:${size(value?.chatFontSize, 14)};--hydra-code-size:${size(value?.codeFontSize, 12)}}`
 }
 
 function Banner({ kind, children }: { kind: 'warning' | 'error'; children: React.ReactNode }) {

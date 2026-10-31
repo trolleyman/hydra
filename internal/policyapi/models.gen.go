@@ -163,18 +163,14 @@ type PolicyDecision string
 
 // Profile Portable user-authored profile stored in VS Code configuration.
 type Profile struct {
-	// Effort Provider-specific reasoning effort.
-	Effort     string                    `json:"effort,omitempty"`
 	Filesystem *AuthoredFilesystemPolicy `json:"filesystem,omitempty"`
 	Git        *GitPolicy                `json:"git,omitempty"`
-	Model      string                    `json:"model,omitempty"`
 
 	// Name User-facing label; the containing settings key remains the stable profile ID.
-	Name     string                 `json:"name,omitempty"`
-	Network  *AuthoredNetworkPolicy `json:"network,omitempty"`
-	Prompt   string                 `json:"prompt,omitempty"`
-	Provider *ProviderKind          `json:"provider,omitempty"`
-	Tools    *ToolPolicy            `json:"tools,omitempty"`
+	Name    string                 `json:"name,omitempty"`
+	Network *AuthoredNetworkPolicy `json:"network,omitempty"`
+	Prompt  string                 `json:"prompt,omitempty"`
+	Tools   *ToolPolicy            `json:"tools,omitempty"`
 }
 
 // ProviderKind defines model for ProviderKind.

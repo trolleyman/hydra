@@ -8,6 +8,7 @@ import { defaultProfileName, profiles, resolveProfile, validateProfile, type Aut
 
 type Page = 'chat' | 'history' | 'profiles'
 type ChatEvent = Extract<HostFrame, { type: 'chat_event' }>['event']
+type Provider = 'claude' | 'codex'
 
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view?: vscode.WebviewView
@@ -18,6 +19,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private conversationID?: string
   private workspace?: vscode.WorkspaceFolder
   private pendingProfile?: string
+  private runtimeProvider: Provider
+  private runtimeModel: string
+  private runtimeEffort: string
+  private readonly queuedMessages: { id: string; text: string }[] = []
   private readonly approvals = new Map<string, Extract<HostFrame, { type: 'approval_request' }>>()
   private readonly disposables: vscode.Disposable[] = []
   private pendingFrames: HostFrame[] = []
@@ -25,14 +30,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private metadataUpdate = Promise.resolve()
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
+    this.runtimeProvider = vscode.workspace.getConfiguration('hydra').get<Provider>('defaultProvider', 'codex')
+    const runtime = this.configuredRuntime(this.runtimeProvider)
+    this.runtimeModel = runtime.model
+    this.runtimeEffort = runtime.effort
     this.disposables.push(vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('hydra')) void this.reloadProfile().catch(error => this.reportError(error))
+      if (event.affectsConfiguration('hydra.appearance')) {
+        this.postState()
+        return
+      }
+      if (event.affectsConfiguration('hydra.profiles') || event.affectsConfiguration('hydra.defaultProfile')) {
+        void this.reloadProfile().catch(error => this.reportError(error))
+      }
     }))
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view
-    view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] }
+    view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist'), vscode.Uri.joinPath(this.context.extensionUri, 'media')] }
     view.webview.html = this.html(view.webview)
     this.disposables.push(view.webview.onDidReceiveMessage(message => {
       void this.onMessage(message).catch(error => this.reportError(error))
@@ -48,6 +63,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.profile = defaultProfileName()
     this.workspace = workspace
     this.pendingProfile = undefined
+    this.queuedMessages.splice(0)
     const policy = await this.resolvePolicy(this.profile, workspace)
     const conversationDir = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID)
     await fs.mkdir(conversationDir, { recursive: true })
@@ -56,6 +72,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       title: 'New chat',
       workspace: workspace.uri.fsPath,
       provider: policy.provider,
+      model: policy.model,
+      effort: policy.effort,
       profile: this.profile,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -127,7 +145,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       if (frame.event.type === 'turn_started') this.running = true
       if (['turn_completed', 'turn_failed', 'turn_interrupted'].includes(frame.event.type)) {
         this.running = false
-        if (this.pendingProfile) void this.applyProfile(this.pendingProfile)
+        void this.afterTurn()
       }
     }
     if (frame.type === 'state_snapshot') this.running = frame.projection.turn?.status === 'running'
@@ -148,10 +166,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case 'cycleProfile': await this.cycleProfile(); break
       case 'sendMessage':
         if (!this.client) await this.newChat()
-        const text = String(message.text ?? '')
-        this.client?.send({ type: 'user_message', request_id: randomUUID(), id: randomUUID(), content: [{ type: 'text', text }] })
-        await this.touchMetadata(undefined, text)
+        const text = messageText(String(message.text ?? ''), Array.isArray(message.attachments) ? message.attachments.map(String) : [])
+        if (!text.trim()) break
+        if (message.queued === true && this.running) {
+          this.queuedMessages.push({ id: randomUUID(), text })
+          this.postState()
+        } else await this.sendUserMessage(text)
         break
+      case 'selectProvider': await this.selectProvider(String(message.provider)); break
+      case 'selectModel':
+        this.runtimeModel = String(message.model ?? '')
+        this.client?.send({ type: 'set_model', request_id: randomUUID(), model: this.runtimeModel })
+        await this.updateRuntimeMetadata()
+        this.postState()
+        break
+      case 'selectEffort': await this.selectEffort(String(message.effort ?? '')); break
+      case 'pickFiles': await this.pickFiles(); break
       case 'interrupt': this.client?.send({ type: 'interrupt', request_id: randomUUID() }); break
       case 'approval':
         await this.answerApproval(String(message.requestID), message.decision as 'allow' | 'deny', message.scope as 'once' | 'chat' | 'workspace' | 'profile')
@@ -175,7 +205,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case 'saveProfile': {
         const name = String(message.name)
         if (!name.trim() || typeof message.profile !== 'object' || !message.profile) break
-        const profile = message.profile as AuthoredProfile
+        const profile = policyOnly(message.profile as AuthoredProfile)
         validateProfile(name, profile)
         const configuration = vscode.workspace.getConfiguration('hydra')
         const target = message.scope === 'workspace' ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global
@@ -219,6 +249,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     }
     const configured = profiles()
     const profile = configured[metadata.profile] ? metadata.profile : defaultProfileName(configured)
+    this.runtimeProvider = metadata.provider === 'claude' || metadata.provider === 'codex' ? metadata.provider : this.runtimeProvider
+    const configuredRuntime = this.configuredRuntime(this.runtimeProvider)
+    this.runtimeModel = typeof metadata.model === 'string' ? metadata.model : configuredRuntime.model
+    this.runtimeEffort = typeof metadata.effort === 'string' ? metadata.effort : configuredRuntime.effort
     const policy = await this.resolvePolicy(profile, workspace)
     let resumeSessionID: string | undefined
     try {
@@ -230,6 +264,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.workspace = workspace
     this.profile = profile
     this.pendingProfile = undefined
+    this.queuedMessages.splice(0)
     this.page = 'chat'
     const initialize: InitializeCommand = {
       type: 'initialize', protocol_version: 1, workspace: policy.workspace,
@@ -301,7 +336,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       const metadata = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID, 'metadata.json')
       try {
         const current = JSON.parse(await fs.readFile(metadata, 'utf8'))
-        await fs.writeFile(metadata, JSON.stringify({ ...current, profile: name, provider: policy.provider, updatedAt: new Date().toISOString() }, null, 2))
+        await fs.writeFile(metadata, JSON.stringify({ ...current, profile: name, provider: policy.provider, model: policy.model, effort: policy.effort, updatedAt: new Date().toISOString() }, null, 2))
       } catch {}
     }
     this.postState()
@@ -319,6 +354,81 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       return
     }
     await this.applyProfile(this.profile)
+  }
+
+  private async afterTurn(): Promise<void> {
+    if (this.pendingProfile) await this.applyProfile(this.pendingProfile)
+    const queued = this.queuedMessages.shift()
+    if (queued) await this.sendUserMessage(queued.text)
+    this.postState()
+  }
+
+  private async sendUserMessage(text: string): Promise<void> {
+    if (!this.client) return
+    this.running = true
+    this.postState()
+    this.client.send({ type: 'user_message', request_id: randomUUID(), id: randomUUID(), content: [{ type: 'text', text }] })
+    await this.touchMetadata(undefined, text)
+  }
+
+  private async pickFiles(): Promise<void> {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: true,
+      defaultUri: this.workspace?.uri,
+      openLabel: 'Add to message',
+    })
+    if (!selected?.length) return
+    const references = selected.map(uri => {
+      const inWorkspace = this.workspace && uri.fsPath.startsWith(this.workspace.uri.fsPath + path.sep)
+      const display = inWorkspace ? path.relative(this.workspace!.uri.fsPath, uri.fsPath) : uri.fsPath
+      return { path: display, name: path.basename(display) }
+    })
+    this.post({ type: 'selectedFiles', files: references })
+  }
+
+  private async selectProvider(value: string): Promise<void> {
+    if (value !== 'claude' && value !== 'codex') return
+    if (this.running) {
+      void vscode.window.showInformationMessage('Stop the running response before changing providers.')
+      return
+    }
+    if (value === this.runtimeProvider) return
+    this.runtimeProvider = value
+    const runtime = this.configuredRuntime(value)
+    this.runtimeModel = runtime.model
+    this.runtimeEffort = runtime.effort
+    if (this.client) await this.applyProfile(this.profile)
+    else this.postState()
+  }
+
+  private async selectEffort(effort: string): Promise<void> {
+    if (this.running) {
+      void vscode.window.showInformationMessage('Stop the running response before changing thinking effort.')
+      return
+    }
+    if (effort === this.runtimeEffort) return
+    this.runtimeEffort = effort
+    if (this.client) await this.applyProfile(this.profile)
+    else this.postState()
+  }
+
+  private configuredRuntime(provider: Provider): { model: string; effort: string } {
+    const settings = vscode.workspace.getConfiguration(`hydra.providers.${provider}`)
+    return {
+      model: settings.get('defaultModel', provider === 'codex' ? 'gpt-6.1-sol' : 'claude-sonnet-5-5'),
+      effort: settings.get('defaultEffort', provider === 'codex' ? 'medium' : ''),
+    }
+  }
+
+  private async updateRuntimeMetadata(): Promise<void> {
+    if (!this.conversationID) return
+    const metadata = path.join(this.context.globalStorageUri.fsPath, 'conversations', this.conversationID, 'metadata.json')
+    try {
+      const current = JSON.parse(await fs.readFile(metadata, 'utf8'))
+      await fs.writeFile(metadata, JSON.stringify({ ...current, provider: this.runtimeProvider, model: this.runtimeModel, effort: this.runtimeEffort, updatedAt: new Date().toISOString() }, null, 2))
+    } catch {}
   }
 
   private async answerApproval(requestID: string, decision: 'allow' | 'deny', scope: 'once' | 'chat' | 'workspace' | 'profile'): Promise<void> {
@@ -340,7 +450,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   }
 
   private resolvePolicy(name: string, workspace: vscode.WorkspaceFolder) {
-    return resolveProfile(name, workspace, this.context.workspaceState.get(this.workspaceGrantKey(name, workspace), {}))
+    return resolveProfile(name, workspace, this.context.workspaceState.get(this.workspaceGrantKey(name, workspace), {}), { provider: this.runtimeProvider, model: this.runtimeModel || undefined, effort: this.runtimeEffort || undefined })
   }
 
   private workspaceGrantKey(profile: string, workspace: vscode.WorkspaceFolder): string {
@@ -351,7 +461,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const configured = profiles()
     const profileLabels = this.profileLabels(configured)
     const networkMode = configured[this.profile]?.network?.mode ?? 'hard'
-    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(configured), profileLabels, profileValues: JSON.parse(JSON.stringify(configured)), networkMode, running: this.running, hasConversation: Boolean(this.conversationID) })
+    const settings = vscode.workspace.getConfiguration('hydra.appearance')
+    const appearance = {
+      interfaceFont: settings.get('interfaceFont', 'inter'),
+      chatFont: settings.get('chatFont', 'merriweather'),
+      codeFont: settings.get('codeFont', 'fira-code'),
+      interfaceFontSize: settings.get('interfaceFontSize', 13),
+      chatFontSize: settings.get('chatFontSize', 14),
+      codeFontSize: settings.get('codeFontSize', 12),
+    }
+    this.post({ type: 'state', page: this.page, profile: this.profile, pendingProfile: this.pendingProfile, profiles: Object.keys(configured), profileLabels, profileValues: JSON.parse(JSON.stringify(configured)), provider: this.runtimeProvider, model: this.runtimeModel, effort: this.runtimeEffort, networkMode, running: this.running, hasConversation: Boolean(this.conversationID), queuedMessages: [...this.queuedMessages], appearance })
   }
 
   private async createProfile(): Promise<void> {
@@ -364,7 +483,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     if (!id) return
     const label = await vscode.window.showInputBox({ title: 'Create Hydra profile', prompt: 'Display name', value: id[0].toUpperCase() + id.slice(1) })
     if (!label) return
-    const source = profiles()[this.profile] ?? {}
+    const source = policyOnly(profiles()[this.profile] ?? {})
     const profile = JSON.parse(JSON.stringify({ ...source, name: label })) as AuthoredProfile
     validateProfile(id, profile)
     const configuration = vscode.workspace.getConfiguration('hydra')
@@ -404,7 +523,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'))
     const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'))
     const nonce = randomUUID().replaceAll('-', '')
-    return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`
+    return `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><link rel="stylesheet" href="${style}"><style id="hydra-appearance" nonce="${nonce}"></style></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`
   }
 }
 
@@ -446,3 +565,18 @@ function addProfileGrant(profile: Record<string, any>, request: Extract<HostFram
 }
 
 function unique(values: string[]): string[] { return [...new Set(values)] }
+
+function messageText(text: string, attachments: string[]): string {
+  const paths = unique(attachments.map(value => value.trim()).filter(Boolean))
+  if (!paths.length) return text
+  const references = `Attached files (read these paths):\n${paths.map(value => `- ${JSON.stringify(value)}`).join('\n')}`
+  return `${text.trim()}${text.trim() ? '\n\n' : ''}${references}`
+}
+
+function policyOnly(value: AuthoredProfile): AuthoredProfile {
+  const copy = { ...value }
+  delete copy.provider
+  delete copy.model
+  delete copy.effort
+  return copy
+}

@@ -1,0 +1,3 @@
+# Generated from the repository's content-addressed Webfont build. The VS Code
+# build copies only the faces it ships into this directory.
+*.woff2

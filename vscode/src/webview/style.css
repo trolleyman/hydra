@@ -1,34 +1,69 @@
 @import "tailwindcss";
 @source "./**/*.{ts,tsx}";
 
+/* The catalogue is shared with web/src/lib/fonts.ts. These generated faces are
+   copied from the browser's content-addressed font cache before each build. */
+@font-face { font-family: 'IBM Plex Sans'; src: url('../media/fonts/ibm-plex-sans-normal.woff2') format('woff2'); font-style: normal; font-weight: 400 700; font-display: swap; }
+@font-face { font-family: 'IBM Plex Sans'; src: url('../media/fonts/ibm-plex-sans-italic.woff2') format('woff2'); font-style: italic; font-weight: 400 700; font-display: swap; }
+@font-face { font-family: Inter; src: url('../media/fonts/inter-normal.woff2') format('woff2'); font-style: normal; font-weight: 400 700; font-display: swap; }
+@font-face { font-family: Inter; src: url('../media/fonts/inter-italic.woff2') format('woff2'); font-style: italic; font-weight: 400 700; font-display: swap; }
+@font-face { font-family: Merriweather; src: url('../media/fonts/merriweather-normal.woff2') format('woff2'); font-style: normal; font-weight: 300 900; font-display: swap; }
+@font-face { font-family: Merriweather; src: url('../media/fonts/merriweather-italic.woff2') format('woff2'); font-style: italic; font-weight: 300 900; font-display: swap; }
+@font-face { font-family: 'Roboto Flex'; src: url('../media/fonts/roboto-flex-normal.woff2') format('woff2'); font-style: oblique 0deg 10deg; font-weight: 100 1000; font-stretch: 100%; font-display: swap; }
+@font-face { font-family: 'Source Serif 4'; src: url('../media/fonts/source-serif-normal.woff2') format('woff2'); font-style: normal; font-weight: 400 700; font-display: swap; }
+@font-face { font-family: 'Source Serif 4'; src: url('../media/fonts/source-serif-italic.woff2') format('woff2'); font-style: italic; font-weight: 400 700; font-display: swap; }
+@font-face { font-family: 'Iosevka'; src: url('../media/fonts/iosevka-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Iosevka'; src: url('../media/fonts/iosevka-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Iosevka'; src: url('../media/fonts/iosevka-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Iosevka'; src: url('../media/fonts/iosevka-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Fira Code'; src: url('../media/fonts/fira-code-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Fira Code'; src: url('../media/fonts/fira-code-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('../media/fonts/jetbrains-mono-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('../media/fonts/jetbrains-mono-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('../media/fonts/jetbrains-mono-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('../media/fonts/jetbrains-mono-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../media/fonts/ibm-plex-mono-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../media/fonts/ibm-plex-mono-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../media/fonts/ibm-plex-mono-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('../media/fonts/ibm-plex-mono-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('../media/fonts/source-code-pro-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('../media/fonts/source-code-pro-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('../media/fonts/source-code-pro-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('../media/fonts/source-code-pro-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Hydra Arrows'; src: url('../media/fonts/noto-sans-math-arrows.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; unicode-range: U+2190-21FF, U+27F5-27FF; size-adjust: 110%; }
+@font-face { font-family: 'Hydra Nerd Symbols 50'; src: url('../media/fonts/nerd-symbols-400-normal.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; size-adjust: 50%; unicode-range: U+23FB-23FE, U+2B58, U+E000-E00A, U+E0A0-E0A3, U+E0B0-E0D7, U+E200-E2A9, U+E300-E3E3, U+E5FA-E6B7, U+E700-E8EF, U+EA60-EC1E, U+ED00-EFCE, U+F000-F2FF, U+F300-F381, U+F400-F533; }
+@font-face { font-family: 'Hydra Nerd Symbols 60'; src: url('../media/fonts/nerd-symbols-400-normal.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; size-adjust: 60%; unicode-range: U+23FB-23FE, U+2B58, U+E000-E00A, U+E0A0-E0A3, U+E0B0-E0D7, U+E200-E2A9, U+E300-E3E3, U+E5FA-E6B7, U+E700-E8EF, U+EA60-EC1E, U+ED00-EFCE, U+F000-F2FF, U+F300-F381, U+F400-F533; }
+
 @theme {
-  --font-sans: var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif);
-  --font-mono: var(--vscode-editor-font-family, ui-monospace, monospace);
-  --text-xs: 13px;
-  --text-sm: 15px;
-  --text-base: 17px;
+  --font-sans: var(--hydra-ui-font, Inter, sans-serif);
+  --font-mono: var(--hydra-code-font, 'Fira Code', monospace);
+  --text-xs: var(--hydra-ui-size, 13px);
+  --text-sm: calc(var(--hydra-ui-size, 13px) + 2px);
+  --text-base: calc(var(--hydra-ui-size, 13px) + 4px);
 }
 
 @utility text-2xs {
-  font-size: 12px;
+  font-size: calc(var(--hydra-ui-size, 13px) - 1px);
 }
 
 @utility text-3xs {
-  font-size: 11px;
+  font-size: calc(var(--hydra-ui-size, 13px) - 2px);
 }
 
 :root {
   color-scheme: light dark;
-  font-family: var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif);
-  font-size: var(--vscode-font-size, 13px);
+  font-family: var(--hydra-ui-font, Inter, sans-serif);
+  font-feature-settings: var(--hydra-ui-features, normal);
+  font-size: var(--hydra-ui-size, 13px);
   color: var(--vscode-foreground);
   --hydra-border: var(--vscode-panel-border, color-mix(in srgb, currentColor 16%, transparent));
   --hydra-border-strong: color-mix(in srgb, var(--vscode-foreground) 24%, transparent);
   --hydra-border-subtle: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
   --hydra-surface: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%);
-  --hydra-user-message: var(--vscode-editorWidget-background, var(--vscode-input-background));
+  --hydra-user-message: #f0eee6;
   --hydra-code: var(--vscode-textCodeBlock-background, color-mix(in srgb, var(--vscode-editor-background) 90%, var(--vscode-foreground) 10%));
   --hydra-accent-soft: color-mix(in srgb, var(--vscode-textLink-foreground) 13%, transparent);
+  --hydra-accent: var(--vscode-textLink-foreground, #d97757);
 }
 
 @layer base {
@@ -101,14 +136,14 @@
   }
 }
 
-.activity-card,
 .settings-section,
 .nested-section {
-  overflow: hidden;
   border: 1px solid var(--hydra-border);
   border-radius: 8px;
   background: var(--hydra-surface);
 }
+
+.nested-section { overflow: hidden; }
 
 .activity-card-error {
   border-color: var(--vscode-inputValidation-errorBorder);
@@ -122,32 +157,66 @@
   padding: 8px 9px;
   border-radius: 6px;
   background: var(--hydra-code);
-  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
-  font-size: var(--vscode-editor-font-size, 12px);
+  font-family: var(--hydra-code-font, 'Fira Code', monospace);
+  font-feature-settings: var(--hydra-code-features, normal);
+  font-size: var(--hydra-code-size, 12px);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .question-option {
-  display: flex;
-  gap: 8px;
-  padding: 8px;
   border: 1px solid var(--hydra-border-subtle);
   border-radius: 7px;
-  cursor: pointer;
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
 .question-option:hover {
   border-color: var(--hydra-border-strong);
-  background: var(--vscode-list-hoverBackground);
 }
 
 .question-option-selected {
-  border-color: var(--vscode-focusBorder);
+  border-color: var(--hydra-accent);
   background: var(--hydra-accent-soft);
 }
+.question-note-trigger { position: absolute; top: 4px; right: 4px; display: flex; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 4px; color: var(--vscode-descriptionForeground); background: transparent; opacity: 0; transition: opacity 120ms ease; }
+.question-option:hover .question-note-trigger, .question-note-trigger:focus-visible { opacity: 1; }
+.question-note-trigger:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+.question-note { margin: 0 10px 6px 32px; display: flex; gap: 8px; border-top: 1px dashed color-mix(in srgb, var(--hydra-accent) 35%, transparent); padding-top: 5px; color: var(--vscode-descriptionForeground); }
+.question-note textarea { min-height: 20px; resize: none; overflow: hidden; border: 0; background: transparent; padding: 0; font-size: var(--hydra-ui-size, 13px); }
+
+.chat-font { font-family: var(--hydra-chat-font, Merriweather, serif); font-feature-settings: var(--hydra-chat-features, normal); font-size: var(--hydra-chat-size, 14px); line-height: calc(var(--hydra-chat-size, 14px) + 8px); }
+.composer { overflow: hidden; border: 1px solid var(--vscode-input-border, var(--hydra-border-strong)); border-radius: 14px; background: var(--vscode-input-background); box-shadow: 0 2px 10px rgb(0 0 0 / 8%); }
+.composer:focus-within { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder), 0 2px 10px rgb(0 0 0 / 8%); }
+.composer textarea { font-family: var(--hydra-chat-font, Merriweather, serif); font-feature-settings: var(--hydra-chat-features, normal); font-size: var(--hydra-chat-size, 14px); line-height: calc(var(--hydra-chat-size, 14px) + 8px); }
+.model-select, .provider-select, .thinking-select { width: auto; min-height: 26px; border-color: transparent; background-color: transparent; padding: 2px 5px; font-size: inherit; }
+.model-select { max-width: 126px; }
+.provider-select { max-width: 70px; }
+.thinking-select { max-width: 112px; }
+.tool-step { overflow: hidden; border: 1px solid var(--hydra-border-subtle); border-radius: 7px; background: transparent; }
+.tool-summary { display: flex; min-height: 30px; cursor: pointer; list-style: none; align-items: center; gap: 7px; padding: 5px 9px; color: var(--vscode-descriptionForeground); font-size: var(--hydra-ui-size, 13px); }
+.tool-summary:hover { color: var(--vscode-foreground); }
+.step-group-summary { display: flex; min-height: 30px; cursor: pointer; list-style: none; align-items: center; gap: 7px; padding: 5px 9px; color: var(--vscode-descriptionForeground); font-size: var(--hydra-ui-size, 13px); }
+.step-group-summary:hover .step-count { color: var(--vscode-foreground); }
+.tool-running { color: var(--vscode-testing-iconQueued, var(--hydra-accent)); }
+.commit-chip, .attachment-chip { display: inline-flex; min-width: 0; align-items: center; gap: 6px; border: 1px solid var(--hydra-border); border-radius: 999px; background: var(--hydra-surface); color: var(--vscode-descriptionForeground); font-size: calc(var(--hydra-ui-size, 13px) - 1px); }
+.commit-chip { padding: 4px 9px; }
+.attachment-chip { padding: 3px 7px; }
+.attachment-chip button { display: inline-flex; padding: 0; color: inherit; background: transparent; }
+.question-card { max-width: 640px; border: 1px solid var(--hydra-border); border-radius: 12px; background: var(--hydra-surface); padding: 12px; }
+.question-badge { flex: none; border-radius: 5px; background: var(--hydra-accent-soft); padding: 2px 6px; color: var(--hydra-accent); font-size: calc(var(--hydra-ui-size, 13px) - 2px); }
+.question-check { margin-top: 2px; display: flex; width: 14px; height: 14px; flex: none; align-items: center; justify-content: center; border: 1px solid var(--vscode-checkbox-border, var(--hydra-border)); }
+.question-check-selected { border-color: var(--hydra-accent); color: var(--vscode-button-foreground); background: var(--hydra-accent); }
+.info-popover { position: absolute; z-index: 50; top: 22px; right: -18px; width: min(280px, 72vw); border: 1px solid var(--hydra-border-strong); border-radius: 8px; background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background)); padding: 9px 10px; color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground)); box-shadow: 0 6px 20px rgb(0 0 0 / 20%); font-size: calc(var(--hydra-ui-size, 13px) - 1px); font-weight: 400; line-height: 1.5; }
+.chat-text-shimmer { color: transparent; background: linear-gradient(90deg, var(--vscode-descriptionForeground) 35%, var(--vscode-foreground) 50%, var(--vscode-descriptionForeground) 65%); background-size: 200% 100%; background-clip: text; animation: chat-text-shimmer 2.2s linear infinite; }
+@keyframes chat-text-shimmer { to { background-position: -220% 0; } }
+@keyframes work-spark-spin { to { transform: rotate(-360deg); } }
+@keyframes work-spark-pulse { 0%, 100% { opacity: 0.28; transform: scaleY(0.58); } 30% { opacity: 1; transform: scaleY(1); } }
+.work-spark { transform-origin: center; animation: work-spark-spin 6s linear infinite; }
+.work-spark-spoke { transform-box: view-box; transform-origin: 12px 9.2px; animation: work-spark-pulse 1.32s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .chat-text-shimmer { animation: none; color: var(--vscode-descriptionForeground); background: none; } .work-spark, .work-spark-spoke { animation: none; } }
+
+body.vscode-dark, body.vscode-high-contrast { --hydra-user-message: #31302c; }
 
 .permission-tree {
   overflow: hidden;
@@ -222,7 +291,7 @@
   padding: 8px 9px;
   border-radius: 6px;
   background: var(--hydra-code);
-  font-size: var(--vscode-editor-font-size, 12px);
+  font-size: var(--hydra-code-size, 12px);
   line-height: 1.5;
 }
 
@@ -230,7 +299,7 @@
   border-radius: 3px;
   padding: 0.08em 0.3em;
   background: var(--hydra-code);
-  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-family: var(--hydra-code-font, 'Fira Code', monospace);
   font-size: 0.92em;
 }
 

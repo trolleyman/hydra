@@ -15,9 +15,12 @@ async function run() {
   const defaults = manifest.contributes.configuration.properties['hydra.profiles'].default
   assert.equal(defaults.plan.name, 'Plan')
   assert.equal(defaults.plan.tools.core.edit, 'deny')
+  assert.equal(defaults.plan.provider, undefined)
   assert.equal(defaults.edit.name, 'Edit')
   assert.equal(defaults.edit.tools.core.edit, 'allow')
+  assert.equal(defaults.edit.provider, undefined)
   assert.equal(manifest.contributes.configuration.properties['hydra.defaultProfile'].default, 'edit')
+  assert.equal(manifest.contributes.configuration.properties['hydra.defaultProvider'].default, 'codex')
 
   await vscode.commands.executeCommand('hydra.showProfiles')
 }

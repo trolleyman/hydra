@@ -31,25 +31,27 @@
     "package": "node scripts/package.mjs"
   },
   "dependencies": {
-    "dompurify": "^3.4.15",
-    "lucide-react": "^1.26.0",
-    "marked": "^18.0.11",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "dompurify": "^3.4.17",
+    "lucide-react": "^1.66.0",
+    "marked": "^18.1.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "refractor": "^5.0.0"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
-    "@types/node": "^24.0.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@types/vscode": "^1.105.0",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/vscode": "^1.144.0",
     "@vscode/test-electron": "^3.1.0",
-    "@vscode/vsce": "^3.6.0",
-    "esbuild": "^0.25.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^6.0.0"
+    "typescript": "~6.0.3"
   },
+  "//typescript": "Held at 6.0.x because openapi-typescript 7.13 uses compiler APIs that TypeScript 7 no longer exposes. Revisit 7.0 once the generator supports it.",
   "contributes": {
     "commands": [
       {
@@ -128,7 +130,6 @@
           "default": {
             "plan": {
               "name": "Plan",
-              "provider": "codex",
               "prompt": "Analyze the request, inspect the workspace, and produce a concrete implementation plan. Do not modify files or Git state.",
               "filesystem": {
                 "readable": [
@@ -165,7 +166,6 @@
             },
             "edit": {
               "name": "Edit",
-              "provider": "codex",
               "prompt": "Work carefully in the opened workspace and complete the user's request.",
               "filesystem": {
                 "readable": [
@@ -236,6 +236,32 @@
           "scope": "window",
           "description": "How profile changes are applied while a turn is running."
         },
+        "hydra.defaultProvider": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude"
+          ],
+          "enumItemLabels": [
+            "Codex",
+            "Claude"
+          ],
+          "default": "codex",
+          "scope": "window",
+          "description": "Provider selected for new conversations. Provider selection is independent of permission profiles."
+        },
+        "hydra.providers.claude.defaultModel": {
+          "type": "string",
+          "default": "claude-sonnet-5-5",
+          "scope": "window",
+          "description": "Claude model selected for new conversations."
+        },
+        "hydra.providers.claude.defaultEffort": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "Claude thinking effort selected for new conversations; empty uses the provider default."
+        },
         "hydra.providers.claude.path": {
           "type": "string",
           "default": "claude",
@@ -248,11 +274,117 @@
           "scope": "machine-overridable",
           "description": "Codex executable available on the workspace host."
         },
+        "hydra.providers.codex.defaultModel": {
+          "type": "string",
+          "default": "gpt-6.1-sol",
+          "scope": "window",
+          "description": "Codex model selected for new conversations."
+        },
+        "hydra.providers.codex.defaultEffort": {
+          "type": "string",
+          "default": "medium",
+          "scope": "window",
+          "description": "Codex thinking effort selected for new conversations."
+        },
         "hydra.agentHost.path": {
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
           "description": "Development override for the packaged hydra-agent-host executable."
+        },
+        "hydra.appearance.interfaceFont": {
+          "type": "string",
+          "default": "inter",
+          "enum": [
+            "system-sans",
+            "inter",
+            "roboto-flex",
+            "ibm-plex-sans",
+            "system-serif",
+            "merriweather",
+            "source-serif"
+          ],
+          "enumItemLabels": [
+            "System sans",
+            "Inter",
+            "Roboto Flex",
+            "IBM Plex Sans",
+            "System serif",
+            "Merriweather",
+            "Source Serif 4"
+          ],
+          "scope": "window",
+          "description": "Font used by Hydra controls and metadata."
+        },
+        "hydra.appearance.chatFont": {
+          "type": "string",
+          "default": "merriweather",
+          "enum": [
+            "system-serif",
+            "merriweather",
+            "source-serif",
+            "system-sans",
+            "inter",
+            "roboto-flex",
+            "ibm-plex-sans"
+          ],
+          "enumItemLabels": [
+            "System serif",
+            "Merriweather",
+            "Source Serif 4",
+            "System sans",
+            "Inter",
+            "Roboto Flex",
+            "IBM Plex Sans"
+          ],
+          "scope": "window",
+          "description": "Font used by assistant prose and the composer. User messages remain sans serif."
+        },
+        "hydra.appearance.codeFont": {
+          "type": "string",
+          "default": "fira-code",
+          "enum": [
+            "system-mono",
+            "iosevka",
+            "fira-code",
+            "jetbrains-mono",
+            "ibm-plex-mono",
+            "source-code-pro"
+          ],
+          "enumItemLabels": [
+            "System mono",
+            "Iosevka",
+            "Fira Code",
+            "JetBrains Mono",
+            "IBM Plex Mono",
+            "Source Code Pro"
+          ],
+          "scope": "window",
+          "description": "Font used by code and tool details."
+        },
+        "hydra.appearance.interfaceFontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 11,
+          "maximum": 18,
+          "scope": "window",
+          "description": "Interface font size in pixels."
+        },
+        "hydra.appearance.chatFontSize": {
+          "type": "number",
+          "default": 14,
+          "minimum": 11,
+          "maximum": 20,
+          "scope": "window",
+          "description": "Chat message font size in pixels."
+        },
+        "hydra.appearance.codeFontSize": {
+          "type": "number",
+          "default": 12,
+          "minimum": 10,
+          "maximum": 18,
+          "scope": "window",
+          "description": "Code and tool detail font size in pixels."
         }
       }
     }

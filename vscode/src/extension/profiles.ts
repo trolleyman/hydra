@@ -7,9 +7,6 @@ import type { components } from '../generated/protocol'
 export type EffectivePolicy = components['schemas']['InitializeCommand']['policy']
 export type AuthoredProfile = Record<string, unknown> & {
   name?: string
-  provider?: 'claude' | 'codex'
-  model?: string
-  effort?: string
   prompt?: string
   filesystem?: { readable?: string[]; writable?: string[]; copy_on_write?: string[]; masked?: string[] }
   network?: { mode?: 'off' | 'hard' | 'advisory' | 'unrestricted'; allowed_hosts?: string[]; blocked_hosts?: string[] }
@@ -34,7 +31,7 @@ export function defaultProfileName(all = profiles()): string {
   return all[configured] ? configured : Object.keys(all)[0] ?? 'edit'
 }
 
-export async function resolveProfile(name: string, workspace: vscode.WorkspaceFolder, grants: WorkspaceGrants = {}): Promise<EffectivePolicy> {
+export async function resolveProfile(name: string, workspace: vscode.WorkspaceFolder, grants: WorkspaceGrants = {}, runtime: { provider: 'claude' | 'codex'; model?: string; effort?: string }): Promise<EffectivePolicy> {
   const authored = profiles()[name]
   if (!authored) throw new Error(`Unknown Hydra profile: ${name}`)
   validateProfile(name, authored)
@@ -57,9 +54,9 @@ export async function resolveProfile(name: string, workspace: vscode.WorkspaceFo
   }
   return {
     profile: name,
-    provider: authored.provider ?? 'codex',
-    model: authored.model,
-    effort: authored.effort,
+    provider: runtime.provider,
+    model: runtime.model,
+    effort: runtime.effort,
     prompt: authored.prompt,
     workspace: workspacePath,
     user_home: home,
@@ -92,8 +89,7 @@ function jsonClone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as
 export function validateProfile(name: string, profile: AuthoredProfile): void {
   const fail = (field: string, message: string): never => { throw new Error(`Hydra profile "${name}" ${field} ${message}`) }
   const decisions = new Set(['allow', 'ask', 'deny'])
-  if (profile.provider !== undefined && !['claude', 'codex'].includes(profile.provider)) fail('provider', 'must be claude or codex')
-  for (const field of ['name', 'model', 'effort', 'prompt'] as const) {
+  for (const field of ['name', 'prompt'] as const) {
     if (profile[field] !== undefined && typeof profile[field] !== 'string') fail(field, 'must be a string')
   }
   for (const field of ['readable', 'writable', 'copy_on_write', 'masked'] as const) {
