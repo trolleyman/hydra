@@ -152,3 +152,17 @@ ends with `tsc-report.ts`.
 only at the end, so a run killed by `timeout_sec` reports *nothing* - the whole suite
 reads as a bare red exit code. Streamed cases are kept as they arrive, so a partial
 run still shows what passed. That is why the e2e suite moved off JUnit.
+
+## Rich editor browser coverage
+
+The `rich_editor` runner boots the isolated Tiptap fixture on a free loopback
+port and runs its Chromium selection, inline-code, clipboard, composition,
+attachment and table interactions. It streams results with the shared Playwright
+reporter and runs when work settles. It does not need a production frontend
+build. The `e2e` runner separately verifies the production chat and Spawn flows,
+including shell-mode handoff, send history, draft restoration and console errors.
+
+`cd web && aube run test:rich-editor` runs all three configured engines when
+Chromium, Firefox and WebKit are installed. Use npm when aube is unavailable.
+Browser downloads follow the sandbox's network allow-list; browser engine
+coverage does not imply physical IME, touchscreen or assistive-technology testing.

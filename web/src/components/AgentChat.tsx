@@ -1,4 +1,6 @@
-import { Fragment, createContext, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import { richTextEditorEnabled } from '../lib/composerPrefs'
+import { flushSync } from 'react-dom'
+import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -43,7 +45,7 @@ import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../l
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { selectAgent, selectLiveAgent, useAgentStore } from '../stores/agentStore'
-import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
+import { RichMarkdown, type RepoLinkContext } from '../lib/RichMarkdown'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
@@ -70,9 +72,14 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import type { MarkdownComposerHandle, MarkdownComposerKeyContext } from '../lib/rich-editor/MarkdownComposer'
+import type { ComposerReference } from '../lib/rich-editor/Reference'
+import { AttachmentRegistry } from '../lib/rich-editor/AttachmentRegistry'
+import { restoreAttachment, type ComposerAttachment } from '../lib/rich-editor/Attachment'
 import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
+import { optimisticEchoIndex } from '../lib/optimisticEcho'
 import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
@@ -113,6 +120,27 @@ import { WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 import { diffCodeHtml } from '../lib/diffCode'
 import { CODE_LEADING, CODE_TEXT, UNIFIED_ROW, UNIFIED_GUTTER, UNIFIED_LINE_NUM_CLASS, UNIFIED_MARKER, UNIFIED_CODE_CLASS } from '../lib/diffMetrics'
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
+
+const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
+
+function composerAttachment(attachment: Attachment): ComposerAttachment {
+  const lower = attachment.filename.toLowerCase()
+  const kind: ComposerAttachment['kind'] = attachment.previewUrl
+    ? 'image'
+    : lower.endsWith('.pdf')
+      ? 'pdf'
+      : /\.(txt|md|log|csv|json|ya?ml)$/.test(lower)
+        ? 'text'
+        : /\.(zip|tar|tgz|gz|bz2|xz|7z)$/.test(lower)
+          ? 'archive'
+          : 'file'
+  return {
+    id: String(attachment.id),
+    name: attachment.filename,
+    kind,
+    display: attachment.previewUrl ? 'thumbnail' : 'chip',
+  }
+}
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
 import { CommentLink } from './CommentLink'
@@ -240,18 +268,24 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   const shown = item.merged?.length ?? 0
   return (
     <div className="flex max-w-full flex-col items-center">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full ${expanded && shown > 0 ? 'relative z-10 rounded-t-lg rounded-b-none border-b-0' : 'rounded-full'}`}
-        title={expanded ? 'Hide merged commits' : 'Show merged commits'}
+      <Tooltip
+        content={
+          <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
+        }
       >
-        {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
-        <GitMerge className="w-3 h-3 shrink-0" />
-        <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{label}</span>
-        <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
-      </button>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Hide' : 'Show'} merged commits: ${label}`}
+          className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full ${expanded && shown > 0 ? 'relative z-10 rounded-t-lg rounded-b-none border-b-0' : 'rounded-full'}`}
+        >
+          {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+          <GitMerge className="w-3 h-3 shrink-0" />
+          <span className="min-w-0 flex-1 whitespace-normal break-words optical-center">{label}</span>
+          <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
+        </button>
+      </Tooltip>
       <Expandable open={expanded && shown > 0} className="-mt-px w-full">
         <div className="relative flex w-full flex-col rounded-b-md border border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
           <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[18px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
@@ -307,7 +341,7 @@ type ChatItem =
   // suppresses the fade/slide entrance for a message that takes the place of a
   // queued bubble already on screen (item 21) - it was visible, so re-animating
   // it as it settles reads as a flicker.
-  | ({ kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean } & MessageProvenance)
+  | ({ kind: 'user'; id: number; text: string; clientId?: string; sending?: boolean; noEntrance?: boolean; flightFrom?: ComposerFlightRect } & MessageProvenance)
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -489,6 +523,12 @@ interface PendingSend extends MessageProvenance {
   clientId: string
   text: string
   queued: boolean
+  flightFrom?: ComposerFlightRect
+}
+
+interface ComposerFlightRect {
+  top: number
+  right: number
 }
 
 // Minimal shapes of the stream-json events the reducer consumes. Everything
@@ -1910,7 +1950,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn, saved
 // --- Claude-app-ish shared styles -------------------------------------------
 
 // The user's message bubble: borderless, a shade off the pane background.
-// No whitespace-pre-wrap: the Markdown chat variant's remark-breaks already
+// No whitespace-pre-wrap: the RichMarkdown chat variant's remark-breaks already
 // preserves typed newlines.
 const USER_BUBBLE_CLASS =
   'max-w-[85%] rounded-2xl rounded-br-md bg-[#f0eee6] dark:bg-[#31302c] px-3.5 py-2 break-words'
@@ -2363,7 +2403,7 @@ function WebSearchOutput({ text }: { text: string }) {
           </ul>
         </div>
       )}
-      {parsed.body && <Markdown text={parsed.body} />}
+      {parsed.body && <RichMarkdown text={parsed.body} />}
     </div>
   )
 }
@@ -2560,7 +2600,7 @@ function ReviewCommentCard({
         // The remark is separated from the code it is about, the way it is in the
         // diff viewer: the excerpt ends, then someone speaks.
         <div className={`px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200 ${context ? 'border-t border-stone-200 dark:border-white/[0.06]' : ''}`}>
-          <Markdown text={body} />
+          <RichMarkdown text={body} />
         </div>
       )}
     </div>
@@ -2578,7 +2618,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
   if (!parsed) {
     return (
       <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
-        <Markdown text={text} />
+        <RichMarkdown text={text} />
       </div>
     )
   }
@@ -2586,7 +2626,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
   return (
     <div className="space-y-1.5">
       {parsed.preamble && (
-        <div className="break-words leading-relaxed chat-font text-stone-500 dark:text-stone-400"><Markdown text={parsed.preamble} /></div>
+        <div className="break-words leading-relaxed chat-font text-stone-500 dark:text-stone-400"><RichMarkdown text={parsed.preamble} /></div>
       )}
       {parsed.comments.map((c) => {
         // A reply to a comment shown above it is drawn as a thread: indented
@@ -2609,7 +2649,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
       })}
       {parsed.trailer && (
         <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
-          <Markdown text={parsed.trailer} />
+          <RichMarkdown text={parsed.trailer} />
         </div>
       )}
     </div>
@@ -3346,7 +3386,7 @@ function MemoryPanel({ text }: { text: string }) {
       )}
       {body && (
         <div className="break-words leading-relaxed chat-font">
-          <Markdown text={body} />
+          <RichMarkdown text={body} />
         </div>
       )}
     </div>
@@ -3382,10 +3422,10 @@ function TaskToolFields({ input }: { input: Record<string, unknown> }) {
         </div>
       )}
       {subject && (
-        <LabeledField label="Subject"><div className={proseCls}><Markdown text={subject} /></div></LabeledField>
+        <LabeledField label="Subject"><div className={proseCls}><RichMarkdown text={subject} /></div></LabeledField>
       )}
       {description && (
-        <LabeledField label="Description"><div className={proseCls}><Markdown text={description} /></div></LabeledField>
+        <LabeledField label="Description"><div className={proseCls}><RichMarkdown text={description} /></div></LabeledField>
       )}
     </div>
   )
@@ -3455,7 +3495,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
             reflow (hardBreaks={false}) - messages are hard-wrapped at ~72
             columns, so a <br> per source newline would shred every paragraph. */}
         <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-2xs leading-relaxed text-stone-700 dark:text-stone-200 chat-font`}>
-          <Markdown text={str('message')} hardBreaks={false} />
+          <RichMarkdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
           <div className="space-y-0.5">{paths.map((p) => fileRow(p, path(p)))}</div>
@@ -3637,12 +3677,12 @@ function SendMessageFields({
         </LabeledField>
       )}
       {summary && (
-        <LabeledField label="Summary"><div className={proseCls}><Markdown text={summary} /></div></LabeledField>
+        <LabeledField label="Summary"><div className={proseCls}><RichMarkdown text={summary} /></div></LabeledField>
       )}
       {message && (
         <LabeledField label="Message">
           <div className={`${PANEL_CLASS} px-2.5 py-1.5 ${proseCls} text-stone-700 dark:text-stone-200`}>
-            <Markdown text={message} />
+            <RichMarkdown text={message} />
           </div>
         </LabeledField>
       )}
@@ -4021,7 +4061,7 @@ const ToolCard = memo(function ToolCard({
   // These first-party tools have compact arguments fully represented by their
   // heading and summary. Repeating them as JSON makes a native action look like
   // protocol plumbing. Review writes are the exception in spirit, not layout:
-  // their long body still renders below, but as Markdown rather than JSON.
+  // their long body still renders below, but as RichMarkdown rather than JSON.
   const nativeHydraSummaryOnly = HYDRA_SUMMARY_ONLY_TOOLS.has(item.name)
 
   // SendMessage: a note to another agent, so the card reads as who it went to +
@@ -4337,11 +4377,11 @@ const ToolCard = memo(function ToolCard({
                     : mem && !item.isError
 						? <MemoryPanel text={renderedResult} />
                       : isTaskTool && !item.isError
-							? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
+							? <div className="break-words leading-relaxed chat-font"><RichMarkdown text={renderedResult} /></div>
                         : isWebSearch && !item.isError
                           ? <WebSearchOutput text={renderedResult} />
                         : isWebFetch && !item.isError
-                          ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
+                          ? <div className="break-words leading-relaxed chat-font"><RichMarkdown text={renderedResult} /></div>
                         : isReviewComments && !item.isError
                           ? <ReviewCommentsPanel text={renderedResult} />
                         : isReviewCommentWrite && !item.isError
@@ -4433,7 +4473,7 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
             <CodePanel code={rawJson} lang="json" />
           ) : (
             <div className="rounded-md border border-stone-200/70 dark:border-white/[0.06] bg-white/40 dark:bg-white/[0.02] px-3 py-1.5">
-              <Markdown text={parsed.plan} />
+              <RichMarkdown text={parsed.plan} />
             </div>
           )}
         </div>
@@ -4699,7 +4739,7 @@ function SubagentTimeline({
     if (it.kind === 'assistant')
       return (
         <div key={it.id} className="chat-leading-xs chat-font">
-          <Markdown text={it.text} />
+          <RichMarkdown text={it.text} />
         </div>
       )
     return null
@@ -4871,7 +4911,7 @@ function SubagentReport({ report }: { report: SubReport }) {
         <OutputPanel text={report.text} lang="" isError />
       ) : (
         <div className="chat-leading-xs chat-font">
-          <Markdown text={report.text} />
+          <RichMarkdown text={report.text} />
         </div>
       )}
     </div>
@@ -4945,7 +4985,7 @@ function FinishedReportCard({
             <OutputPanel text={report.text} lang="" isError />
           ) : (
             <div className="chat-leading-xs chat-font">
-              <Markdown text={report.text} />
+              <RichMarkdown text={report.text} />
             </div>
           )
         ) : (
@@ -5072,7 +5112,7 @@ const SubagentCard = memo(function SubagentCard({
                 Prompt
               </div>
               <div className="break-words chat-leading-xs chat-font">
-                <Markdown text={sub.prompt} />
+                <RichMarkdown text={sub.prompt} />
               </div>
             </div>
           )}
@@ -5145,7 +5185,7 @@ function SubagentChatView({
       {sub.prompt && (
         <div className="flex flex-col items-end gap-1">
           <div className={`${USER_BUBBLE_CLASS} leading-relaxed chat-font`}>
-            <Markdown text={sub.prompt} />
+            <RichMarkdown text={sub.prompt} />
           </div>
         </div>
       )}
@@ -5836,32 +5876,28 @@ export function QuestionCard({
     return (
       <div className="mb-1.5 ml-8 mr-2.5 flex items-start gap-2 border-t border-dashed border-[#c96442]/30 pt-1 dark:border-[#e0a184]/25">
         <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-        {/* Auto-grows the same way the "Other" box does - an invisible span in
-            the same grid cell drives the height. */}
-        <div className="grid min-w-0 flex-1">
-          <span aria-hidden className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4">
-            {value + ' '}
-          </span>
-          <textarea
-            rows={1}
+        <div className="min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+          <Suspense fallback={<div className="min-h-4 text-xs text-stone-400">Loading editor...</div>}>
+          <MarkdownComposer
             spellCheck={spellcheck}
             autoFocus={value === '' && !answered}
             value={value}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => setNote(qi, at, e.target.value)}
+            onChange={(markdown) => setNote(qi, at, markdown)}
             onKeyDown={(e) => {
               // Enter submits, as in the "Other" box; shift+Enter is a newline,
               // which a note wants more often than an option label does.
-              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
               e.preventDefault()
               e.stopPropagation()
               submit()
+              return true
             }}
-            disabled={answered}
+            editable={!answered}
             placeholder="Note to go with your answer..."
-            aria-label="Note to go with your answer"
-            className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+            ariaLabel="Note to go with your answer"
+            className="question-rich-composer min-h-4 p-0 text-xs leading-4"
           />
+          </Suspense>
         </div>
       </div>
     )
@@ -5975,43 +6011,32 @@ export function QuestionCard({
                   >
                     {isSel && <Check className="h-2.5 w-2.5 text-white" />}
                   </button>
-                  {/* A textarea, not an input, so a long custom answer wraps
-                      onto more lines instead of being clipped. It auto-grows
-                      with no JS: an invisible span holding the same text sits
-                      in the same grid cell and drives the height, so it also
-                      re-fits when the pane is resized. */}
-                  <div className="grid min-w-0 flex-1">
-                    <span
-                      aria-hidden
-                      className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
-                    >
-                      {showOther[qi] + ' '}
-                    </span>
-                    <textarea
-                      rows={1}
+                  <div
+                    className="min-w-0 flex-1"
+                    onFocusCapture={(e) => selectOther(e.currentTarget, qi)}
+                  >
+                    <Suspense fallback={<div className="min-h-4 text-xs text-stone-400">Loading editor...</div>}>
+                    <MarkdownComposer
                       spellCheck={spellcheck}
                       value={showOther[qi]}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
-                        // Typing claims the selection.
-                        selectOther(e.currentTarget, qi)
-                      }}
-                      onFocus={(e) => selectOther(e.currentTarget, qi)}
+                      onChange={(markdown) => setOther((prev) => prev.map((p, i) => (i === qi ? markdown : p)))}
                       onKeyDown={(e) => {
                         // Enter submits the card, like the composer (shift+Enter
                         // still inserts a newline). Ignored while an IME is
                         // composing, and a no-op if another question is still
                         // unanswered (submit() gates on `complete`).
-                        if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                        if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
                         e.preventDefault()
                         e.stopPropagation()
                         submit()
+                        return true
                       }}
-                      disabled={answered}
+                      editable={!answered}
                       placeholder="Other..."
-                      className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+                      ariaLabel="Other answer"
+                      className="question-rich-composer min-h-4 p-0 text-xs leading-4"
                     />
+                    </Suspense>
                   </div>
                   </div>
                 </div>
@@ -6084,6 +6109,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   sourceAgentId,
   projectId,
   linkCtx,
+  flightFrom,
 }: {
   text: string
   sending?: boolean
@@ -6100,19 +6126,36 @@ const ChatUserMessage = memo(function ChatUserMessage({
   // test" send points at) to the repository view - same context the assistant
   // bubbles use. Without it a link falls back to a plain, unresolvable anchor.
   linkCtx?: RepoLinkContext
+  flightFrom?: ComposerFlightRect
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // The chip clicked, so the picture flies out of it instead of fading in.
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
-  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
-  // render an empty bubble.
-  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
+  const inlineAttachmentNames = new Set(Array.from(body.matchAll(/\[([^\]\n]+)\]/g), (match) => match[1]))
+  const trailingAttachments = attachments.filter((attachment) => !inlineAttachmentNames.has(attachment.filename))
   const auto = automatedOrigin(origin, reason, sourceAgentId)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const flewRef = useRef(false)
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current
+    if (!bubble || !flightFrom || flewRef.current || typeof bubble.animate !== 'function') return
+    flewRef.current = true
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    const destination = bubble.getBoundingClientRect()
+    bubble.animate([
+      { transform: `translate(${flightFrom.right - destination.right}px, ${flightFrom.top - destination.top}px) scale(0.96)`, opacity: 0.72 },
+      { transform: 'translate(0, 0) scale(1)', opacity: 1 },
+    ], { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
+  }, [flightFrom])
+  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
+  // render an empty bubble. Keep this after the transition hooks so every render
+  // calls the same hooks even if a streamed placeholder becomes empty.
+  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div ref={bubbleRef} className="flex flex-col items-end gap-1" data-composer-flight={flightFrom ? '' : undefined}>
       {/* An automated turn is still YOUR side of the conversation - it acts on
           your behalf and the agent answers it as if you had spoken - so it keeps
           the user bubble's shape and side. What changes is the tint and this
@@ -6147,10 +6190,20 @@ const ChatUserMessage = memo(function ChatUserMessage({
           handler (copyTranscriptAsMarkdown), which also trims the trailing
           newlines the browser adds for the bubble's block padding. */}
       <div className={`${auto ? AUTOMATED_BUBBLE_CLASS : USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
-        {body && <Markdown text={body} linkCtx={linkCtx} />}
-        {attachments.length > 0 && (
-          <AttachmentChips
+        {body && (
+          <RichMarkdown
+            text={body}
+            linkCtx={linkCtx}
             attachments={attachments}
+            onOpenAttachment={(attachment, origin) => {
+              setLightboxOrigin(origin)
+              setLightboxIndex(openable.findIndex((candidate) => candidate.id === attachment.id))
+            }}
+          />
+        )}
+        {trailingAttachments.length > 0 && (
+          <AttachmentChips
+            attachments={trailingAttachments}
             size="sm"
             className={body ? 'mt-2' : ''}
             onOpen={(id, origin) => {
@@ -6200,7 +6253,7 @@ const ContextNoteCard = memo(function ContextNoteCard({ text, outOfContext }: { 
       <div className="w-full max-w-[92%]">
         <Expandable open={open}>
           <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
-            <Markdown text={text} />
+            <RichMarkdown text={text} />
           </div>
         </Expandable>
       </div>
@@ -6229,7 +6282,7 @@ const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: 
       <div className="w-full max-w-[92%]">
         <Expandable open={open}>
           <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
-            <Markdown text={text} />
+            <RichMarkdown text={text} />
           </div>
         </Expandable>
       </div>
@@ -6258,7 +6311,7 @@ const MetaCard = memo(function MetaCard({ text }: { text: string }) {
       <div className="w-full max-w-[92%]">
         <Expandable open={open}>
           <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
-            <Markdown text={text} />
+            <RichMarkdown text={text} />
           </div>
         </Expandable>
       </div>
@@ -7104,7 +7157,31 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
   const { present, commit, reconcile, reset: resetHistory, undo, redo } = useComposerHistory(initialComposer.current)
   const input = present.prompt
+  const shellComposer = input.startsWith('!')
+  const sourceComposer = shellComposer || !richTextEditorEnabled
   const attachments = present.attachments
+  const [richComposerGeneration, setRichComposerGeneration] = useState(0)
+  const [initialRichDocument] = useState(() => loadAgentViewPrefs(projectId, stateId).chatRichDraft?.document)
+  const richDocumentRef = useRef(initialRichDocument)
+  const [richAttachmentIds, setRichAttachmentIds] = useState<Set<string>>(
+    () => new Set(initialComposer.current!.attachments.map((attachment) => String(attachment.id))),
+  )
+  const restoredAttachmentIdsRef = useRef(new Set<string>())
+  const attachmentRegistry = useMemo(() => new AttachmentRegistry(async (file, id, signal) => {
+    const uploaded = await uploadFile(projectId, file, signal)
+    reconcile(Number(id), { path: uploaded.path, uploading: false })
+    return { path: uploaded.path }
+  }), [projectId, reconcile])
+
+  useEffect(() => attachmentRegistry.subscribe(() => {
+    for (const attachment of attachmentsRef.current) {
+      const state = attachmentRegistry.get(String(attachment.id))
+      if (state?.status === 'failed') reconcile(attachment.id, { uploading: false, error: formatError(state.error) })
+    }
+  }), [attachmentRegistry, reconcile])
+  const documentAttachments = useMemo(() => sourceComposer
+    ? attachments
+    : attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id))), [attachments, richAttachmentIds, sourceComposer])
   const inputRef = useRef(input)
   useEffect(() => {
     inputRef.current = input
@@ -7223,6 +7300,25 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // grows across the 0.22s disclosure animation, not in one step.
   const contentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const richComposerRef = useRef<MarkdownComposerHandle>(null)
+  const richComposerHostRef = useRef<HTMLDivElement>(null)
+  const focusComposer = useCallback((position: 'start' | 'end' | number = 'end') => {
+    if (!richTextEditorEnabled || inputRef.current.startsWith('!')) {
+      const textarea = textareaRef.current
+      textarea?.focus()
+      if (textarea && position === 'end') textarea.selectionStart = textarea.selectionEnd = textarea.value.length
+    } else richComposerRef.current?.focus(position)
+  }, [])
+  const previousShellComposer = useRef(shellComposer)
+  useLayoutEffect(() => {
+    if (previousShellComposer.current === shellComposer) return
+    previousShellComposer.current = shellComposer
+    if (shellComposer) {
+      const textarea = textareaRef.current
+      textarea?.focus()
+      if (textarea) textarea.selectionStart = textarea.selectionEnd = textarea.value.length
+    } else richComposerRef.current?.focus('end')
+  }, [shellComposer])
   // Pin-to-bottom: keep auto-scrolling while the user is at (or near) the
   // bottom; stop once they scroll up to read history. The ref is the live
   // value the socket/scroll handlers read; the state mirror drives the
@@ -7290,6 +7386,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
+  const composerSpellcheck = useSpellcheckStore((s) => s.enabled)
   // Enter sends by default. The Browser setting flips unmodified Enter back to
   // a newline and makes Cmd/Ctrl+Enter the explicit send shortcut.
   const enterSends = useEnterSendsStore((s) => s.enabled)
@@ -7311,7 +7408,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const repositoryRef = useAgentStore((s) => chatRepositoryRef(
     selectAgent(s, agentId)?.branch_name,
   ))
-  // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
+  const branchName = useAgentStore(
+    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
+  )
+  const knownHeadRecords = useAgentStore((s) => s.agents)
+  const knownHeads = useMemo(() => knownHeadRecords.map((agent) => agent.id), [knownHeadRecords])
+  const composerReferences = useMemo<ComposerReference[]>(() => [
+    { kind: 'branch', value: branchName },
+    { kind: 'agent', value: agentId },
+    ...knownHeads.filter((id) => id !== agentId).map((id) => ({ kind: 'agent' as const, value: id })),
+    ...Object.values(subagents).filter((sub) => !knownHeads.includes(sub.agentId)).map((sub) => ({ kind: 'agent' as const, value: sub.agentId })),
+  ], [agentId, branchName, knownHeads, subagents])
+  // memo'd: <RichMarkdown> is memo'd on its props, so a fresh object each render
   // would re-parse every rendered message on every keystroke in the composer.
   // agentId lets a markdown image resolve against this head's files.
   const chatLinkCtx = useMemo(
@@ -8389,8 +8497,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
       // it for placement would put the user message below its own reply.
-      const oi = optimisticTextsRef.current.findIndex((pending) =>
-        (clientId !== '' && pending.clientId === clientId) || (clientId === '' && pending.text === text))
+      const oi = optimisticEchoIndex(optimisticTextsRef.current, clientId, text)
+      // Some providers echo a transcript/message UUID rather than the client
+      // send UUID. Fall back to the pending text in that case; without this the
+      // acknowledged turn is appended beside its optimistic twin.
       if (oi >= 0) {
         markTurnStart()
         const optimisticText = optimisticTextsRef.current[oi].text
@@ -8399,7 +8509,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           let j = -1
           for (let k = prev.length - 1; k >= 0; k--) {
             const it = prev[k]
-            if (it.kind === 'user' && it.sending && it.text === optimisticText) {
+            if (it.kind === 'user' && it.sending
+              && ((clientId !== '' && it.clientId === clientId) || it.text === optimisticText)) {
               j = k
               break
             }
@@ -9919,7 +10030,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       lastScrollRef.current = { top: applied, pinned: atBottom }
     }
 
-    // Markdown, code highlighting and images settle over the frames after the
+    // RichMarkdown, code highlighting and images settle over the frames after the
     // replay, each nudging the message down. Re-align while that happens, then
     // hand the pane back to the user.
     const ro = new ResizeObserver(() => alignToLastMessage())
@@ -9958,6 +10069,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     },
     [projectId, stateId],
   )
+
+  const syncAttachmentsIntoDocument = useCallback((editor = richComposerRef.current?.editor) => {
+    if (!editor || sourceComposer) return
+    for (const attachment of attachmentsRef.current) {
+      const metadata = composerAttachment(attachment)
+      if (attachment.path) attachmentRegistry.registerUploaded(metadata, { path: attachment.path }, attachment.previewUrl)
+      if (!restoredAttachmentIdsRef.current.has(metadata.id)) {
+        restoreAttachment(editor, metadata)
+        restoredAttachmentIdsRef.current.add(metadata.id)
+      }
+    }
+  }, [attachmentRegistry, sourceComposer])
+
+  useEffect(() => {
+    syncAttachmentsIntoDocument()
+  }, [attachments, syncAttachmentsIntoDocument])
 
   // requestOlderHistory asks the daemon for the batch older than the current
   // oldest line, when the user scrolls near the top (item 25).
@@ -10071,20 +10198,27 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Save the composer text (debounced) so a half-written message survives an
   // agent switch or reload. Sending clears input, which persists as "no draft".
   useEffect(() => {
-    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, { chatDraft: input || undefined }), 300)
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, {
+      chatDraft: input || undefined,
+      chatRichDraft: input && richDocumentRef.current
+        ? { version: 1, document: richDocumentRef.current }
+        : undefined,
+    }), 300)
     return () => clearTimeout(t)
   }, [input, projectId, stateId])
 
   // --- Composer: attachments ------------------------------------------------
 
+  const persistedAttachmentsRef = useRef(documentAttachments)
   const attachmentsRef = useRef<Attachment[]>(attachments)
   useEffect(() => {
     attachmentsRef.current = attachments
     // Mirror to the per-agent caches so a switch away - or a reload - restores
     // them. Running on every change (rather than only on unmount) is what makes
     // the reload case work: a reload tears the page down without unmounting.
-    saveChatAttachments(projectId, stateId, attachments)
-  }, [attachments, projectId, stateId])
+    persistedAttachmentsRef.current = documentAttachments
+    saveChatAttachments(projectId, stateId, documentAttachments)
+  }, [attachments, documentAttachments, projectId, stateId])
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
   // the cache and restored on return), so URLs live until a send consumes the
@@ -10095,8 +10229,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // thumbnails. They're freed on send, or when the page fully reloads.
   useEffect(
     () => () => {
-      saveChatAttachments(projectId, stateId, attachmentsRef.current)
-      patchAgentViewPrefs(projectId, stateId, { chatDraft: inputRef.current || undefined })
+      saveChatAttachments(projectId, stateId, persistedAttachmentsRef.current)
+      patchAgentViewPrefs(projectId, stateId, {
+        chatDraft: inputRef.current || undefined,
+        chatRichDraft: inputRef.current && richDocumentRef.current
+          ? { version: 1, document: richDocumentRef.current }
+          : undefined,
+      })
     },
     [projectId, stateId],
   )
@@ -10131,10 +10270,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // the reservation visible immediately so it receives image2, not another
       // image1 calculated from the previous render.
       attachmentsRef.current = [...attachmentsRef.current, chip]
+      const editor = richComposerRef.current?.editor
+      // The registry inserts fresh rich attachments itself. Mark them before
+      // committing the legacy upload manifest so the migration effect cannot
+      // race it and append a second node at the end of the document.
+      if (editor && !shellComposer) restoredAttachmentIdsRef.current.add(String(id))
       commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
-      uploadFile(projectId, file)
-        .then((res) => reconcile(id, { path: res.path, uploading: false }))
-        .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
+      if (editor && !shellComposer) {
+        attachmentRegistry.add(editor, composerAttachment(chip), file, chip.previewUrl)
+      } else {
+        uploadFile(projectId, file)
+          .then((res) => reconcile(id, { path: res.path, uploading: false }))
+          .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
+      }
       names.push(file.name || 'pasted-image')
     }
     return names
@@ -10156,6 +10304,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // whether they need a leading space; they never carry a trailing one, so the
   // caret stays against the "]".
   function insertPasteMarkers(names: string[]) {
+    const rich = richComposerRef.current?.editor
+    if (rich && !input.startsWith('!')) {
+      const insert = pasteMarkerText(names, input)
+      rich.commands.insertContent(insert)
+      return
+    }
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
@@ -10172,20 +10326,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     })
   }
 
-  function handlePaste(e: React.ClipboardEvent) {
+  function handlePaste(e: ClipboardEvent | globalThis.ClipboardEvent) {
     const files = extractFiles(e.clipboardData)
     if (files.length === 0) return
     e.preventDefault()
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+    if ((shellComposer || !richComposerRef.current?.editor) && pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   const handleDesktopImagePaste = useEffectEvent((file: File) => {
-    if (document.activeElement !== textareaRef.current) return
+    const rich = richComposerRef.current?.editor?.view.dom
+    const active = document.activeElement
+    if (active !== textareaRef.current && (!rich || !active || !rich.contains(active))) return
     const names = addFiles([file])
-    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+    if ((shellComposer || !richComposerRef.current?.editor) && pasteMarkers && names.length > 0) insertPasteMarkers(names)
   })
   useEffect(() => onDesktopImagePaste(handleDesktopImagePaste), [])
 
@@ -10194,12 +10350,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     e.target.value = ''
   }
 
-  const uploading = attachments.some((a) => a.uploading)
-  const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  const uploading = documentAttachments.some((a) => a.uploading)
+  const readyAttachments = documentAttachments.filter((a) => a.path && !a.error)
   // Every attachment is openable, in chip order - the lightbox navigates this list
   // and each chip opens at its own index (see lib/attachmentLightbox).
-  const openable = openableAttachments(attachments)
-  const lightboxItems = attachmentLightboxItems(attachments)
+  const openable = openableAttachments(documentAttachments)
+  const lightboxItems = attachmentLightboxItems(documentAttachments)
   const canSend = connected && !uploading && (!!input.trim() || readyAttachments.length > 0)
 
   // A pin placed on a picture in the lightbox, arriving as text for this
@@ -10215,8 +10371,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const next = appendToComposer(prev.prompt, text)
       return makeSnapshot(next, prev.attachments, next.length, next.length)
     }, false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }, [commit])
+    requestAnimationFrame(() => focusComposer())
+  }, [commit, focusComposer])
   useEffect(() => {
     registerPinTargets({
       quote: (note) => addToComposer(formatQuote(note)),
@@ -10252,30 +10408,34 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function acceptSlash(cmd: string) {
     const value = '/' + cmd + ' '
     commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
+    requestAnimationFrame(() => focusComposer())
   }
 
   // --- Composer: sizing (item 9) ---------------------------------------------
 
   const MAX_ROWS = 10
 
+  const composerElement = useCallback((): HTMLElement | null => (
+    sourceComposer ? textareaRef.current : richComposerRef.current?.editor?.view.dom ?? null
+  ), [sourceComposer])
+
   // Grow/shrink the textarea one whole line at a time with its content,
   // respecting the user-dragged minimum.
   useEffect(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    const cs = getComputedStyle(ta)
+    const element = composerElement()
+    if (!element) return
+    const cs = getComputedStyle(element)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
     // The textarea fills its wrapper (position: absolute, inset-0), so collapsing
     // to 'auto' would just stretch it to the parent. Pin it to 0 instead: the box
     // is empty but the content overflows, so scrollHeight reports the true content
     // height. Restore to '' afterwards to hand sizing back to the wrapper.
-    ta.style.height = '0px'
-    const contentRows = Math.max(1, Math.round((ta.scrollHeight - pad) / lineHeight))
-    ta.style.height = ''
+    element.style.height = '0px'
+    const contentRows = Math.max(1, Math.round((element.scrollHeight - pad) / lineHeight))
+    element.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
-    ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
+    element.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
     // Bail when the height is unchanged (sub-pixel tolerance): a fractional
     // lineHeight can make this recompute a hair-different value each pass, and an
     // unconditional setState there would keep committing - a needless re-render at
@@ -10294,16 +10454,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       composerHeightRef.current = nextH
       setComposerHeight(nextH)
     }
-  }, [input, minRows])
+  }, [composerElement, input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault()
-    const ta = textareaRef.current
-    if (!ta) return
-    const cs = getComputedStyle(ta)
+    const element = composerElement()
+    if (!element) return
+    const cs = getComputedStyle(element)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
-    const displayedRows = Math.max(1, Math.round((ta.clientHeight - pad) / lineHeight))
+    const displayedRows = Math.max(1, Math.round((element.clientHeight - pad) / lineHeight))
     composerDragRef.current = { startY: e.clientY, startRows: displayedRows, lineHeight }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
@@ -10332,7 +10492,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // closing the window / navigating away, and stays editable (Up arrow). The
   // bubble is added optimistically; the CLI's echo (or a `queue` frame on
   // reattach) is the source of truth. Returns false when the socket isn't usable.
-  function sendUserText(text: string, queue = isTurnRunning): boolean {
+  function sendUserText(text: string, queue = isTurnRunning, flightFrom?: ComposerFlightRect): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
@@ -10346,7 +10506,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (queued) {
       // A held message shows as a queued bubble pinned under the transcript
       // (reconciled against the server's queue frame on reconnect).
-      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued }])
+      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued, flightFrom }])
     } else {
       // A message that goes straight through appears immediately, in-flow, above
       // the thinking/response it triggers (item 26); the CLI's echo (which can
@@ -10354,7 +10514,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // Allocated OUTSIDE the updater: React may run an updater more than once
       // (StrictMode does, in dev), and an id/stamp taken in there would be too.
       const optId = takeOptimisticId()
-      setItems((prev) => [...prev, { kind: 'user', id: optId, text, sending: true }])
+      setItems((prev) => [...prev, { kind: 'user', id: optId, text, clientId, sending: true, flightFrom }])
       optimisticTextsRef.current.push({ clientId, text })
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
@@ -10425,6 +10585,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
         objectUrlsRef.current.clear()
         resetHistory(makeSnapshot('', [], 0, 0))
+        setRichComposerGeneration((generation) => generation + 1)
         setLightboxIndex(null)
       }
       return
@@ -10433,13 +10594,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Attachment paths ride below the typed text, same as the spawn box - the
     // agent reads the uploaded files from inside its sandbox.
     const finalText = paths.length > 0 ? (text ? `${text}\n\n${paths.join('\n')}` : paths.join('\n')) : text
-    if (!finalText || !sendUserText(finalText, queue)) return
+    const composerRect = richComposerHostRef.current?.getBoundingClientRect()
+    const flightFrom = composerRect ? { top: composerRect.top, right: composerRect.right } : undefined
+    if (!finalText || !sendUserText(finalText, queue, flightFrom)) return
     setSlashDismissed(false)
     // The message is sent - free every preview URL minted this session (including
     // ones only reachable via undo history) and reset the composer + its history.
     objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
     objectUrlsRef.current.clear()
     resetHistory(makeSnapshot('', [], 0, 0))
+    setRichComposerGeneration((generation) => generation + 1)
     setLightboxIndex(null)
   }
 
@@ -10535,6 +10699,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setSlashDismissed(false)
   }
 
+  function handleRichInputChange(value: string) {
+    const update = () => commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), true)
+    // A leading ! changes the actual input element. Commit that handoff before
+    // the next keyboard event, or fast typing can target the removed editor.
+    if (value.startsWith('!') !== shellComposer) flushSync(update)
+    else update()
+    setSlashDismissed(false)
+  }
+
   // Explicit newline shortcuts carry the same markdown list continuation the
   // shared textarea handler gives an ordinary multiline Enter.
   function insertNewline(ta: HTMLTextAreaElement) {
@@ -10559,11 +10732,80 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!snap) return
     const ta = textareaRef.current
     requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = snap.selStart
-      ta.selectionEnd = snap.selEnd
+      if ((!richTextEditorEnabled || snap.prompt.startsWith('!')) && ta) {
+        ta.focus()
+        ta.selectionStart = snap.selStart
+        ta.selectionEnd = snap.selEnd
+      } else {
+        focusComposer('end')
+      }
     })
+  }
+
+  function recallLatestQueued(): boolean {
+    if (attachments.length > 0 || slashMatches.length > 0) return false
+    const last = [...pendingSends].reverse().find((pending) => pending.queued)
+    if (!last) return false
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'dequeue', id: last.clientId }))
+    setPendingSends((prev) => prev.filter((pending) => pending.id !== last.id))
+    const { text: body, attachments: recalled } = parseUploadAttachments(last.text, projectId)
+    const restored = recalled.map((attachment) => ({ ...attachment, id: nextAttachmentId() }))
+    commit(() => makeSnapshot(body, restored, body.length, body.length), false)
+    requestAnimationFrame(() => focusComposer('end'))
+    return true
+  }
+
+  function onMarkdownComposerKeyDown(e: KeyboardEvent, context: MarkdownComposerKeyContext): boolean {
+    if (!context.editor) return false
+    // Tiptap owns rich-document undo/redo, including inline attachment nodes.
+    // The explicit snapshot history remains for the dedicated shell textarea.
+    if (slashMatches.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashSel((selection) => e.key === 'ArrowDown'
+          ? (selection + 1) % slashMatches.length
+          : (selection - 1 + slashMatches.length) % slashMatches.length)
+        return true
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashDismissed(true)
+        return true
+      }
+      const exact = slashMatches.length === 1 && slashQuery === slashMatches[0]
+      if (e.key === 'Tab' || (e.key === 'Enter' && !exact && !e.shiftKey && !e.ctrlKey && !e.altKey)) {
+        e.preventDefault()
+        acceptSlash(slashMatches[Math.min(slashSel, slashMatches.length - 1)])
+        return true
+      }
+    }
+    if (e.key === 'ArrowUp' && context.empty && recallLatestQueued()) {
+      e.preventDefault()
+      return true
+    }
+    if (e.key !== 'Enter' || e.isComposing) return false
+    if (e.altKey) {
+      e.preventDefault()
+      context.editor.commands.setHardBreak()
+      return true
+    }
+    // Shift+Enter always inserts a hard break. With "Enter sends" off, plain
+    // Enter performs the editor's structural newline; Cmd/Ctrl+Enter is then
+    // the explicit send gesture. Tables retain their own row-navigation handler.
+    if (e.shiftKey) {
+      e.preventDefault()
+      context.editor.commands.setHardBreak()
+      return true
+    }
+    // The schema owns structural Enter, including leaving an empty list item.
+    if (!enterSends && !e.metaKey && !e.ctrlKey) return false
+    if (enterSends || e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      send()
+      return true
+    }
+    return false
   }
 
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -10732,7 +10974,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const m = fence.exec(rest)
       if (!m) break
       const before = rest.slice(0, m.index)
-      if (before.trim()) parts.push(<Markdown key={key++} text={before} linkCtx={chatLinkCtx} />)
+      if (before.trim()) parts.push(<RichMarkdown key={key++} text={before} linkCtx={chatLinkCtx} />)
       const specs = parseQuestionBlock(m[1])
       if (specs) {
         parts.push(
@@ -10741,13 +10983,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>,
         )
       } else {
-        parts.push(<Markdown key={key++} text={m[0]} linkCtx={chatLinkCtx} />)
+        parts.push(<RichMarkdown key={key++} text={m[0]} linkCtx={chatLinkCtx} />)
       }
       rest = rest.slice(m.index + m[0].length)
     }
-    if (parts.length === 0) return <Markdown text={text} linkCtx={chatLinkCtx} />
+    if (parts.length === 0) return <RichMarkdown text={text} linkCtx={chatLinkCtx} />
     // eslint-disable-next-line no-useless-assignment -- final key++ is a dead store, but keep it consistent with the pushes above
-    if (rest.trim()) parts.push(<Markdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
+    if (rest.trim()) parts.push(<RichMarkdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
     return parts
   }
 
@@ -10765,7 +11007,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} reason={item.reason} sourceAgentId={item.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} reason={item.reason} sourceAgentId={item.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={item.flightFrom} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -11309,7 +11551,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               so it sits ABOVE any queued (held-for-later) messages (item 33).
               The "working" indicator below already signals the turn is live, so
               no blinking caret or per-word opacity animation is applied to
-              either: one makes reparsed Markdown visibly flicker as delimiters
+              either: one makes reparsed RichMarkdown visibly flicker as delimiters
               arrive and the syntax tree changes (item 56). */}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           {/* Live "working" indicator (item 48): a playful verb + elapsed time,
@@ -11350,7 +11592,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed origin={p.origin} reason={p.reason} sourceAgentId={p.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} />
+                  <ChatUserMessage text={p.text} dimmed origin={p.origin} reason={p.reason} sourceAgentId={p.sourceAgentId} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={p.flightFrom} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
@@ -11481,34 +11723,98 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             }`}
           >
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
-            <AttachmentChips
-              attachments={attachments}
-              size="sm"
-              className="px-3 pt-2.5"
-              onRemove={removeAttachment}
-              onOpen={(id, origin) => {
-                setLightboxOrigin(origin)
-                setLightboxIndex(openable.findIndex((a) => a.id === id))
-              }}
-            />
-            <HighlightedTextarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => handleInputChange(e.target.value)}
-              onKeyDown={onComposerKeyDown}
-              onPaste={handlePaste}
-              data-desktop-image-paste
-              renderContent={renderComposerBackdrop}
-              placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
-              disabled={!connected}
-              rows={1}
-              wrapperClassName="w-full"
-              wrapperStyle={{ height: composerHeight }}
-              textColorClassName="text-stone-800 dark:text-stone-100"
-              caretClassName="caret-stone-800 dark:caret-stone-100"
-              placeholderClassName="text-stone-400 dark:text-stone-500"
-              textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 disabled:opacity-50"
-            />
+            {sourceComposer && (
+              <AttachmentChips
+                attachments={attachments}
+                size="sm"
+                className="px-3 pt-2.5"
+                onRemove={removeAttachment}
+                onOpen={(id, origin) => {
+                  setLightboxOrigin(origin)
+                  setLightboxIndex(openable.findIndex((a) => a.id === id))
+                }}
+              />
+            )}
+            {sourceComposer ? (
+              <HighlightedTextarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={onComposerKeyDown}
+                onPaste={handlePaste}
+                data-desktop-image-paste
+                renderContent={renderComposerBackdrop}
+                placeholder={connected ? (shellComposer ? 'Run a shell command...' : 'Write a message...') : 'Connecting...'}
+                aria-label="Message"
+                disabled={!connected}
+                rows={1}
+                wrapperClassName="w-full"
+                wrapperStyle={{ height: composerHeight }}
+                textColorClassName="text-stone-800 dark:text-stone-100"
+                caretClassName="caret-stone-800 dark:caret-stone-100"
+                placeholderClassName="text-stone-400 dark:text-stone-500"
+                textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 disabled:opacity-50"
+              />
+            ) : (
+              <div ref={richComposerHostRef} className="w-full overflow-hidden" style={{ height: composerHeight }} data-rich-chat-composer>
+                <Suspense fallback={<div className="h-full px-3.5 pt-2.5 text-sm leading-5 text-stone-400">Loading editor...</div>}>
+                  <MarkdownComposer
+                    key={richComposerGeneration}
+                    autoFocus={active}
+                    ref={richComposerRef}
+                    value={input}
+                    initialDocument={initialRichDocument}
+                    onDocumentChange={(document) => {
+                      richDocumentRef.current = document
+                      const ids = new Set<string>()
+                      const visit = (node: typeof document) => {
+                        if (node.type === 'attachment' && typeof node.attrs?.id === 'string') ids.add(node.attrs.id)
+                        node.content?.forEach(visit)
+                      }
+                      visit(document)
+                      setRichAttachmentIds(ids)
+                    }}
+                    onEditor={(editor) => {
+                      if (editor) syncAttachmentsIntoDocument(editor)
+                    }}
+                    attachmentRegistry={attachmentRegistry}
+                    onOpenAttachment={(id, origin) => {
+                      const numericId = Number(id)
+                      const index = openable.findIndex((attachment) => attachment.id === numericId)
+                      if (index < 0) return
+                      setLightboxOrigin(origin)
+                      setLightboxIndex(index)
+                    }}
+                    blockCommands={slashMatches.length === 0}
+                    references={composerReferences}
+                    onRequestFiles={() => fileInputRef.current?.click()}
+                    onChange={handleRichInputChange}
+                    onKeyDown={onMarkdownComposerKeyDown}
+                    onPaste={(event) => {
+                      const files = extractFiles(event.clipboardData)
+                      if (files.length === 0) return false
+                      handlePaste(event)
+                      return true
+                    }}
+                    onDrop={(event) => {
+                      const files = extractFiles(event.dataTransfer)
+                      if (files.length === 0) return false
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDragActive(false)
+                      addFiles(files)
+                      return true
+                    }}
+                    editable={connected}
+                    spellCheck={composerSpellcheck}
+                    placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
+                    ariaLabel="Message"
+                    dataDesktopImagePaste
+                    className="h-full overflow-y-auto px-3.5 pt-2.5 pb-1 text-sm leading-5 text-stone-800 caret-stone-800 dark:text-stone-100 dark:caret-stone-100"
+                  />
+                </Suspense>
+              </div>
+            )}
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
                 <button

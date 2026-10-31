@@ -271,6 +271,28 @@ describe('Tooltip', () => {
     }
   })
 
+  it('keeps selectable tooltip content open when it is clicked', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip content={<p>select this text</p>}>
+          <button>commit</button>
+        </Tooltip>,
+      )
+      const span = wrapper(container)
+      fireEvent.mouseEnter(span)
+      act(() => void vi.advanceTimersByTime(600))
+
+      const body = screen.getByText('select this text')
+      fireEvent.click(body)
+
+      expect(body).toBeInTheDocument()
+      expect(body.closest('[role="tooltip"]')).toHaveClass('select-text')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('dismisses after the grace period when the pointer never reaches the card', () => {
     vi.useFakeTimers()
     try {

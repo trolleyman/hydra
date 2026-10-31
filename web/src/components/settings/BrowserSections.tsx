@@ -1,4 +1,5 @@
 import { ThemeSection } from './ThemeSection'
+import { RichTextEditorSection } from './RichTextEditorSection'
 import { ComposerSection } from './ComposerSection'
 import { EnterSendsSection } from './EnterSendsSection'
 import { AutoPairSection } from './AutoPairSection'
@@ -17,7 +18,7 @@ import { DesktopLifetimeSection } from './DesktopLifetimeSection'
 import { GeneratedFilesSection } from './GeneratedFilesSection'
 
 // The Browser tab of the settings pages: the client-only preferences (theme /
-// paste markers / auto-close pairs / spellcheck / fonts / step folding / smooth
+// rich editing / paste markers / auto-close pairs / spellcheck / fonts / step folding / smooth
 // streaming / code line numbers / whitespace marks / generated-file rules /
 // shell command indent / chat height / terminal / desktop notifications) in
 // this browser's localStorage.
@@ -27,6 +28,7 @@ export function BrowserSections() {
   return (
     <>
       <ThemeSection />
+      <RichTextEditorSection />
       <ComposerSection />
       <EnterSendsSection />
       <AutoPairSection />

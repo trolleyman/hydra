@@ -22,7 +22,7 @@ import { type FileKind } from '../lib/fileKind'
 import { getLanguage } from '../lib/language'
 import { buildEditRows, numberRows } from '../lib/editDiff'
 import { formatBytes } from '../lib/formatBytes'
-import { Markdown } from '../lib/MarkdownRenderer'
+import { RichMarkdown } from '../lib/RichMarkdown'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import { CodePane, DiffPane } from './CodePane'
 import { Tooltip } from './Tooltip'
@@ -283,7 +283,7 @@ async function fetchText(url: string, signal: AbortSignal): Promise<TextSide> {
 //   - a before/after pair (a changed text artifact) opens as a unified DIFF,
 //     built by the same line-diff engine the chat's Edit cards use (lib/editDiff)
 //     and marked up with the same word diff the diff viewer uses;
-//   - markdown opens RENDERED, through the shared <Markdown variant="doc">, with
+//   - markdown opens RENDERED, through the shared <RichMarkdown variant="doc">, with
 //     a switch back to the source.
 export function LightboxText({ url, filename, diff }: {
   url: string
@@ -439,7 +439,7 @@ export function LightboxText({ url, filename, diff }: {
           // repository browser - so a .md reads the same wherever you open it. No
           // linkCtx: an artifact or an attachment has no repo path for a relative
           // link to resolve against, so links stay plain anchors.
-          <Markdown text={text} variant="doc" className="max-w-3xl mx-auto px-6 py-5 text-gray-800 dark:text-gray-200" />
+          <RichMarkdown text={text} variant="doc" className="max-w-3xl mx-auto px-6 py-5 text-gray-800 dark:text-gray-200" />
         ) : (
           <CodePane content={text} lang={lang} wrap={wrap} className="py-2" />
         )}

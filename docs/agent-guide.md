@@ -63,13 +63,25 @@ duplicating synchronized array-and-map state. Keep `.find` for predicate searche
 such as "the current branch" or "the first non-empty line", where there is no
 stable lookup key.
 
-### Composer textarea layers
+### Markdown composers
 
-`HighlightedTextarea` places a transparent native textarea over a visible
-markdown backdrop. Their box metrics and scroll offsets stay identical: any
-caret-editing path that changes the textarea scroll position also synchronizes
-the backdrop immediately. Otherwise a visible word can sit over different
-source text, so clicking or double-clicking it edits the wrong range.
+Settings -> Browser -> Rich text editor selects rich editing (the default) or
+highlighted Markdown source. The browser-local choice applies after a page
+reload and keeps drafts and uploaded attachments in either mode.
+
+`MarkdownComposer` is the shared editor used by spawn forms,
+chat, review replies, image notes, and question notes. Markdown remains the
+controlled value and persisted source of truth; the editor parses it into a
+structured live document and serializes transactions back to Markdown. Keep
+editor-only state such as the selection and attachment nodes inside that live
+document. Versioned document snapshots retain attachment positions beside the
+portable Markdown drafts; upload paths remain in a separate manifest.
+
+Editable and sent content share the `.rich-text-surface` presentation rules.
+Structured references and attachments are atomic inline nodes: their caret can
+sit only before or after the node, while the serialized Markdown remains a
+normal link/reference. A composer surface fills its host card, so blank-space
+clicks focus the document at its end.
 
 Generic clipboard images use `image1`, `image2`, and so on within the current
 attachment list. Upload queues reserve each filename synchronously, before a
@@ -511,3 +523,5 @@ area; do not re-derive it by reading source. Skip them otherwise.
   crashed-daemon-can't-orphan guarantee)
 The open backlog (ideas/gaps not yet built) lives in
 [docs/roadmap.md](roadmap.md).
+
+The rich composer behavior and design live in [rich-text-composer.md](rich-text-composer.md).

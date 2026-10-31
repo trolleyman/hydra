@@ -11,6 +11,10 @@ const baseURL = `http://127.0.0.1:${port}`
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.ts',
+  // This fixture has its own Vite server and Playwright config. Running it
+  // against Hydra's simulation server makes every case wait for a page that is
+  // intentionally not present.
+  testIgnore: 'rich-editor-spike/**',
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,

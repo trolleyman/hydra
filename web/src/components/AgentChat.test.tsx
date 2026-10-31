@@ -7,7 +7,18 @@ import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
+import { editorForMarkdownComposer } from '../lib/rich-editor/mountedEditors'
+import { optimisticEchoIndex } from '../lib/optimisticEcho'
 import { useEnterSendsStore } from '../lib/composerPrefs'
+
+describe('optimistic user echo reconciliation', () => {
+  const pending = [{ clientId: 'client-send-id', text: 'same message' }]
+
+  it('prefers the client send id and falls back when a provider returns its own message id', () => {
+    expect(optimisticEchoIndex(pending, 'client-send-id', 'same message')).toBe(0)
+    expect(optimisticEchoIndex(pending, 'provider-transcript-id', 'same message')).toBe(0)
+  })
+})
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -402,10 +413,26 @@ describe('sectioned search output', () => {
   })
 })
 
-async function connectedComposer(): Promise<HTMLTextAreaElement> {
-  const ta = screen.getByRole('textbox') as HTMLTextAreaElement
-  await waitFor(() => expect(ta).not.toBeDisabled())
-  return ta
+async function connectedComposer(): Promise<HTMLElement> {
+  // MarkdownComposer is a production lazy chunk. Under the full parallel test run,
+  // transforming that chunk can exceed Testing Library's 1s default even
+  // though the websocket and editor mount normally.
+  const composer = await screen.findByRole('textbox', {}, { timeout: 5_000 })
+  await waitFor(() => expect(composer).toHaveAttribute('contenteditable', 'true'))
+  return composer
+}
+
+async function setComposerValue(composer: HTMLElement, value: string) {
+  await act(async () => {
+    const editor = editorForMarkdownComposer(composer)!
+    editor.commands.setContent(value, { contentType: 'markdown' })
+    editor.commands.focus('end')
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+  })
+}
+
+function composerValue(composer: HTMLElement): string {
+  return editorForMarkdownComposer(composer)!.getText()
 }
 
 describe('composer status and actions', () => {
@@ -427,20 +454,30 @@ describe('composer status and actions', () => {
 
   it('sends with Enter and Cmd/Ctrl+Enter by default while Shift+Enter adds a newline', async () => {
     renderChat()
-    const ta = await connectedComposer()
+    let ta = await connectedComposer()
     const ws = sockets[0]
 
-    fireEvent.change(ta, { target: { value: 'plain' } })
+    await setComposerValue(ta, 'plain')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled())
     fireEvent.keyDown(ta, { key: 'Enter' })
     expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'plain' }] })
+    ta = await connectedComposer()
+    await waitFor(() => expect(composerValue(ta)).toBe(''))
+    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
+    expect(composerValue(ta)).toBe('')
 
-    fireEvent.change(ta, { target: { value: 'modified' } })
+    await setComposerValue(ta, 'modified')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled())
     fireEvent.keyDown(ta, { key: 'Enter', metaKey: true })
     expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'modified' }] })
+    ta = await connectedComposer()
+    await waitFor(() => expect(composerValue(ta)).toBe(''))
+    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
+    expect(composerValue(ta)).toBe('')
 
-    fireEvent.change(ta, { target: { value: 'two' } })
+    await setComposerValue(ta, 'two')
     fireEvent.keyDown(ta, { key: 'Enter', shiftKey: true })
-    expect(ta).toHaveValue('two\n')
+    expect(composerValue(ta)).toBe('two\n')
   })
 
   it('flips Enter to newline and Cmd/Ctrl+Enter to send when Enter sends is off', async () => {
@@ -449,12 +486,13 @@ describe('composer status and actions', () => {
     const ta = await connectedComposer()
     const ws = sockets[0]
 
-    fireEvent.change(ta, { target: { value: 'first line' } })
+    await setComposerValue(ta, 'first line')
     fireEvent.keyDown(ta, { key: 'Enter' })
-    expect(ta).toHaveValue('first line\n')
+    expect(editorForMarkdownComposer(ta)!.getJSON().content).toHaveLength(2)
     expect(ws.sent).toHaveLength(0)
 
-    fireEvent.change(ta, { target: { value: 'send this' } })
+    await setComposerValue(ta, 'send this')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled())
     fireEvent.keyDown(ta, { key: 'Enter', ctrlKey: true })
     expect(JSON.parse(ws.sent.at(-1) ?? '{}')).toMatchObject({ type: 'user_message', content: [{ text: 'send this' }] })
   })
@@ -477,7 +515,7 @@ describe('composer status and actions', () => {
       />,
     )
     const ta = await connectedComposer()
-    fireEvent.change(ta, { target: { value: 'one more question' } })
+    await setComposerValue(ta, 'one more question')
 
     act(() => sockets[0].emit({ type: 'status', status: AgentStatus.RUNNING }))
     await screen.findByRole('button', { name: 'Queue message' })
@@ -494,7 +532,7 @@ describe('composer status and actions', () => {
     })
     renderChat(agentId)
     const ta = await connectedComposer()
-    fireEvent.change(ta, { target: { value: 'ship it' } })
+    await setComposerValue(ta, 'ship it')
 
     act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING))
     const sendNow = await screen.findByRole('button', { name: 'Send message now' })
@@ -783,24 +821,20 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
   afterAll(() => vi.unstubAllGlobals())
   afterEach(() => localStorage.clear())
 
-  it('undoes a pasted image: first Ctrl+Z drops the marker, second drops the chip', async () => {
+  it('undoes a pasted image as one structured document step', async () => {
     renderChat()
     const ta = await connectedComposer()
 
     fireEvent.paste(ta, imagePasteEvent())
 
-    // The paste both inserts a "[image1.png]" marker and stages an image chip.
+    // The attachment is one inline document node. Its Markdown serialization
+    // remains the readable marker sent to the agent.
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
 
-    // First Ctrl+Z: the marker is gone but the chip remains (two distinct steps).
+    // One undo removes both its visible chip and serialized marker.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('')
-    expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
-
-    // Second Ctrl+Z: the chip is gone too - back to an empty composer.
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('')
+    expect(composerValue(ta)).toBe('')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
   })
 
@@ -814,7 +848,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     })))
 
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
     expect(ta).toHaveAttribute('data-desktop-image-paste')
   })
 
@@ -844,7 +878,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
 
     await screen.findByLabelText('Remove diagram.png')
     await screen.findByLabelText('Remove notes.txt')
-    expect(ta.value).toBe('')
+    expect(composerValue(ta)).toBe('[diagram.png][notes.txt]')
   })
 
   it('redo (Ctrl+Shift+Z) replays an undone paste', async () => {
@@ -854,16 +888,13 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     fireEvent.paste(ta, imagePasteEvent())
     await screen.findByLabelText('Remove image1.png')
 
-    // Undo the whole paste (marker, then chip).
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
+    // Undo and redo the single inline attachment node.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
 
-    // Redo brings the chip back, then the marker.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
     expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
   })
 
   it('keeps typed text when a later pasted image is undone', async () => {
@@ -871,22 +902,41 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     const ta = await connectedComposer()
 
     // Type into the composer (a coalesced undo step), then paste an image.
-    fireEvent.change(ta, { target: { value: 'look at this ' } })
-    expect(ta.value).toBe('look at this ')
+    editorForMarkdownComposer(ta)!.commands.insertContent('look at this ')
+    expect(composerValue(ta)).toBe('look at this ')
+    // MarkdownComposer delivers its controlled Markdown in a microtask after
+    // ProseMirror finishes appended transactions. A real paste is a later DOM
+    // event; let the simulated typing event reach the host before firing it.
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Paste with the caret at the end (jsdom doesn't move it on a controlled
     // re-render), so the marker lands after the typed text.
-    ta.selectionStart = ta.selectionEnd = ta.value.length
     fireEvent.paste(ta, imagePasteEvent())
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('look at this [image1.png]')
+    expect(composerValue(ta)).toBe('look at this [image1.png]')
 
-    // Undo marker, then chip - the typed text survives.
+    // The attachment has its own history boundary, so typed text survives.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('look at this ')
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('look at this ')
+    expect(composerValue(ta)).toBe('look at this ')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
+  })
+
+  it('shows a contextual language selector while the caret is in a code block', async () => {
+    renderChat()
+    const composer = await connectedComposer()
+    const editor = editorForMarkdownComposer(composer)!
+    editor.commands.setContent('```javascript\nconst x = 1\n```', { contentType: 'markdown' })
+    editor.commands.setTextSelection(2)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Code block language: JavaScript' }))
+    const language = screen.getByRole('combobox', { name: 'Code block language' })
+    expect(language).toHaveValue('javascript')
+    fireEvent.change(language, { target: { value: 'typescript' } })
+    fireEvent.click(screen.getByRole('option', { name: 'TypeScript' }))
+    expect(editor.getAttributes('codeBlock').language).toBe('typescript')
+
+    editor.commands.setContent('ordinary text', { contentType: 'markdown' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Code block language:/ })).toBeNull())
   })
 })
 
@@ -1640,11 +1690,35 @@ describe('a message sent after a commit lands under it', () => {
     fireEvent.mouseEnter(row?.parentElement as HTMLElement)
     expect(await screen.findByRole('tooltip', {}, { timeout: 1200 })).toHaveClass('text-left')
 
-    fireEvent.change(ta, { target: { value: 'ship it' } })
+    await setComposerValue(ta, 'ship it')
     fireEvent.keyDown(ta, { key: 'Enter' })
     const bubble = await screen.findByText('ship it')
 
     expect(chip.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('flies the composer content into its optimistic bubble', async () => {
+    renderChat()
+    const composer = await connectedComposer()
+    act(() => sockets[0].emit({ type: 'replay_done' }))
+    const composerHost = composer.closest<HTMLElement>('[data-rich-chat-composer]')!
+    composerHost.getBoundingClientRect = vi.fn(() => ({ top: 500, right: 900 } as DOMRect))
+    const animate = vi.fn()
+    const previousAnimate = HTMLElement.prototype.animate
+    HTMLElement.prototype.animate = animate
+    try {
+      await setComposerValue(composer, 'animate me')
+      const send = await screen.findByRole('button', { name: 'Send message' })
+      await waitFor(() => expect(send).not.toBeDisabled())
+      fireEvent.click(send)
+      await waitFor(() => expect(animate).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ transform: expect.stringContaining('translate(') })]),
+        expect.objectContaining({ duration: 220 }),
+      ))
+      expect(document.querySelector('[data-composer-flight]')).not.toBeNull()
+    } finally {
+      HTMLElement.prototype.animate = previousAnimate
+    }
   })
 
   it('connects and aligns merged commit rows with commit-card tooltips', async () => {
@@ -1700,9 +1774,14 @@ describe('a message sent after a commit lands under it', () => {
     expect(subject.closest('[role="button"]')).toHaveClass('w-full')
     expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('ml-auto')
 
-    fireEvent.mouseEnter(subject.closest('[role="button"]')?.parentElement as HTMLElement)
+    const row = subject.closest('[role="button"]')!
+    fireEvent.mouseEnter(row.parentElement!)
     expect(await screen.findByText('Merged Author', {}, { timeout: 1200 })).toBeInTheDocument()
-    expect(screen.getByRole('tooltip')).toHaveClass('text-left')
+    const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveClass('text-left')
+    expect(tooltip).toHaveTextContent('child12')
+    expect(tooltip).toHaveTextContent('The merged change')
+    expect(tooltip.querySelector('[aria-label="8 lines added, 1 lines removed"]')).not.toBeNull()
   })
 })
 

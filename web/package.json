@@ -18,7 +18,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:rich-editor": "playwright test --config playwright.rich-editor.config.ts"
   },
   "dependencies": {
     "@icons-pack/react-simple-icons": "^13.15.1",
@@ -30,13 +31,25 @@
     "lucide-react": "^1.66.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-markdown": "^10.1.0",
     "refractor": "^5.0.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "tailwindcss": "^4.3.3",
     "tldts": "^7.4.19",
-    "zustand": "^5.0.16"
+    "zustand": "^5.0.16",
+    "@tiptap/core": "3.30.5",
+    "@tiptap/extension-code-block": "3.30.5",
+    "@tiptap/extension-italic": "3.30.5",
+    "@tiptap/extension-list": "3.30.5",
+    "@tiptap/extension-table": "3.30.5",
+    "@tiptap/markdown": "3.30.5",
+    "@tiptap/pm": "3.30.5",
+    "@tiptap/react": "3.30.5",
+    "@tiptap/starter-kit": "3.30.5",
+    "hast-util-to-jsx-runtime": "^2.3.6",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

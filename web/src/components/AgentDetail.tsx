@@ -33,7 +33,7 @@ import { Badge } from './Badge'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { RelativeTime } from './LiveTime'
 import { deepEqual } from '../lib/deepEqual'
-import { Markdown } from '../lib/MarkdownRenderer'
+import { RichMarkdown } from '../lib/RichMarkdown'
 import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
@@ -73,7 +73,7 @@ const PromptContent = memo(function PromptContent({ prompt, projectId }: { promp
   const lightboxItems = attachmentLightboxItems(attachments)
   return (
     <>
-      {text && <Markdown text={text} className="text-sm text-gray-800 dark:text-gray-200" />}
+      {text && <RichMarkdown text={text} className="text-sm text-gray-800 dark:text-gray-200" />}
       <AttachmentChips
         attachments={attachments}
         size="md"

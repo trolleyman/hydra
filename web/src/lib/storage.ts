@@ -107,6 +107,8 @@ export const StorageKeys = {
   // Cmd/Ctrl+Enter as send. Absent/'1' = Enter sends (the default). Shift+Enter
   // always adds a newline. See lib/composerPrefs.ts + AgentChat.
   enterSends: 'hydra-enter-sends',
+  // Rich editing is on unless disabled; editor choice applies after reload.
+  richTextEditor: 'hydra-rich-text-editor',
   // '0' when the user turned OFF auto-pairing in the composers: typing an opener
   // (` ( [ { " ') inserts its closer, Enter on a "```" line opens a fenced
   // block, and a mark typed over a selection wraps it. Absent/'1' = on (the default). See
@@ -347,6 +349,10 @@ export const chatImageCounterKey = (projectId: string | null, agentId: string): 
 // Unsent spawn-prompt draft, per project and per layout (compact vs full).
 export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`
+
+// Structured positions for the same draft; Markdown remains its portable value.
+export const promptRichDraftKey = (projectId: string, compact: boolean): string =>
+  `hydra-prompt-rich-draft-${compact ? 'compact' : 'full'}-${projectId}`
 
 // Scroll offset (textarea scrollTop) of the spawn-prompt box, per project and
 // per layout - mirrors promptDraftKey so a long draft restores to the same

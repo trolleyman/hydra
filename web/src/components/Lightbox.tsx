@@ -1,9 +1,8 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, FileArchive, FileText, File as FileIcon, Film, MessageSquarePlus } from 'lucide-react'
 import { ImagePins, type ImagePin, type PendingPin } from './ImagePins'
-import { HighlightedTextarea } from './HighlightedTextarea'
-import { renderCommentSource } from '../lib/mentionHighlight'
+import type { MarkdownComposerHandle } from '../lib/rich-editor/MarkdownComposer'
 import { useImageCommentStore } from '../stores/imageCommentStore'
 import {
   anchorPositionLabel, anchorVersionLabel, artifactRefFromUrl, buildImageAnchor, sameArtifactPicture,
@@ -28,6 +27,8 @@ import {
 import { discoverMediaSize, rememberMediaSize } from '../lib/mediaSize'
 import { logicalSize } from '../lib/imageDensity'
 import { useOverlayScrollbarSuppression } from '../lib/useOverlayScrollbarSuppression'
+
+const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
 
 export interface LightboxItem {
   url: string
@@ -318,6 +319,7 @@ export function Lightbox({
   const [arming, setArming] = useState(false)
   const [pending, setPending] = useState<PendingPin | null>(null)
   const [pinBody, setPinBody] = useState('')
+  const pinComposerRef = useRef<MarkdownComposerHandle>(null)
   const [pinBusy, setPinBusy] = useState(false)
   // The clip element, so a pin on a recording can record WHICH FRAME it is about.
   // currentTime is the only place that lives, and it has to be read at the moment
@@ -1141,29 +1143,26 @@ export function Lightbox({
               ))}
             </div>
           )}
-          <HighlightedTextarea
+          <div className="h-24 overflow-y-auto rounded border border-white/15 bg-black/30 focus-within:ring-1 focus-within:ring-blue-400">
+            <Suspense fallback={<div className="h-full p-2 text-xs text-white/50">Loading editor...</div>}>
+              <MarkdownComposer
+            ref={pinComposerRef}
             value={pinBody}
             autoFocus
-            onChange={(e) => setPinBody(e.target.value)}
+            onChange={setPinBody}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault()
                 void savePin(false)
+                return true
               }
             }}
             placeholder={pinDest === 'annotate' ? 'What should the agent do here?' : 'What is wrong with this spot?'}
-            // The textarea is absolutely positioned inside the wrapper, so it
-            // cannot size the box - the height belongs on the wrapper, as it
-            // does on the diff viewer's comment box.
-            wrapperClassName="w-full h-20 rounded border border-white/15 bg-black/30 focus-within:ring-1 focus-within:ring-blue-400"
-            textClassName="p-2 text-xs leading-5"
-            textColorClassName="text-gray-100"
-            caretClassName="caret-gray-100"
-            // Mentions decide who the comment wakes - `@review` sends it to the
-            // reviewer instead of the head - so they are painted while it is
-            // typed, exactly as in the line-comment box.
-            renderContent={renderCommentSource}
+            ariaLabel="Image pin note"
+            className="lightbox-rich-composer min-h-full p-2 text-xs leading-5 text-gray-100 caret-gray-100"
           />
+            </Suspense>
+          </div>
           {pinError && <p className="mt-2 text-2xs text-red-400">{pinError}</p>}
           <div className="flex items-center justify-end gap-1.5 mt-2">
             <button

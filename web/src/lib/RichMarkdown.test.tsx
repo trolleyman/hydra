@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { Markdown } from './MarkdownRenderer'
+import { RichMarkdown } from './RichMarkdown'
 
 // jsdom implements no media loading: the off-screen size probe behind a markdown
 // video (lib/imageDensity's useNaturalVideoSize) drops its source on cleanup, and
@@ -10,16 +10,16 @@ beforeAll(() => {
   window.HTMLMediaElement.prototype.load = vi.fn()
 })
 
-describe('Markdown', () => {
+describe('RichMarkdown', () => {
   it('keeps the start number of an ordered list (8. stays 8., not 1.)', () => {
-    const { container } = render(<Markdown text="8. test" />)
+    const { container } = render(<RichMarkdown text="8. test" />)
     const ol = container.querySelector('ol')!
     expect(ol).toHaveAttribute('start', '8')
     expect(ol.querySelector('li')).toHaveTextContent('test')
   })
 
   it('leaves a list starting at 1 without an explicit start', () => {
-    const { container } = render(<Markdown text="1. test" />)
+    const { container } = render(<RichMarkdown text="1. test" />)
     expect(container.querySelector('ol')).not.toHaveAttribute('start')
   })
 
@@ -27,30 +27,30 @@ describe('Markdown', () => {
   // one (the git_commit chat card, the commit hover card) pass hardBreaks={false}
   // to get CommonMark reflow with the compact chat styling.
   it('reflows single newlines when hardBreaks is false', () => {
-    const { container } = render(<Markdown text={'one\ntwo'} hardBreaks={false} />)
+    const { container } = render(<RichMarkdown text={'one\ntwo'} hardBreaks={false} />)
     expect(container.querySelectorAll('br')).toHaveLength(0)
     expect(container.querySelector('p')).toHaveTextContent('one two')
   })
 
   it('keeps single newlines as hard breaks by default', () => {
-    const { container } = render(<Markdown text={'one\ntwo'} />)
+    const { container } = render(<RichMarkdown text={'one\ntwo'} />)
     expect(container.querySelectorAll('br')).toHaveLength(1)
   })
 
   it('highlights routing mentions only when requested', () => {
     const { container, rerender } = render(
-      <Markdown text="@agent please ask @review too" highlightMentions />,
+      <RichMarkdown text="@agent please ask @review too" highlightMentions />,
     )
     expect([...container.querySelectorAll('[data-review-mention]')].map((el) => el.textContent))
       .toEqual(['@agent', '@review'])
     expect(container.querySelector('[data-review-mention]')).not.toHaveClass('font-medium')
 
-    rerender(<Markdown text="@agent is ordinary text here" />)
+    rerender(<RichMarkdown text="@agent is ordinary text here" />)
     expect(container.querySelector('[data-review-mention]')).toBeNull()
   })
 
   it('does not highlight mention-like text inside code', () => {
-    const { container } = render(<Markdown text="`@agent` outside @head" highlightMentions />)
+    const { container } = render(<RichMarkdown text="`@agent` outside @head" highlightMentions />)
     expect(container.querySelector('code [data-review-mention]')).toBeNull()
     expect(container.querySelector('[data-review-mention]')).toHaveTextContent('@head')
   })
@@ -62,7 +62,7 @@ describe('Markdown', () => {
   // body it actually sits in, and follows the size control for free. Re-absolute
   // one of these and the pane grows its prose past its own h3.
   it('sizes chat headings relative to their prose', () => {
-    const { container } = render(<Markdown text={'# a\n\n## b\n\n### c'} />)
+    const { container } = render(<RichMarkdown text={'# a\n\n## b\n\n### c'} />)
     for (const tag of ['h1', 'h2', 'h3']) {
       expect(container.querySelector(tag)!.className).toMatch(/text-\[length:[\d.]+em\]/)
     }
@@ -72,14 +72,14 @@ describe('Markdown', () => {
   // reads at the size of the prose around it. It used to carry a literal 14px
   // from when chat prose was 14px, which left it 1.077x its surroundings.
   it('gives the chat table no size of its own', () => {
-    const { container } = render(<Markdown text={'| x |\n| - |\n| y |'} />)
+    const { container } = render(<RichMarkdown text={'| x |\n| - |\n| y |'} />)
     expect(container.querySelector('table')!.className).not.toMatch(/text-/)
   })
 
   // The document variant is a README at a fixed page size, not prose that moves,
   // so its headings stay on the type scale.
   it('leaves the doc variant headings on absolute sizes', () => {
-    const { container } = render(<Markdown text="# a" variant="doc" />)
+    const { container } = render(<RichMarkdown text="# a" variant="doc" />)
     expect(container.querySelector('h1')!.className).toContain('text-2xl')
   })
 
@@ -93,18 +93,18 @@ describe('Markdown', () => {
 
     it('shows a regular link destination only when its text differs', () => {
       vi.useFakeTimers()
-      const { container, rerender } = render(<Markdown text="[OpenAI](https://openai.com/research)" />)
+      const { container, rerender } = render(<RichMarkdown text="[OpenAI](https://openai.com/research)" />)
       fireEvent.mouseEnter(container.querySelector('a')!.parentElement!)
       act(() => void vi.advanceTimersByTime(600))
       expect(screen.getByRole('tooltip')).toHaveTextContent('https://openai.com/research')
 
-      rerender(<Markdown text="<https://openai.com/research>" />)
+      rerender(<RichMarkdown text="<https://openai.com/research>" />)
       expect(container.querySelector('a')!.parentElement).toBe(container.querySelector('p'))
     })
 
-    it('keeps a chat file link label exact and visibly linked', () => {
+    it('renders a chat file link as a presentation-only file chip', () => {
       const { container } = render(
-        <Markdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
+        <RichMarkdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
       )
       const link = container.querySelector('a')!
       expect(link).toHaveTextContent('controller.go')
@@ -113,16 +113,13 @@ describe('Markdown', () => {
         'href',
         '/project/p1/repository/hydra/a1/-/internal/controller.go',
       )
-      expect(link.className.split(' ')).toContain('text-stone-800')
-      expect(link.className.split(' ')).not.toContain('font-medium')
-      expect(link.className.split(' ')).toContain('underline')
-      expect(link.className.split(' ')).toContain('decoration-dotted')
-      expect(link.querySelector('svg')).toBeNull()
+      expect(link.className).not.toContain('text-blue')
+      expect(link.querySelector('svg')).not.toBeNull()
     })
 
     it('also makes a semantic repo link visibly linked', () => {
       const { container } = render(
-        <Markdown text="[the controller](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
+        <RichMarkdown text="[the controller](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
       )
       const link = container.querySelector('a')!
       expect(link).toHaveTextContent('the controller')
@@ -135,7 +132,7 @@ describe('Markdown', () => {
       vi.useFakeTimers()
       try {
         const { container } = render(
-          <Markdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
+          <RichMarkdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
         )
         fireEvent.mouseEnter(container.querySelector('a')!.parentElement!)
         act(() => void vi.advanceTimersByTime(600))
@@ -147,7 +144,7 @@ describe('Markdown', () => {
     })
 
     it('distinguishes linked inline code with a stronger neutral border', () => {
-      const { container } = render(<Markdown text="[`go help buildconstraint`](https://go.dev/help/buildconstraint)" />)
+      const { container } = render(<RichMarkdown text="[`go help buildconstraint`](https://go.dev/help/buildconstraint)" />)
       const link = container.querySelector('a')!
       expect(link.className).toContain('[&:has(>code)]:no-underline')
       expect(link.className).toContain('[&>code]:border-stone-400/70')
@@ -156,7 +153,7 @@ describe('Markdown', () => {
 
     it('keeps README file links as prose links', () => {
       const { container } = render(
-        <Markdown text="[controller.go](internal/controller.go)" variant="doc" linkCtx={ctx} />,
+        <RichMarkdown text="[controller.go](internal/controller.go)" variant="doc" linkCtx={ctx} />,
       )
       expect(container.querySelector('a')).toHaveTextContent('controller.go')
       expect(container.querySelector('a')).not.toHaveTextContent('... /')
@@ -166,7 +163,7 @@ describe('Markdown', () => {
       vi.useFakeTimers()
       try {
         const { container } = render(
-          <Markdown text="[README](/home/callum/code/hydra/README.md)" linkCtx={ctx} />,
+          <RichMarkdown text="[README.md](/home/callum/code/hydra/README.md)" linkCtx={ctx} />,
         )
         fireEvent.mouseEnter(container.querySelector('a')!.parentElement!)
         act(() => void vi.advanceTimersByTime(600))
@@ -178,7 +175,7 @@ describe('Markdown', () => {
 
     it('opens an absolute project-directory path at the project HEAD', () => {
       const { container } = render(
-        <Markdown
+        <RichMarkdown
           text="[agent guide](/home/callum/code/hydra/docs/agent-guide.md)"
           linkCtx={{
             projectId: 'p1',
@@ -196,19 +193,84 @@ describe('Markdown', () => {
     })
   })
 
+  describe('Hydra document nodes', () => {
+    it('renders structured references as semantic chips with shared tooltips', () => {
+      vi.useFakeTimers()
+      try {
+        const { container } = render(
+          <RichMarkdown text="[web/src/App.tsx](hydra://file/web/src/App.tsx) [abc1234](hydra://commit/abc1234) [main](hydra://branch/main) [reviewer](hydra://agent/reviewer)" />,
+        )
+        expect([...container.querySelectorAll('[data-hydra-reference]')].map((node) => node.getAttribute('data-hydra-reference')))
+          .toEqual(['file', 'commit', 'branch', 'agent'])
+        expect(container.querySelector('[data-reference-value="web/src/App.tsx"]')).toHaveTextContent('web/src/App.tsx')
+        const commit = container.querySelector('[data-hydra-reference="commit"]')!
+        expect(commit).not.toHaveAttribute('title')
+        fireEvent.mouseEnter(commit.parentElement!)
+        act(() => void vi.advanceTimersByTime(600))
+        expect(document.body.querySelector('[role="tooltip"]')).toHaveTextContent('commit: abc1234')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('continues to render legacy structured reference syntax', () => {
+      const { container } = render(<RichMarkdown text="@file[web/src/App.tsx]" />)
+      expect(container.querySelector('[data-hydra-reference="file"]')).toHaveTextContent('web/src/App.tsx')
+    })
+
+    it('does not navigate malformed or unknown Hydra links', () => {
+      const { container } = render(<RichMarkdown text="[thing](hydra://unknown/value)" />)
+      expect(container.querySelector('a')).toBeNull()
+      expect(container).toHaveTextContent('thing')
+    })
+
+    it('keeps reference syntax literal inside code', () => {
+      const { container } = render(<RichMarkdown text="`@file[web/src/App.tsx]`" />)
+      expect(container.querySelector('[data-hydra-reference]')).toBeNull()
+      expect(container.querySelector('code')).toHaveTextContent('@file[web/src/App.tsx]')
+    })
+
+    it('renders an attachment at its sentence position and opens it', () => {
+      const attachment = {
+        id: 4,
+        filename: 'image1.png',
+        kind: 'image' as const,
+        url: '/upload/image1.png',
+        previewUrl: '/upload/image1.png',
+        uploading: false,
+        error: null,
+      }
+      const open = vi.fn()
+      const { container } = render(
+        <RichMarkdown text="Look at [image1.png] before continuing." attachments={[attachment]} onOpenAttachment={open} />,
+      )
+      const chip = container.querySelector('.composer-static-attachment')!
+      expect(chip.parentElement).toHaveTextContent('Look at image1.png before continuing.')
+      fireEvent.click(chip)
+      expect(open).toHaveBeenCalledWith(attachment, chip)
+    })
+  })
+
   // What makes a code block a block is the fence, not what is inside it. This
   // used to be guessed from the content ("no language and no newline means
   // inline"), which rendered the single commonest shape an agent writes - a
   // one-line unannotated fence holding a command - as an inline chip.
   describe('code', () => {
     const kind = (text: string) => {
-      const { container } = render(<Markdown text={text} />)
+      const { container } = render(<RichMarkdown text={text} />)
       const code = container.querySelector('code')!
       return code.hasAttribute('data-md-code-block') ? 'block' : 'inline'
     }
 
     it('renders a one-line fence with no language as a block', () => {
       expect(kind('```\ngit rebase --onto main x y\n```')).toBe('block')
+    })
+
+    it('renders only inline commit-shaped code as a git hash chip', () => {
+      const { container } = render(<RichMarkdown text={'`5cf36289` and `cafe`\n\n```\n5cf36289\n```'} />)
+      expect(container.querySelectorAll('[data-md-git-hash]')).toHaveLength(1)
+      expect(container.querySelector('[data-md-git-hash]')).toHaveTextContent('5cf36289')
+      expect(container.querySelector('[data-md-code-block]')).not.toHaveAttribute('data-md-git-hash')
     })
 
     it('renders an annotated or multi-line fence as a block', () => {
@@ -229,14 +291,14 @@ describe('Markdown', () => {
     })
 
     it('carries the info string on the block for copy-as-markdown', () => {
-      const { container } = render(<Markdown text={'```go\nx := 1\n```'} />)
+      const { container } = render(<RichMarkdown text={'```go\nx := 1\n```'} />)
       expect(container.querySelector('code')).toHaveAttribute('data-md-lang', 'go')
     })
 
     it('renders ANSI colours in fenced output without exposing escape codes', () => {
       const esc = '\x1b'
       const { container } = render(
-        <Markdown text={`\`\`\`\n${esc}[31mfailed${esc}[0m plain\n\`\`\``} />,
+        <RichMarkdown text={`\`\`\`\n${esc}[31mfailed${esc}[0m plain\n\`\`\``} />,
       )
       const code = container.querySelector('code')!
       expect(code).toHaveTextContent('failed plain')
@@ -247,7 +309,7 @@ describe('Markdown', () => {
     it('keeps syntax highlighting when a language-tagged fence contains ANSI', () => {
       const esc = '\x1b'
       const { container } = render(
-        <Markdown text={`\`\`\`html\n${esc}[32m<tag>${esc}[0m\n\`\`\``} />,
+        <RichMarkdown text={`\`\`\`html\n${esc}[32m<tag>${esc}[0m\n\`\`\``} />,
       )
       const code = container.querySelector('code')!
       expect(code).toHaveTextContent('<tag>')
@@ -261,7 +323,7 @@ describe('Markdown', () => {
     const ctx = { projectId: 'p1', agentId: 'a1', refStr: 'hydra/a1', filePath: '' }
 
     it('serves an agent-emitted local path through the agent-files endpoint', () => {
-      const { container } = render(<Markdown text="![shot](/tmp/shot.png)" linkCtx={ctx} />)
+      const { container } = render(<RichMarkdown text="![shot](/tmp/shot.png)" linkCtx={ctx} />)
       const img = container.querySelector('img')!
       expect(img).toHaveAttribute(
         'src',
@@ -271,14 +333,14 @@ describe('Markdown', () => {
     })
 
     it('leaves an http/data source alone', () => {
-      const { container } = render(<Markdown text="![x](https://e.com/a.png)" linkCtx={ctx} />)
+      const { container } = render(<RichMarkdown text="![x](https://e.com/a.png)" linkCtx={ctx} />)
       expect(container.querySelector('img')).toHaveAttribute('src', 'https://e.com/a.png')
     })
 
     it('falls back to the uploads endpoint for an upload path with no head', () => {
       const path = '/home/u/.hydra/local/projects/p1/uploads/1788109758389757016-image1.png'
       const { container } = render(
-        <Markdown text={`![m](${path})`} linkCtx={{ projectId: 'p1', refStr: 'main', filePath: '' }} />,
+        <RichMarkdown text={`![m](${path})`} linkCtx={{ projectId: 'p1', refStr: 'main', filePath: '' }} />,
       )
       expect(container.querySelector('img')).toHaveAttribute(
         'src',
@@ -287,7 +349,7 @@ describe('Markdown', () => {
     })
 
     it('degrades an unresolvable path to a labelled chip, not a broken image', () => {
-      const { container } = render(<Markdown text="![a shot](/tmp/shot.png)" />)
+      const { container } = render(<RichMarkdown text="![a shot](/tmp/shot.png)" />)
       expect(container.querySelector('img')).toBeNull()
       expect(container.textContent).toContain('a shot')
     })
@@ -300,7 +362,7 @@ describe('Markdown', () => {
     const ctx = { projectId: 'p1', agentId: 'a1', refStr: 'hydra/a1', filePath: '' }
 
     it('renders a markdown image whose target is a clip as a player', () => {
-      const { container } = render(<Markdown text="![the popover](/tmp/demo.webm)" linkCtx={ctx} />)
+      const { container } = render(<RichMarkdown text="![the popover](/tmp/demo.webm)" linkCtx={ctx} />)
       expect(container.querySelector('img')).toBeNull()
       const video = container.querySelector('video')!
       expect(video).toHaveAttribute(
@@ -317,15 +379,27 @@ describe('Markdown', () => {
     })
 
     it('still renders a still image as an image', () => {
-      const { container } = render(<Markdown text="![shot](/tmp/shot.png)" linkCtx={ctx} />)
+      const { container } = render(<RichMarkdown text="![shot](/tmp/shot.png)" linkCtx={ctx} />)
       expect(container.querySelector('video')).toBeNull()
       expect(container.querySelector('img')).not.toBeNull()
     })
 
     it('degrades an unservable clip to a labelled chip', () => {
-      const { container } = render(<Markdown text="![a clip](/tmp/demo.webm)" />)
+      const { container } = render(<RichMarkdown text="![a clip](/tmp/demo.webm)" />)
       expect(container.querySelector('video')).toBeNull()
       expect(container.textContent).toContain('a clip')
     })
   })
+  it('renders unsafe and malformed reference links as inert text', () => {
+    const { container } = render(<RichMarkdown text="[Unsafe](javascript:alert%281%29) [Data](data:text/html,hello) [Broken](hydra-reference:file:%E0%A4)" />)
+    expect(container).toHaveTextContent('Unsafe Data Broken')
+    expect(container.querySelector('a')).toBeNull()
+  })
+
+  it('keeps the authored label on a structured reference', () => {
+    const { container } = render(<RichMarkdown text="[Feature branch](hydra://branch/hydra/feature)" />)
+    expect(container.querySelector('[data-hydra-reference="branch"]')).toHaveTextContent('Feature branch')
+    expect(container.querySelector('[data-reference-value="hydra/feature"]')).not.toBeNull()
+  })
+
 })

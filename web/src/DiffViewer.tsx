@@ -89,7 +89,7 @@ import { attachmentFromPath } from './lib/draftAttachments'
 import { useAttachmentUploads } from './lib/useAttachmentUploads'
 import { extractFiles, hasFilePayload } from './api/uploads'
 import { renderCommentSource } from './lib/mentionHighlight'
-import { Markdown } from './lib/MarkdownRenderer'
+import { RichMarkdown } from './lib/RichMarkdown'
 import { useCopyFlash } from './lib/useCopyFlash'
 import { CopyStateIcon } from './components/CopyStateIcon'
 import { mergeBaseInstruction } from './lib/mergeBaseInstruction'
@@ -394,7 +394,7 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
               )}
             </span>
           </div>
-          <Markdown text={comment.text} highlightMentions className="text-xs text-gray-700 dark:text-gray-200 break-words" />
+          <RichMarkdown text={comment.text} highlightMentions className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           <AttachmentChips
             attachments={attachments}
             size="sm"

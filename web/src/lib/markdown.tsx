@@ -262,7 +262,7 @@ const CODEBLOCK_CLASS =
 
 // highlightCode returns highlight.js token HTML for `code` when `lang` names a
 // recognised language, or null to fall back to plain (uncoloured) monospace text.
-// Exported so the react-markdown renderer (Markdown.tsx) shares the one
+// Exported so the static renderer (RichMarkdown.tsx) shares the one
 // highlighter rather than pulling in a second (rehype-highlight/lowlight).
 //
 // The work itself lives in lib/highlightCore (which also serves the diff viewer
@@ -408,7 +408,7 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
 //
 // Block-structured markdown (chat messages, the AgentView prompt, README
 // previews, config pre-prompt previews) is now rendered by the shared
-// <Markdown> component in ./Markdown.tsx, which wraps react-markdown + remark-gfm
+// <RichMarkdown> component in ./RichMarkdown.tsx, which parses with remark-gfm
 // (tables, task lists, strikethrough). The hand-rolled parseBlocks/
 // renderMarkdownBlocks that used to live here have been retired.
 //

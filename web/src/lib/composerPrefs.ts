@@ -134,3 +134,19 @@ export const useSpellcheckStore = create<SpellcheckState>()(
     },
   ),
 )
+
+// One editor choice for the entire page lifetime. Applying on reload avoids
+// replacing an active input or cancelling an upload when Settings changes.
+export function loadRichTextEditor(): boolean {
+  return readLocal(StorageKeys.richTextEditor) !== '0'
+}
+
+export const richTextEditorEnabled = loadRichTextEditor()
+
+export const useRichTextEditorStore = create<{ enabled: boolean; setEnabled: (enabled: boolean) => void }>((set) => ({
+  enabled: loadRichTextEditor(),
+  setEnabled: (enabled) => {
+    writeLocal(StorageKeys.richTextEditor, enabled ? null : '0')
+    set({ enabled })
+  },
+}))

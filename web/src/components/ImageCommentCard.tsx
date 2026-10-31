@@ -4,7 +4,7 @@ import { anchorPointLabel, artifactBlobUrl } from '../lib/artifactAnchor'
 import { getFileIcon } from '../lib/fileIcons'
 import { Badge } from './Badge'
 import { cropRect } from '../lib/imageCrop'
-import { Markdown } from '../lib/MarkdownRenderer'
+import { RichMarkdown } from '../lib/RichMarkdown'
 import { useLightboxStore } from '../stores/lightboxStore'
 
 // A remark about a spot in a picture, rendered as one readable thing.
@@ -145,7 +145,7 @@ export function ImageCommentCard({ comment, projectId, onOpen }: {
         </div>
       )}
       <div className={`mt-1.5 text-xs ${comment.resolved ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
-        <Markdown text={comment.text} variant="chat" />
+        <RichMarkdown text={comment.text} variant="chat" />
       </div>
     </div>
   )

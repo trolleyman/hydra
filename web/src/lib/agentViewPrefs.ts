@@ -14,6 +14,7 @@
 
 import { agentViewPrefsKey, AGENT_VIEW_PREFS_PREFIX, createShardedStore } from './storage'
 import type { StoredAttachment } from './draftAttachments'
+import type { JSONContent } from '@tiptap/core'
 
 // A persisted bash shell tab. `id` doubles as the backend shell_id, so on
 // restore the pane reconnects to the same session if it's still alive.
@@ -55,6 +56,10 @@ export type AgentViewPrefs = {
   // draftAttachments). Both halves of one draft, so they expire together.
   chatDraft?: string
   chatAttachments?: StoredAttachment[]
+  // Versioned structured draft for the rich composer. Markdown remains beside
+  // it as the portable fallback and submission boundary; this document retains
+  // structural positions such as inline attachment chips across reloads.
+  chatRichDraft?: { version: 1; document: JSONContent }
   // Split layout: whether the working pane's prompt disclosure is collapsed.
   promptCollapsed?: boolean
   // Floating chat Plan panel disclosure state. This belongs to the agent view,
@@ -92,6 +97,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatComposerRows: stored.chatComposerRows,
     chatDraft: stored.chatDraft,
     chatAttachments: stored.chatAttachments,
+    chatRichDraft: stored.chatRichDraft?.version === 1 ? stored.chatRichDraft : undefined,
     promptCollapsed: stored.promptCollapsed,
     planOpen: stored.planOpen,
     viewedFiles: stored.viewedFiles,

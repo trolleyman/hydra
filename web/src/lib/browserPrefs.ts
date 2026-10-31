@@ -13,7 +13,7 @@
 import { useThemeStore } from './theme'
 import { fontStores, fontSizeStores } from './fontPrefs'
 import { FONT_ROLES, FONT_ROLE_SPEC } from './fonts'
-import { usePasteMarkersStore, useEnterSendsStore, useAutoPairStore, useSpellcheckStore } from './composerPrefs'
+import { usePasteMarkersStore, useEnterSendsStore, useAutoPairStore, useSpellcheckStore, useRichTextEditorStore } from './composerPrefs'
 import {
   useChatStreamStore,
   useChatStepsStore,
@@ -36,6 +36,7 @@ const PREF_STORES = [
   ...Object.values(fontStores),
   ...Object.values(fontSizeStores),
   usePasteMarkersStore,
+  useRichTextEditorStore,
   useEnterSendsStore,
   useAutoPairStore,
   useSpellcheckStore,
@@ -72,6 +73,7 @@ function simple<T>(label: string, get: () => T, set: (v: T) => void, fallback: T
 
 export function browserPrefs(): Pref[] {
   const theme = useThemeStore.getState()
+  const rich = useRichTextEditorStore.getState()
   const paste = usePasteMarkersStore.getState()
   const enter = useEnterSendsStore.getState()
   const pair = useAutoPairStore.getState()
@@ -105,6 +107,7 @@ export function browserPrefs(): Pref[] {
       const store = fontSizeStores[role].getState()
       return simple(`the ${FONT_ROLE_SPEC[role].label.toLowerCase()} size`, () => store.step, store.setStep, 0, 'fonts')
     }),
+    simple('rich text editor', () => rich.enabled, rich.setEnabled, true),
     simple('paste markers', () => paste.enabled, paste.setEnabled, true),
     simple('Enter sends', () => enter.enabled, enter.setEnabled, true),
     simple('auto-close pairs', () => pair.enabled, pair.setEnabled, true),

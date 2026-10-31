@@ -1,6 +1,13 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QuestionCard, deriveAnswered, toProviderEvents } from './AgentChat'
+import { editorForMarkdownComposer } from '../lib/rich-editor/mountedEditors'
+import { parseRichMarkdown } from '../lib/rich-editor/RichEditorCore'
+
+// Tiptap deliberately destroys editors on the next timer tick so a StrictMode
+// remount can reuse them. Let that deferred cleanup finish before Vitest tears
+// down this file's jsdom window.
+afterEach(async () => new Promise((resolve) => setTimeout(resolve, 2)))
 
 // An answer to an AskUserQuestion can carry a free-text note ALONGSIDE the
 // picked option ("Postgres, but keep the schema in one file"), which is a
@@ -21,11 +28,17 @@ const SPECS = [
 const rows = () => Array.from(document.querySelector('[data-question-rows]')!.children)
 const rowIndex = (label: string) => rows().findIndex((r) => r.textContent?.startsWith(label))
 // The row holding the open note - the note lives INSIDE the row it qualifies.
-const notedRow = () => rows().findIndex((r) => r.querySelector('textarea[aria-label="Note to go with your answer"]'))
+const notedRow = () => rows().findIndex((r) => r.querySelector('[aria-label="Note to go with your answer"]'))
 // Each row carries its own corner trigger; clicking one picks that row.
 const trigger = (label: string) =>
   rows()[rowIndex(label)].querySelector('button[aria-label="Add a note"]') as HTMLElement
-const noteBox = () => screen.getByLabelText('Note to go with your answer')
+async function setComposer(label: string, value: string, index = 0) {
+  const boxes = await screen.findAllByLabelText(label)
+  const editor = editorForMarkdownComposer(boxes[index] as HTMLElement)
+  expect(editor).toBeDefined()
+  editor!.commands.setContent(parseRichMarkdown(value), { contentType: 'json' })
+  await waitFor(() => expect(editor!.getText()).toBe(value))
+}
 
 it('replays a persisted Codex answer as a settled question result', () => {
   const events = toProviderEvents({
@@ -72,13 +85,13 @@ describe('QuestionCard notes', () => {
     expect(submit).not.toBeDisabled()
   })
 
-  it('sends a note alongside the picked option, in annotations', () => {
+  it('sends a note alongside the picked option, in annotations', async () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
 
     fireEvent.click(screen.getByText('Postgres'))
     fireEvent.click(trigger('Postgres'))
-    fireEvent.change(noteBox(), { target: { value: 'but keep the schema in one file' } })
+    await setComposer('Note to go with your answer', 'but keep the schema in one file')
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
@@ -97,18 +110,18 @@ describe('QuestionCard notes', () => {
     expect(onSubmit).toHaveBeenCalledWith({ 'Which database?': 'SQLite' }, {})
   })
 
-  it('discards a named option note when switching to Other', () => {
+  it('discards a named option note when switching to Other', async () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
 
     fireEvent.click(screen.getByText('Postgres'))
     fireEvent.click(trigger('Postgres'))
-    fireEvent.change(noteBox(), { target: { value: 'neither - use the file store' } })
+    await setComposer('Note to go with your answer', 'neither - use the file store')
     fireEvent.click(screen.getByRole('button', { name: 'Select Other' }))
 
     const submit = screen.getByRole('button', { name: 'Submit' })
     expect(submit).toBeDisabled()
-    fireEvent.change(screen.getByPlaceholderText('Other...'), { target: { value: 'neither - use the file store' } })
+    await setComposer('Other answer', 'neither - use the file store')
     fireEvent.click(submit)
     expect(onSubmit).toHaveBeenCalledWith({ 'Which database?': 'neither - use the file store' }, {})
   })
@@ -117,7 +130,7 @@ describe('QuestionCard notes', () => {
 // A note reads as a caveat on the choice it qualifies, so it renders inside
 // that row rather than as a row of its own beneath it.
 describe('QuestionCard note placement', () => {
-  it('opens the note inside the row whose trigger was used, picking it on the way', () => {
+  it('opens the note inside the row whose trigger was used, picking it on the way', async () => {
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
     // Nothing picked, and the trigger on an unpicked row picks it first so the
     // note lands where it was asked for.
@@ -125,10 +138,10 @@ describe('QuestionCard note placement', () => {
 
     fireEvent.click(trigger('SQLite'))
     expect(notedRow()).toBe(rowIndex('SQLite'))
-    expect(screen.getByText('SQLite').closest('[data-question-rows] > div')).toContainElement(noteBox())
+    expect(screen.getByText('SQLite').closest('[data-question-rows] > div')).toContainElement(await screen.findByLabelText('Note to go with your answer'))
   })
 
-  it('moves the note into whichever row you pick', () => {
+  it('moves the note into whichever row you pick', async () => {
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
     fireEvent.click(screen.getByText('Postgres'))
     fireEvent.click(trigger('Postgres'))
@@ -139,17 +152,17 @@ describe('QuestionCard note placement', () => {
 
     // Other is itself free text, so selecting it drops the named option's note
     // instead of creating a second, redundant free-text field.
-    fireEvent.focus(screen.getByPlaceholderText('Other...'))
+    fireEvent.focus(await screen.findByLabelText('Other answer'))
     expect(notedRow()).toBe(-1)
   })
 
   // Closing has to clear the text: a note kept in state but out of sight would
   // still be submitted.
-  it('discards the note text when the note is closed again', () => {
+  it('discards the note text when the note is closed again', async () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
     fireEvent.click(trigger('Postgres'))
-    fireEvent.change(noteBox(), { target: { value: 'never mind' } })
+    await setComposer('Note to go with your answer', 'never mind')
 
     fireEvent.click(screen.getByRole('button', { name: 'Discard note' }))
     expect(notedRow()).toBe(-1)
@@ -237,15 +250,15 @@ describe('QuestionCard notes on a multi-select', () => {
   ]
   const noteBoxes = () => screen.getAllByLabelText('Note to go with your answer')
 
-  it('keeps a separate note per selected option and merges them, labelled', () => {
+  it('keeps a separate note per selected option and merges them, labelled', async () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={MULTI} disabled={false} onSubmit={onSubmit} />)
 
     fireEvent.click(trigger('Schema validation'))
-    fireEvent.change(noteBoxes()[0], { target: { value: 'only if it is cheap' } })
+    await setComposer('Note to go with your answer', 'only if it is cheap')
     fireEvent.click(trigger('Hot reload'))
     expect(noteBoxes()).toHaveLength(2)
-    fireEvent.change(noteBoxes()[1], { target: { value: 'after the config lands' } })
+    await setComposer('Note to go with your answer', 'after the config lands', 1)
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     expect(onSubmit).toHaveBeenCalledWith(
@@ -255,13 +268,13 @@ describe('QuestionCard notes on a multi-select', () => {
   })
 
   // One note needs no label - it would only restate the answer.
-  it('sends a lone note unlabelled', () => {
+  it('sends a lone note unlabelled', async () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={MULTI} disabled={false} onSubmit={onSubmit} />)
 
     fireEvent.click(screen.getByText('Hot reload'))
     fireEvent.click(trigger('Hot reload'))
-    fireEvent.change(noteBoxes()[0], { target: { value: 'after the config lands' } })
+    await setComposer('Note to go with your answer', 'after the config lands')
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     expect(onSubmit).toHaveBeenCalledWith(
@@ -272,14 +285,14 @@ describe('QuestionCard notes on a multi-select', () => {
 
   // Unchecking an option takes its note out of the answer, but keeps the text
   // in case the option comes back - it is only dropped by the X.
-  it('drops an unchecked option note from the answer, and restores it on re-check', () => {
+  it('drops an unchecked option note from the answer, and restores it on re-check', async () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={MULTI} disabled={false} onSubmit={onSubmit} />)
 
     fireEvent.click(trigger('Schema validation'))
-    fireEvent.change(noteBoxes()[0], { target: { value: 'only if it is cheap' } })
+    await setComposer('Note to go with your answer', 'only if it is cheap')
     fireEvent.click(trigger('Hot reload'))
-    fireEvent.change(noteBoxes()[1], { target: { value: 'after the config lands' } })
+    await setComposer('Note to go with your answer', 'after the config lands', 1)
 
     // Unchecked: its note goes out of sight...
     fireEvent.click(screen.getByText('Schema validation'))
@@ -287,7 +300,7 @@ describe('QuestionCard notes on a multi-select', () => {
     // ...and comes back with its text when the option does.
     fireEvent.click(screen.getByText('Schema validation'))
     expect(noteBoxes()).toHaveLength(2)
-    expect((noteBoxes()[0] as HTMLTextAreaElement).value).toBe('only if it is cheap')
+    expect(noteBoxes()[0]).toHaveTextContent('only if it is cheap')
 
     fireEvent.click(screen.getByText('Schema validation'))
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
