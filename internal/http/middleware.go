@@ -145,7 +145,8 @@ var logAllHTTP = os.Getenv("HYDRA_LOG_HTTP") == "1"
 
 // LoggingMiddleware logs each HTTP request with method, path, status code, and
 // duration - but only the ones worth a line: mutations, errors, and anything
-// slow. A fast, successful GET logs nothing.
+// slow. Page navigations also log both ways so remote loading failures can be
+// traced; a fast, successful API poll logs nothing.
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -162,12 +163,13 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		// A websocket is *meant* to sit open for minutes, so neither the
 		// in-flight warning nor the duration on close says anything useful.
 		websocket := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
-		// GETs are the poll traffic; everything else changes state and is rare
-		// enough to trace both ways.
-		verbose := logAllHTTP || (r.Method != http.MethodGet && !websocket)
+		// Trace page loads and mutations, keeping routine GET polling quiet.
+		navigation := r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/html")
+		verbose := logAllHTTP || navigation || (r.Method != http.MethodGet && !websocket)
 
 		if verbose {
-			log.Printf("<- %s %s", r.Method, uri)
+			log.Printf("<- %s %s peer=%q host=%q forwarded_proto=%q user_agent=%q", r.Method, uri,
+				r.RemoteAddr, r.Host, r.Header.Get("X-Forwarded-Proto"), r.UserAgent())
 		}
 		// The old code logged every request on receipt so that one hanging in its
 		// handler showed up as a "<- " with no matching "-> ". Keep that property

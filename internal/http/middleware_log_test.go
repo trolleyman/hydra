@@ -147,3 +147,19 @@ func TestLoggingMiddlewareIsQuietForWebsockets(t *testing.T) {
 		t.Errorf("long-lived websocket logged %q, want nothing", out)
 	}
 }
+
+func TestLoggingMiddlewareTracesPageNavigation(t *testing.T) {
+	h := LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	out := captureLog(t, func() {
+		serve(h, http.MethodGet, "https://hydra.example/project/p", map[string]string{
+			"Accept":            "text/html,application/xhtml+xml",
+			"User-Agent":        "Mobile Safari",
+			"X-Forwarded-Proto": "https",
+		})
+	})
+	for _, want := range []string{"<- GET /project/p", "-> GET /project/p 200", `host="hydra.example"`, `forwarded_proto="https"`, `user_agent="Mobile Safari"`, "peer="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("navigation log missing %q: %s", want, out)
+		}
+	}
+}

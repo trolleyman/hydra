@@ -175,3 +175,19 @@ If serving 99 ports feels heavy, a future improvement is to mount previews under
 path on the main port (`/preview/<slot>/`) so a single TLS mapping covers
 everything; that needs a preview-proxy + frontend URL change and is not built yet.
 For now, serving the ports you actually use is the simple path.
+
+## Diagnosing a lost connection
+
+Hydra logs page navigations when the request accepts `text/html`, including the
+peer address, requested host, forwarded protocol, and user agent, followed by the
+response status and duration. Routine API polling stays quiet. Response write
+failures in the compression layer are logged even when they happen while
+finishing a buffered response or gzip stream.
+
+On Linux and macOS, these diagnostics are in
+`~/.local/share/hydra/logs/hydra.log`. `HYDRA_LOG_HTTP=1` enables every HTTP request
+when more detail is needed. Match a failed mobile load by time and host: a
+navigation receipt confirms the request reached Hydra; a completion confirms the
+handler returned, but does not prove the browser received the whole response.
+If there is no receipt, inspect the Tailscale/proxy path and its logs; failures
+before HTTP reaches Hydra cannot be diagnosed from its request log alone.

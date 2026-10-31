@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -60,7 +61,13 @@ func CompressionMiddleware(next http.Handler) http.Handler {
 		}
 
 		cw := &compressWriter{ResponseWriter: w, status: http.StatusOK}
-		defer cw.finish()
+		defer func() {
+			cw.finish()
+			if cw.writeErr != nil {
+				log.Printf("http: response write failed: %s %s peer=%q host=%q encoding=%q: %v",
+					r.Method, r.URL.Path, r.RemoteAddr, r.Host, cw.Header().Get("Content-Encoding"), cw.writeErr)
+			}
+		}()
 		next.ServeHTTP(cw, r)
 	})
 }
@@ -148,10 +155,18 @@ func (c *compressWriter) Write(b []byte) (int, error) {
 	}
 	if c.gz != nil {
 		n, err := c.gz.Write(b)
+		c.recordError(err)
 		return n, errtrace.Wrap(err)
 	}
 	n, err := c.ResponseWriter.Write(b)
+	c.recordError(err)
 	return n, errtrace.Wrap(err)
+}
+
+func (c *compressWriter) recordError(err error) {
+	if err != nil && c.writeErr == nil {
+		c.writeErr = err
+	}
 }
 
 // decide settles compress-vs-passthrough, emits the response header, and drains
@@ -238,7 +253,7 @@ func (c *compressWriter) shouldCompress(h http.Header, streaming bool) bool {
 func (c *compressWriter) Flush() {
 	c.decide(true)
 	if c.gz != nil {
-		_ = c.gz.Flush()
+		c.recordError(c.gz.Flush())
 	}
 	if f, ok := c.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
@@ -267,7 +282,7 @@ func (c *compressWriter) finish() {
 	}
 	c.decide(false)
 	if c.gz != nil {
-		_ = c.gz.Close()
+		c.recordError(c.gz.Close())
 		c.gz.Reset(nil) // don't pin the connection through the pool
 		gzipWriters.Put(c.gz)
 		c.gz = nil

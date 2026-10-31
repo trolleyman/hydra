@@ -3,8 +3,11 @@
 package sandbox
 
 import (
+	"os"
+	"os/exec"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -143,5 +146,37 @@ func TestWrapScopeUsesHostBusWithoutLeakingItToPayload(t *testing.T) {
 		if entry == "XDG_RUNTIME_DIR=/run/user/4242" || entry == "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/4242/bus" {
 			t.Errorf("host bus variable leaked into payload command: %q", entry)
 		}
+	}
+}
+
+// Execute the payload without a real systemd manager: nil must retain PATH for
+// toolchain commands, and an explicitly empty environment must stay empty.
+func TestWrapScopePreservesEnvironmentSemantics(t *testing.T) {
+	t.Setenv("HYDRA_SCOPE_TEST", "inherited")
+	oldRun, oldEnv := systemdRunPath, envPath
+	systemdRunPath, envPath = "/usr/bin/systemd-run", "/usr/bin/env"
+	t.Cleanup(func() { systemdRunPath, envPath = oldRun, oldEnv })
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{"inherited", nil, os.Environ()},
+		{"empty", []string{}, nil},
+		{"explicit", []string{"ONLY=payload"}, []string{"ONLY=payload"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &Spec{Path: envPath, Args: []string{envPath}, Env: tc.env}
+			wrapScopeSpec("hydra-test.scope", spec, ScopeLimits{}, ScopeBackground)
+			args := spec.Args[slices.Index(spec.Args, "--")+1:]
+			out, err := exec.Command(args[0], args[1:]...).Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.FieldsFunc(string(out), func(r rune) bool { return r == '\n' })
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("payload environment differs for %s", tc.name)
+			}
+		})
 	}
 }

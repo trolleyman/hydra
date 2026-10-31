@@ -276,7 +276,12 @@ func wrapScopeSpec(unit string, spec *Spec, limits ScopeLimits, class ScopeClass
 	// env -i to restore the exact intended environment before the payload starts.
 	// This keeps head credential isolation intact without making scope startup
 	// depend on variables that heads must not inherit.
-	payloadEnv := append([]string(nil), spec.Env...)
+	payloadEnv := spec.Env
+	if payloadEnv == nil {
+		// Match exec.Cmd: nil inherits the daemon's environment, while an
+		// explicitly empty slice means no environment at all.
+		payloadEnv = os.Environ()
+	}
 	wrapped = append(wrapped, "--", envPath, "-i")
 	wrapped = append(wrapped, payloadEnv...)
 	wrapped = append(wrapped, spec.Path)

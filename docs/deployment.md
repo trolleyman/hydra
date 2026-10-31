@@ -178,6 +178,10 @@ mage available - Hydra manages other people's repositories too, and rebuilding
 the server from one of those would be nonsense. Those daemons get restart but not
 update, reported as `can_restart` / `can_update` on `/api/status`.
 
+The update build inherits the daemon environment, including `PATH`, inside its
+resource scope. An explicit workload environment remains isolated; a nil
+environment inherits the daemon environment, matching Go process execution.
+
 ### The UI
 
 One toast for the whole run, keyed so a second press replaces it in place. Its

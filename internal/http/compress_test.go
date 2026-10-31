@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"braces.dev/errtrace"
 )
 
 // bigJSON is comfortably over minCompressSize and compresses well.
@@ -303,5 +306,28 @@ func TestWeakensStrongETag(t *testing.T) {
 
 	if got := resp.Header.Get("ETag"); got != `W/"abc123"` {
 		t.Errorf("ETag = %q, want it weakened to W/\"abc123\"", got)
+	}
+}
+
+type failedResponseWriter struct{ *httptest.ResponseRecorder }
+
+func (w failedResponseWriter) Write(p []byte) (int, error) {
+	return 0, errtrace.Wrap(errors.New("test connection lost"))
+}
+
+// A short response is buffered until finish, after the inner request logger has
+// returned. The outer middleware must report that failure itself.
+func TestCompressionLogsFinalWriteFailure(t *testing.T) {
+	h := CompressionMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("short page"))
+	}))
+	out := captureLog(t, func() {
+		h.ServeHTTP(failedResponseWriter{httptest.NewRecorder()}, gzipReq())
+	})
+	for _, want := range []string{"response write failed", "GET /api/agents", "test connection lost"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("write failure log missing %q: %s", want, out)
+		}
 	}
 }
