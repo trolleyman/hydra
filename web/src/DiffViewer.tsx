@@ -3601,13 +3601,13 @@ export function FileRow({ file, isActive, viewed = false, onClick, onToggleViewe
 }) {
   return (
     <div
-      className={`group flex w-full items-center text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+      className={`group flex w-full items-center gap-1.5 pr-1 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${isActive ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
       data-viewed={viewed || undefined}
+      onClick={onClick}
     >
       <button
         type="button"
-        onClick={onClick}
-        className={`flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left cursor-pointer transition-opacity ${viewed ? 'opacity-50' : ''}`}
+        className={`flex min-w-0 items-center gap-1.5 py-1.5 text-left cursor-pointer transition-opacity ${viewed ? 'opacity-50' : ''}`}
         style={{ paddingLeft: `${10 + indent}px` }}
       >
         {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
@@ -3623,12 +3623,11 @@ export function FileRow({ file, isActive, viewed = false, onClick, onToggleViewe
           </Tooltip>
           <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
         </span>
-        <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
       </button>
       {onToggleViewed && (
         <ViewedToggle path={file.path} viewed={viewed} disabled={!file.head_blob_sha} onToggle={() => onToggleViewed(file)} />
       )}
-      <span aria-hidden className="w-1 shrink-0" />
+      <ChangeStats additions={file.additions} deletions={file.deletions} className={`ml-auto text-3xs cursor-pointer transition-opacity ${viewed ? 'opacity-50' : ''}`} />
     </div>
   )
 }

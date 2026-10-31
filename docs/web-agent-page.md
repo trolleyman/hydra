@@ -60,7 +60,8 @@ and `web/src/DiffViewer.tsx`):
   are lowlit in the file list; folders lowlight only when all descendants are
   viewed. A later edit reopens the file, labels it "New changes", and keeps the
   complete base-to-head diff with unchanged regions behind the normal context
-  expanders.
+  expanders. File-list rows place the viewed toggle immediately after the change
+  type icon, with added and removed line counts aligned at the right edge.
 - The uncommitted-changes tooltip merges tracked and untracked paths into one
   path-sorted list while keeping each row's change-type indicator.
 - The commit range selectors keep every right-side commit selectable. Choosing a

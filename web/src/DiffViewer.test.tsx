@@ -131,9 +131,10 @@ describe('diff sidebar path tooltips', () => {
     expect(screen.queryByText('Auto')).not.toBeInTheDocument()
   })
 
-  it('lowlights viewed files and fully viewed folders, with the toggle after the stats', () => {
+  it('lowlights viewed files and fully viewed folders, with the toggle between change type and stats', () => {
     const viewedFile = file({ path: 'src/a.ts', head_blob_sha: 'a' })
     const onToggleViewed = vi.fn()
+    const onFileClick = vi.fn()
     const { container } = render(
       <TreeNodeView
         node={{ name: 'src', path: 'src', type: 'dir', children: [
@@ -142,7 +143,7 @@ describe('diff sidebar path tooltips', () => {
         depth={0}
         collapsedFolders={new Set()}
         toggleFolder={() => {}}
-        onFileClick={() => {}}
+        onFileClick={onFileClick}
         activeFilePath={null}
         isFileViewed={() => true}
         onToggleViewed={onToggleViewed}
@@ -151,9 +152,14 @@ describe('diff sidebar path tooltips', () => {
 
     expect(container.querySelectorAll('[data-viewed="true"]')).toHaveLength(2)
     const toggle = screen.getByRole('button', { name: 'Mark src/a.ts unviewed' })
-    expect(screen.getByLabelText('1 lines added, 1 lines removed').compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const stats = screen.getByLabelText('1 lines added, 1 lines removed')
+    expect(screen.getByLabelText('modified').compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(toggle.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(toggle)
     expect(onToggleViewed).toHaveBeenCalledWith(viewedFile)
+    expect(onFileClick).not.toHaveBeenCalled()
+    fireEvent.click(stats)
+    expect(onFileClick).toHaveBeenCalledExactlyOnceWith('src/a.ts')
   })
 })
 
