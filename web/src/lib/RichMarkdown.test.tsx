@@ -396,4 +396,10 @@ describe('RichMarkdown', () => {
     expect(container.querySelector('a')).toBeNull()
   })
 
+  it('keeps the authored label on a structured reference', () => {
+    const { container } = render(<RichMarkdown text="[Feature branch](hydra://branch/hydra/feature)" />)
+    expect(container.querySelector('[data-hydra-reference="branch"]')).toHaveTextContent('Feature branch')
+    expect(container.querySelector('[data-reference-value="hydra/feature"]')).not.toBeNull()
+  })
+
 })

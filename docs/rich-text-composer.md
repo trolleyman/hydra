@@ -128,8 +128,9 @@ Completed 2026-08-29:
   tinting and zebra rows communicate structure without bold header text.
   The behavior fixture runs in Chromium, Firefox and WebKit (engine-unsupported
   clipboard-permission checks are skipped). The lazy `MarkdownComposer` chunk,
-  including reference discovery and the command menu, is 234.38 KB minified /
-  77.28 KB gzip.
+  including reference discovery and the command menu, is 290.89 KB minified /
+  94.08 KB gzip in the current production build. The shared attachment/core
+  chunk is 304.93 KB minified / 95.74 KB gzip.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -166,7 +167,7 @@ The current implementation is not throwaway work. Carry forward:
 The target is not a document suite. It is a compact, excellent prompt composer
 with a deliberately small schema.
 
-## Decision: Tiptap, behind a Hydra-owned API
+## Decision: Tiptap with a Markdown value boundary
 
 Use Tiptap's MIT-licensed editor, React integration and open-source extensions.
 Tiptap supplies ProseMirror setup, extension packaging, common nodes, commands
@@ -692,8 +693,8 @@ The editor remains an internal Hydra module; package extraction is not a goal.
 3. **Reusable core - DONE.** Hydra-owned editor factory, shared extension
    registry, Markdown parser/serializer, marks, links, conservative input rules
    and unit/browser tests are built. The controlled React adapter and narrow
-   Markdown value/event API are built; Tiptap and ProseMirror state stay behind
-   that boundary.
+   Markdown value/event API are built; advanced frontend hosts use internal
+   editor hooks for selections, attachments and keyboard integration.
 4. **Attachment node/adapter - DONE.** The atomic safe-metadata node and external
    upload registry cancel on undo, restart on redo and keep paths out of
    Markdown/JSON. Production upload wiring, inline chips/thumbnails, retry,
@@ -715,8 +716,8 @@ The editor remains an internal Hydra module; package extraction is not a goal.
    existing Markdown submission contract.
 9. **Release hardening - DONE.** Code-block exit/indent/unwrap, spreadsheet-like
    table navigation and range selection, cell-local table actions, narrow
-   layout, three-engine selection/IME validation and final bundle measurement
-   are complete.
+   layout and bundle measurement are complete. The browser fixture supports
+   Chromium, Firefox and WebKit; the current local run verifies Chromium.
 10. **Broader surfaces - DONE.** Review replies, image-pin notes, question option
     notes and question Other answers use the rich Markdown adapter and render
     settled Markdown structure.
@@ -738,7 +739,8 @@ message backend protocol.
 - Images/files can be placed, moved and removed within prose.
 - Optimistic user bubbles share the document renderer and can move seamlessly
   from the composer without a reparse/layout flash; reduced motion disables it.
-- IME, graphemes, accessibility and touch selection have explicit coverage.
+- Composition-event and grapheme behavior have automated coverage. Physical IME,
+  touchscreen selection and assistive technology need manual device checks.
 - Bundle increase is measured; editor-only code is lazy-loaded if useful.
 - Only MIT packages are included and notices retained.
 - The rich editor exposes a Hydra-owned API.
@@ -781,3 +783,12 @@ message backend protocol.
 
 The implementation is an internal prompt editor. Math and collaborative editing
 remain outside its scope.
+
+The dedicated `rich_editor` Hydra runner preserves browser interaction coverage
+between changes. Production composer tests also fail on unexpected console and
+page errors. See [testing.md](testing.md) for runner behavior and engine coverage.
+
+The code language picker measures its displayed width and reserves that footprint
+on the first source line with a presentation-only float. Narrow composers wrap
+source around the picker without covering characters or adding a toolbar row.
+Code surfaces disable spellcheck independently of the surrounding prose setting.

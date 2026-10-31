@@ -34,6 +34,19 @@ export function CodeBlockView({ editor, getPos, node, updateAttributes }: NodeVi
       || name.toLowerCase().includes(needle))
   }, [query])
 
+  useLayoutEffect(() => {
+    const control = controlRef.current
+    const block = control?.closest<HTMLElement>('.rich-code-block')
+    if (!control || !block) return
+    // Reserve only the first line's occupied space. A DOM-free float keeps
+    // selection/copy literal and avoids either covering source or a toolbar row.
+    const measure = () => block.style.setProperty('--rich-code-language-width', `${Math.ceil(control.getBoundingClientRect().width)}px`)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(control)
+    return () => observer.disconnect()
+  }, [label])
+
   useEffect(() => {
     if (!open) return
     const close = (event: MouseEvent) => {
@@ -101,7 +114,7 @@ export function CodeBlockView({ editor, getPos, node, updateAttributes }: NodeVi
     >
       {/* Keep document content before non-document controls so drag selection
           through code cannot collect the language label as source text. */}
-      <NodeViewContent className="rich-code-block-content" />
+      <NodeViewContent className="rich-code-block-content" spellCheck={false} />
       <div ref={controlRef} className="rich-code-language" contentEditable={false}>
         <button
           ref={triggerRef}

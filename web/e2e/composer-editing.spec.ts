@@ -2,12 +2,24 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const PROJECT = '/project/sim-project/'
 
-async function openComposer(page: Page): Promise<Locator> {
-  const pageErrors: string[] = []
-  page.on('pageerror', (error) => pageErrors.push(error.stack ?? error.message))
+const runtimeErrors = new WeakMap<Page, string[]>()
+test.beforeEach(({ page }) => {
+  const errors: string[] = []
+  runtimeErrors.set(page, errors)
+  page.on('pageerror', (error) => errors.push(error.stack ?? error.message))
   page.on('console', (message) => {
-    if (message.type() === 'error') pageErrors.push(message.text())
+    if (message.type() !== 'error') return
+    const url = message.location().url
+    if (/\/uploads\/projects\/.*\/blob|\/folder-picker\/available/.test(url)) return
+    errors.push(`${message.text()} (${url})`)
   })
+})
+test.afterEach(({ page }) => {
+  expect(runtimeErrors.get(page), 'production composer runtime errors').toEqual([])
+})
+
+async function openComposer(page: Page): Promise<Locator> {
+  const pageErrors = runtimeErrors.get(page) ?? []
   await page.goto(PROJECT)
   const showError = page.getByRole('button', { name: 'Show Error' })
   const composer = page.getByRole('textbox', { name: 'Describe a task' })
@@ -78,4 +90,83 @@ test('an attached image is an inline preview that opens and can be removed', asy
   await page.getByRole('button', { name: 'Remove inline-preview.png' }).click()
   await expect(chip).toHaveCount(0)
   await expect(composer).toContainText('before')
+})
+
+async function openChatComposer(page: Page): Promise<Locator> {
+  await page.goto(`${PROJECT}agent/agent-chat`)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
+  await expect(composer).toHaveAttribute('contenteditable', 'true')
+  return composer
+}
+
+test('chat sends rich content once and starts a fresh focused history', async ({ page }) => {
+  const composer = await openChatComposer(page)
+  await composer.click()
+  await page.keyboard.type('Check `editor` now')
+  await expect(composer.locator('code')).toHaveText('editor')
+  await composer.press('Enter')
+  await expect(composer).toHaveText('')
+  await expect(composer).toBeFocused()
+  await composer.press('ControlOrMeta+z')
+  await expect(composer).toHaveText('')
+  const transcript = page.locator('[data-chat-scroll]')
+  await expect(transcript.getByText('Check editor now', { exact: true })).toHaveCount(1)
+})
+
+test('chat multiline Enter can leave an empty list item', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('hydra-enter-sends', '0'))
+  const composer = await openChatComposer(page)
+  await composer.click()
+  await page.keyboard.type('- first')
+  await composer.press('Enter')
+  await composer.press('Enter')
+  await page.keyboard.type('after the list')
+  await expect(composer.locator('li')).toHaveCount(1)
+  await expect(composer.locator(':scope > p').first()).toHaveText('after the list')
+})
+
+test('IME confirmation cannot choose a discovery command', async ({ page }) => {
+  const composer = await openComposer(page)
+  await composer.fill('/table')
+  await expect(page.getByRole('listbox', { name: 'Block commands' })).toBeVisible()
+  await composer.dispatchEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true })
+  await expect(composer).toHaveText('/table')
+  await expect(composer.locator('table')).toHaveCount(0)
+})
+
+test('removing a Spawn attachment stays removed after a reload', async ({ page }) => {
+  const composer = await openComposer(page)
+  await composer.fill('Keep this draft')
+  await composer.press('End')
+  await composer.locator('xpath=ancestor::form').locator('input[type="file"]').setInputFiles({
+    name: 'draft-note.txt', mimeType: 'text/plain', buffer: Buffer.from('attachment text'),
+  })
+  await expect(composer.locator('[data-composer-attachment]')).toBeVisible()
+  await page.getByRole('button', { name: 'Remove draft-note.txt' }).click()
+  await expect(composer.locator('[data-composer-attachment]')).toHaveCount(0)
+  await page.reload()
+  await expect(composer).toHaveText('Keep this draft')
+  await expect(composer.locator('[data-composer-attachment]')).toHaveCount(0)
+})
+
+test('agent slash commands take precedence over block discovery', async ({ page }) => {
+  const composer = await openChatComposer(page)
+  await composer.fill('/co')
+  await expect(page.getByRole('button', { name: '/compact', exact: true })).toBeVisible()
+  await expect(page.getByRole('listbox', { name: 'Block commands' })).toHaveCount(0)
+  await composer.press('Enter')
+  await expect(composer).toHaveText('/compact ')
+})
+
+test('chat switches between the rich draft and shell source without losing input', async ({ page }) => {
+  const composer = await openChatComposer(page)
+  await composer.click()
+  await page.keyboard.type('!pwd')
+  const shell = page.locator('textarea[placeholder="Run a shell command..."]')
+  await expect(shell).toHaveValue('!pwd')
+  await shell.fill('')
+  await expect(composer).toHaveAttribute('contenteditable', 'true')
+  await expect(composer).toBeFocused()
+  await page.keyboard.type('back to prose')
+  await expect(composer).toHaveText('back to prose')
 })

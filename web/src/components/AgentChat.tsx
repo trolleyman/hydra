@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom'
 import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import {
   ArrowDown,
@@ -7317,11 +7318,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     } else richComposerRef.current?.focus(position)
   }, [])
   const previousShellComposer = useRef(shellComposer)
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousShellComposer.current === shellComposer) return
     previousShellComposer.current = shellComposer
-    requestAnimationFrame(() => focusComposer('end'))
-  }, [focusComposer, shellComposer])
+    if (shellComposer) {
+      const textarea = textareaRef.current
+      textarea?.focus()
+      if (textarea) textarea.selectionStart = textarea.selectionEnd = textarea.value.length
+    } else richComposerRef.current?.focus('end')
+  }, [shellComposer])
   // Pin-to-bottom: keep auto-scrolling while the user is at (or near) the
   // bottom; stop once they scroll up to read history. The ref is the live
   // value the socket/scroll handlers read; the state mirror drives the
@@ -10703,7 +10708,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   function handleRichInputChange(value: string) {
-    commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), true)
+    const update = () => commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), true)
+    // A leading ! changes the actual input element. Commit that handoff before
+    // the next keyboard event, or fast typing can target the removed editor.
+    if (value.startsWith('!') !== shellComposer) flushSync(update)
+    else update()
     setSlashDismissed(false)
   }
 
@@ -11757,6 +11766,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 <Suspense fallback={<div className="h-full px-3.5 pt-2.5 text-sm leading-5 text-stone-400">Loading editor...</div>}>
                   <MarkdownComposer
                     key={richComposerGeneration}
+                    autoFocus={active}
                     ref={richComposerRef}
                     value={input}
                     initialDocument={initialRichDocument}

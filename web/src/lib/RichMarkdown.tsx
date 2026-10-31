@@ -115,7 +115,7 @@ function RegularLink({ href, children }: { href?: string; children?: ReactNode }
   return <Tooltip content={<UrlText url={href} />} align="left">{anchor}</Tooltip>
 }
 
-function StructuredReference({ kind, value }: { kind: string; value: string }) {
+function StructuredReference({ kind, value, label }: { kind: string; value: string; label?: string }) {
   const file = kind === 'file' ? getFileIcon(value.split('/').pop() ?? value).Icon : null
   const Icon = file ?? (kind === 'commit' ? GitCommitHorizontal : kind === 'branch' ? GitBranch : Bot)
   return (
@@ -126,7 +126,7 @@ function StructuredReference({ kind, value }: { kind: string; value: string }) {
         data-reference-value={value}
       >
         <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />
-        <span className="truncate">{value}</span>
+        <span className="truncate">{label || value}</span>
       </span>
     </Tooltip>
   )
@@ -655,14 +655,14 @@ function buildComponents(
     del: ({ children }) => <del className="line-through opacity-80">{prose(children)}</del>,
     a: ({ href, children }) => {
       // Preserve the Markdown renderer's URL policy at the static tree boundary.
-      const scheme = Array.from(href ?? '').filter((character) => character.charCodeAt(0) > 32).join('').match(/^([^:/?#]*):/)
+      const scheme = Array.from(String(href ?? '')).filter((character) => character.charCodeAt(0) > 32).join('').match(/^([^:/?#]*):/)
       if (scheme && !/^(https?|ircs?|mailto|xmpp|hydra|hydra-reference|hydra-attachment)$/i.test(scheme[1])) return <span>{children}</span>
       if (href?.startsWith('hydra://')) {
         try {
           const target = new URL(href)
           if (['file', 'commit', 'branch', 'agent'].includes(target.hostname)) {
             const value = target.pathname.slice(1).split('/').map(decodeURIComponent).join('/')
-            return <StructuredReference kind={target.hostname} value={value} />
+            return <StructuredReference kind={target.hostname} value={value} label={linkText(children)} />
           }
         } catch {
           // Handled below as inert text.

@@ -322,4 +322,21 @@ describe('MarkdownComposer', () => {
     expect(ref.current!.editor!.getText()).toBe('label')
   })
 
+  it('distinguishes pasted inline code from a fenced block', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value="" onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    fireEvent.paste(view.getByRole('textbox'), {
+      clipboardData: {
+        files: [], types: ['text/html', 'text/plain'],
+        getData: (type: string) => type === 'text/html'
+          ? '<p>Run <code>uploadFile()</code></p><pre><code class="language-typescript">await uploadFile()</code></pre>'
+          : 'Run uploadFile()\nawait uploadFile()',
+      },
+    })
+    const document = ref.current!.editor!.getJSON()
+    expect(document.content?.[0].content?.[1]).toMatchObject({ type: 'inlineCode', content: [{ type: 'text', text: 'uploadFile()' }] })
+    expect(document.content?.[1]).toMatchObject({ type: 'codeBlock', content: [{ type: 'text', text: 'await uploadFile()' }] })
+  })
+
 })

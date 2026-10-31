@@ -481,9 +481,9 @@ cd web
 
 # aube when it is on PATH, npm otherwise; PX is the matching one-off runner.
 if command -v aube >/dev/null 2>&1; then
-  PM=aube PX=aubx
+  PM=aube PX="aube exec"
 else
-  PM=npm PX=npx
+  PM=npm PX="npm exec --"
 fi
 
 echo "::hydra:progress:: Installing web dependencies"
@@ -509,6 +509,30 @@ echo "::hydra:progress:: Running ESLint"
 node scripts/eslint-report.ts
 echo "::hydra:progress:: Typechecking web"
 node scripts/tsc-report.ts
+'''
+timeout_sec = 600
+auto_run = "settled"
+type = "stdout"
+
+[tests.rich_editor]
+# Native selection, deletion, composition, clipboard and table keyboard behavior
+# need a real browser; the regular app runner excludes this dedicated fixture.
+script = '''
+cd web
+if command -v aube >/dev/null 2>&1; then
+  PM=aube PX="aube exec"
+else
+  PM=npm PX="npm exec --"
+fi
+
+echo "::hydra:progress:: Installing editor test dependencies"
+$PM install
+echo "::hydra:progress:: Preparing Chromium"
+$PX playwright install chromium
+RICH_EDITOR_E2E_PORT="$(node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
+export RICH_EDITOR_E2E_PORT
+echo "::hydra:progress:: Checking rich editor interactions"
+CI=1 $PX playwright test --config playwright.rich-editor.config.ts --project chromium --reporter=./e2e/hydra-reporter.ts
 '''
 timeout_sec = 600
 auto_run = "settled"
@@ -545,9 +569,9 @@ script = '''
 cd web
 
 if command -v aube >/dev/null 2>&1; then
-  PM=aube PX=aubx
+  PM=aube PX="aube exec"
 else
-  PM=npm PX=npx
+  PM=npm PX="npm exec --"
 fi
 
 echo "::hydra:progress:: Installing e2e dependencies"

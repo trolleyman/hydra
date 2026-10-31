@@ -95,6 +95,9 @@
 .rich-text-surface .rich-code-block { position: relative; margin: 0.5rem 0; border-radius: 0.5rem; background: var(--color-gray-100); font-family: var(--font-mono); font-feature-settings: var(--font-mono--font-feature-settings, normal); }
 .dark .rich-text-surface .rich-code-block { background: rgb(255 255 255 / 0.06); }
 .rich-text-surface .rich-code-block-content { display: block; min-height: 1.4lh; overflow-x: auto; padding: 0.625rem 0.75rem; line-height: 1.25rem; white-space: pre-wrap; }
+/* A presentation-only float reserves the picker's first-line footprint without
+   putting control text in the editable document or reserving a toolbar row. */
+.rich-text-surface .rich-code-block-content [data-node-view-content-react]::before { content: ''; float: right; width: calc(var(--rich-code-language-width, 0px) + 0.5rem); height: 1.25rem; pointer-events: none; }
 .rich-text-surface .rich-code-language { position: absolute; top: 0.375rem; right: 0.5rem; z-index: 5; color: var(--color-gray-500); font-family: var(--font-sans); font-feature-settings: var(--font-sans--font-feature-settings, normal); font-size: var(--text-2xs); user-select: none; }
 .rich-text-surface .rich-code-language-trigger { display: flex; max-width: 11rem; height: 1.45rem; cursor: pointer; align-items: center; gap: 0.25rem; border: 1px solid color-mix(in srgb, var(--color-gray-300) 70%, transparent); border-radius: 0.35rem; background: color-mix(in srgb, var(--color-gray-50) 88%, transparent); padding: 0 0.4rem; color: var(--color-gray-500); box-shadow: 0 1px 2px rgb(0 0 0 / 0.05); opacity: 0.72; }
 .rich-text-surface .rich-code-language-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

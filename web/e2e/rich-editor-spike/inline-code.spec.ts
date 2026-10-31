@@ -562,3 +562,33 @@ test('star typing formats italic while underscore typing stays literal', async (
     ),
   })
 })
+
+test('code source never sits underneath the language picker at narrow or wide sizes', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'Interactive rich editor fixture' })).toBeVisible()
+  await page.evaluate((doc) => window.interactiveRichEditor?.commands.setContent(doc), codeBlock('await uploadFile(projectId, file, signal)'))
+  for (const width of [320, 620]) {
+    await page.locator('#interactive-editor').evaluate((element, size) => { (element as HTMLElement).style.width = `${size}px` }, width)
+    await page.evaluate(() => window.interactiveRichEditor?.commands.updateAttributes('codeBlock', { language: 'typescript' }))
+    const block = page.locator('#interactive-editor .rich-code-block')
+    await expect.poll(() => block.evaluate(element => parseFloat((element as HTMLElement).style.getPropertyValue('--rich-code-language-width')))).toBeGreaterThan(0)
+    const overlaps = await block.evaluate(element => {
+      const picker = element.querySelector('.rich-code-language')!.getBoundingClientRect()
+      const content = element.querySelector('.rich-code-block-content')!
+      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT)
+      let count = 0
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        for (let offset = 0; offset < (node.textContent?.length ?? 0); offset++) {
+          const range = document.createRange()
+          range.setStart(node, offset)
+          range.setEnd(node, offset + 1)
+          for (const box of range.getClientRects()) {
+            if (box.width > 0 && box.left < picker.right && box.right > picker.left && box.top < picker.bottom && box.bottom > picker.top) count++
+          }
+        }
+      }
+      return count
+    })
+    expect(overlaps, `overlapping source characters at ${width}px`).toBe(0)
+  }
+})

@@ -20,11 +20,11 @@ export const InlineCode = Node.create({
   defining: true,
 
   parseHTML() {
-    return [{ tag: 'code', preserveWhitespace: 'full' }]
+    return [{ tag: 'code', preserveWhitespace: 'full', getAttrs: (element) => element.parentElement?.tagName === 'PRE' ? false : null }]
   },
 
   renderHTML() {
-    return ['code', { 'data-inline-code': '' }, 0]
+    return ['code', { 'data-inline-code': '', spellcheck: 'false' }, 0]
   },
 
   markdownTokenName: 'codespan',
