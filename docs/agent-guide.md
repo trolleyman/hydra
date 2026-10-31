@@ -21,7 +21,7 @@ Use `mage` for development tasks.
 
 ## Development Workflow
 
-1.  **Backend**: Go 1.22+ is used. Follow standard Go idioms.
+1.  **Backend**: Go 1.26+ is used. Follow standard Go idioms.
 2.  **Frontend**: React + TypeScript + Vite. Uses `npm` (or `aube`, if on PATH) for
     package management against `web/package-lock.json`. Package lifecycle scripts
     intentionally spell nested calls as `npm run`: npm executes them directly,
@@ -34,10 +34,9 @@ Use `mage` for development tasks.
     - `WARN_AUBE_GVS_INCOMPATIBLE` for `vite`: vite can't use aube's global
       virtual store, so it installs per-project. Upstream vite limitation; install
       still succeeds.
-    - `WARN_AUBE_IGNORED_BUILD_SCRIPTS` for `@swc/core` / `esbuild`: aube skips
-      their postinstall build scripts by default. Both ship prebuilt binaries and
-      work fine without them; run `aube approve-builds` only if you deliberately
-      want to enable them.
+    - `WARN_AUBE_IGNORED_BUILD_SCRIPTS` for `esbuild`: aube skips its postinstall
+      build script by default. It ships a prebuilt binary and works without the
+      script; run `aube approve-builds` only if you deliberately want to enable it.
 3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generateGo` to update server stubs.
 
 ### Commits and verification

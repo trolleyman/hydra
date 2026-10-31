@@ -9,10 +9,11 @@
 //     one they were looking at. So names are matched on their *normalized*
 //     form - lowercased with every non-alphanumeric character stripped
 //     ("folderdot") - which makes both spellings (plus "folder_dot" and
-//     "Folder Dot") the same name. All ~1750 lucide names stay distinct under
-//     that normalization; lucideIcons.test.ts asserts it.
+//     "Folder Dot") the same name. Lucide now has one normalized collision
+//     ("LetterS" and "Letters"), so canonical kebab spelling resolves first and
+//     normalized spelling is used only where it is unambiguous.
 //
-//   - Coverage. lucide ships ~1750 icons, and statically importing all of them
+//   - Coverage. lucide ships ~2000 icons, and statically importing all of them
 //     would drop several hundred KB of icon data into the main bundle. So a
 //     curated set is bundled eagerly (EAGER_LUCIDE_ICONS below) and everything
 //     else arrives in one lazily-fetched chunk (see lucideAllIcons.ts for why
@@ -25,13 +26,13 @@ import {
   Folder, FolderDot, FolderGit2, FolderOpen, Rocket, Database, Server, Cloud, Cpu,
   Terminal, Code, CodeXml, Braces, Binary, Box, Boxes, Package, Container, Globe, Bug,
   Beaker, FlaskConical, Wrench, Hammer, Cog, Settings, Zap, Flame, Star, Heart,
-  Sparkles, Bookmark, Flag, Bell, House, Building, Building2, Layers, LayoutGrid,
-  Component, Palette, Brush, Camera, Image, Film, Music, Book, BookOpen, FileText,
+  Sparkles, Bookmark, Flag, Bell, House, Building, BuildingComplex, Layers, LayoutGrid,
+  Component, Palette, Brush, Camera, Image, Film, EighthNote, EighthNotes, Book, BookOpen, FileText,
   Newspaper, ShoppingCart, ShoppingBag, CreditCard, DollarSign, Briefcase, Users,
   User, Bot, Brain, Shield, ShieldCheck, Lock, Key, Gamepad2, Puzzle, Leaf, TreePine,
   Sprout, Sun, Moon, Coffee, Rss, Radio, Signal, Wifi, Smartphone, Tablet, Laptop,
   Monitor, HardDrive, Compass, Map, MapPin, Bird, Cat, Dog, Ghost, Anchor, Atom,
-  Feather, Gem, Crown, Trophy, Target, WandSparkles, Music2, Headphones, MessageSquare,
+  Feather, Gem, Crown, Trophy, Target, WandSparkles, Headphones, MessageSquare,
   MessagesSquare,
   type LucideIcon,
 } from 'lucide-react'
@@ -69,9 +70,9 @@ export const EAGER_LUCIDE_ICONS: Record<string, LucideIcon> = {
   bug: Bug, beaker: Beaker, flaskconical: FlaskConical, wrench: Wrench,
   hammer: Hammer, cog: Cog, settings: Settings, zap: Zap, flame: Flame, star: Star,
   heart: Heart, sparkles: Sparkles, bookmark: Bookmark, flag: Flag, bell: Bell,
-  house: House, building: Building, building2: Building2, layers: Layers,
+  house: House, building: Building, buildingcomplex: BuildingComplex, layers: Layers,
   layoutgrid: LayoutGrid, component: Component, palette: Palette, brush: Brush,
-  camera: Camera, image: Image, film: Film, music: Music, music2: Music2,
+  camera: Camera, image: Image, film: Film, eighthnote: EighthNote, eighthnotes: EighthNotes,
   book: Book, bookopen: BookOpen, filetext: FileText, newspaper: Newspaper,
   shoppingcart: ShoppingCart, shoppingbag: ShoppingBag, creditcard: CreditCard,
   dollarsign: DollarSign, briefcase: Briefcase, users: Users, user: User, bot: Bot,
@@ -116,6 +117,9 @@ export const LUCIDE_ALIASES: Record<string, string> = {
 export type LucideIconEntry = { name: string; icon: LucideIcon }
 
 type LucideIconSet = {
+  // Canonical kebab name -> component. This disambiguates names such as
+  // "letter-s" and "letters" that deliberately collapse to the same lookup key.
+  byCanonicalName: Record<string, LucideIcon>
   // Normalized name -> component, for resolving a typed value.
   byName: Record<string, LucideIcon>
   // Every icon, kebab-named and sorted, for the picker.
@@ -132,14 +136,24 @@ export function loadLucideIcons(): Promise<LucideIconSet> {
   if (loaded) return Promise.resolve(loaded)
   if (!inFlight) {
     inFlight = import('./lucideAllIcons').then((mod) => {
-      const byName: Record<string, LucideIcon> = {}
+      const byCanonicalName: Record<string, LucideIcon> = {}
+      const normalizedCandidates: Record<string, LucideIcon[]> = {}
       const list: LucideIconEntry[] = []
       for (const [pascal, icon] of Object.entries(mod.icons)) {
-        byName[normalizeIconName(pascal)] = icon
-        list.push({ name: kebabIconName(pascal), icon })
+        const canonicalName = kebabIconName(pascal)
+        const normalizedName = normalizeIconName(pascal)
+        byCanonicalName[canonicalName] = icon
+        const candidates = normalizedCandidates[normalizedName] ??= []
+        candidates.push(icon)
+        list.push({ name: canonicalName, icon })
       }
+      const byName = Object.fromEntries(
+        Object.entries(normalizedCandidates)
+          .filter(([, candidates]) => candidates.length === 1)
+          .map(([name, candidates]) => [name, candidates[0]]),
+      )
       list.sort((a, b) => a.name.localeCompare(b.name))
-      loaded = { byName, list }
+      loaded = { byCanonicalName, byName, list }
       return loaded
     })
   }
@@ -158,7 +172,8 @@ export function lucideIconsLoaded(): boolean {
 export function lucideIcon(name: string): LucideIcon | undefined {
   const n = normalizeIconName(name)
   if (!n) return undefined
-  const direct = EAGER_LUCIDE_ICONS[n] ?? loaded?.byName[n]
+  const canonicalName = kebabIconName(name.trim().replace(/[_ ]+/g, '-'))
+  const direct = EAGER_LUCIDE_ICONS[n] ?? loaded?.byCanonicalName[canonicalName] ?? loaded?.byName[n]
   if (direct) return direct
   const alias = LUCIDE_ALIASES[n]
   if (!alias) return undefined
