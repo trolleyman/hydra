@@ -1,151 +1,81 @@
-import { test, expect, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const PROJECT = '/project/sim-project/'
 
 async function openComposer(page: Page): Promise<Locator> {
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.stack ?? error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') pageErrors.push(message.text())
+  })
   await page.goto(PROJECT)
-  const textarea = page.getByPlaceholder('Describe a task...')
-  await expect(textarea).toBeVisible()
-  // Give every engine the same narrow wrapping surface, independent of the
-  // outer browser viewport or sidebar width.
-  await textarea.evaluate((el) => {
-    const wrapper = el.parentElement
-    if (wrapper) wrapper.style.width = '360px'
-  })
-  return textarea
-}
-
-type GlyphRect = { left: number; right: number; top: number; bottom: number }
-
-// Return the visible backdrop rectangle for one source character. The backdrop
-// may split markdown into several spans, so walk text nodes rather than assuming
-// the value is one node. Its final synthetic newline is deliberately ignored.
-async function backdropGlyph(textarea: Locator, offset: number): Promise<GlyphRect> {
-  return textarea.evaluate((el, wanted) => {
-    const backdrop = el.previousElementSibling as HTMLElement
-    const walker = document.createTreeWalker(backdrop, NodeFilter.SHOW_TEXT)
-    let remaining = wanted
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const length = node.textContent?.length ?? 0
-      if (remaining < length) {
-        const range = document.createRange()
-        range.setStart(node, remaining)
-        range.setEnd(node, remaining + 1)
-        const rect = range.getBoundingClientRect()
-        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
-      }
-      remaining -= length
-    }
-    throw new Error(`backdrop has no glyph at source offset ${wanted}`)
-  }, offset)
-}
-
-async function visualLineStarts(textarea: Locator, length: number): Promise<number[]> {
-  const starts = [0]
-  let previous = await backdropGlyph(textarea, 0)
-  for (let offset = 1; offset < length; offset++) {
-    const current = await backdropGlyph(textarea, offset)
-    if (current.top > previous.top + 1) starts.push(offset)
-    previous = current
+  const showError = page.getByRole('button', { name: 'Show Error' })
+  const composer = page.getByRole('textbox', { name: 'Describe a task' })
+  await expect(composer.or(showError)).toBeVisible()
+  if (await showError.isVisible()) {
+    await showError.click()
+    throw new Error(`application error before the composer mounted:\n${await page.locator('body').innerText()}\n${pageErrors.join('\n')}`)
   }
-  return starts
+  return composer
 }
 
-async function openPersistedScrollableDraft(page: Page, value: string): Promise<Locator> {
-  let textarea = await openComposer(page)
-  await textarea.fill(value)
-  // Reload the saved draft so it becomes the field's initial value, outside the
-  // native undo stack. A later Ctrl+Z then targets only the user edit under test.
-  await expect.poll(() => page.evaluate(() => {
-    return Object.entries(localStorage).some(([, stored]) => stored.includes('line 40'))
-  })).toBe(true)
-  await page.reload()
-  textarea = page.getByPlaceholder('Describe a task...')
-  await expect(textarea).toHaveValue(value)
-  await expect.poll(() => textarea.evaluate((el: HTMLTextAreaElement) => el.scrollHeight - el.clientHeight))
-    .toBeGreaterThan(100)
-  await textarea.evaluate((el: HTMLTextAreaElement) => {
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
-    el.scrollTop = el.scrollHeight
+test('the whole spawn prompt surface focuses the rich composer', async ({ page }) => {
+  const composer = await openComposer(page)
+  const bounds = await composer.boundingBox()
+  expect(bounds).not.toBeNull()
+
+  // The editable surface fills the prompt card, so clicking below its first
+  // text line still places the caret in the editor.
+  await page.mouse.click(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height - 4)
+  await page.keyboard.type('typed from the bottom of the prompt')
+
+  await expect(composer).toHaveText('typed from the bottom of the prompt')
+  await expect(composer).toBeFocused()
+})
+
+test('Enter creates a new rich-text paragraph in the spawn prompt', async ({ page }) => {
+  const composer = await openComposer(page)
+  await composer.fill('first line')
+  await composer.press('End')
+  await composer.press('Enter')
+  await page.keyboard.type('second line')
+
+  await expect(composer.locator(':scope > p')).toHaveCount(2)
+  await expect(composer.locator(':scope > p').nth(0)).toHaveText('first line')
+  await expect(composer.locator(':scope > p').nth(1)).toHaveText('second line')
+})
+
+test('the slash menu inserts the default two-by-two header table', async ({ page }) => {
+  const composer = await openComposer(page)
+  await composer.fill('/table')
+  const menu = page.getByRole('listbox', { name: 'Block commands' })
+  await expect(menu).toBeVisible()
+  await composer.press('Enter')
+
+  await expect(composer.locator('table')).toBeVisible()
+  await expect(composer.locator('th')).toHaveCount(2)
+  await expect(composer.locator('td')).toHaveCount(2)
+})
+
+test('an attached image is an inline preview that opens and can be removed', async ({ page }) => {
+  const composer = await openComposer(page)
+  await composer.fill('before ')
+  await composer.locator('xpath=ancestor::form').locator('input[type="file"]').setInputFiles({
+    name: 'inline-preview.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('not decoded because the optimistic object URL is used'),
   })
-  await expect.poll(() => textarea.evaluate((el: HTMLTextAreaElement) => el.scrollTop)).toBeGreaterThan(100)
-  return textarea
-}
 
-test('Home lands at the first character of the current wrapped line', async ({ page }) => {
-  const textarea = await openComposer(page)
-  const value = 'a'.repeat(180)
-  await textarea.fill(value)
-  const starts = await visualLineStarts(textarea, value.length)
-  expect(starts.length).toBeGreaterThan(2)
+  const chip = composer.locator('[data-composer-attachment]')
+  await expect(chip).toContainText('inline-preview.png')
+  await expect(chip.locator('img.composer-attachment-preview')).toBeVisible()
 
-  const secondStart = starts[1]
-  await textarea.evaluate((el: HTMLTextAreaElement, caret) => {
-    el.focus()
-    el.setSelectionRange(caret, caret)
-  }, secondStart + 5)
-  await textarea.press('Home')
+  await chip.click({ position: { x: 4, y: 4 } })
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toBeHidden()
 
-  await expect.poll(() => textarea.evaluate((el: HTMLTextAreaElement) => el.selectionStart)).toBe(secondStart)
-})
-
-test('repeated End advances across wrapped segments of an unbroken token', async ({ page }) => {
-  test.fail(true, 'Known regression: repeated End stalls at an unbroken-token wrap')
-  const textarea = await openComposer(page)
-  const value = 'a'.repeat(180)
-  await textarea.fill(value)
-  const starts = await visualLineStarts(textarea, value.length)
-  expect(starts.length).toBeGreaterThan(2)
-
-  await textarea.evaluate((el: HTMLTextAreaElement) => {
-    el.focus()
-    el.setSelectionRange(5, 5)
-  })
-  await textarea.press('End')
-  const firstEnd = await textarea.evaluate((el: HTMLTextAreaElement) => el.selectionStart)
-  await textarea.press('End')
-  const secondEnd = await textarea.evaluate((el: HTMLTextAreaElement) => el.selectionStart)
-
-  expect(firstEnd).toBeGreaterThan(5)
-  expect(secondEnd).toBeGreaterThan(firstEnd)
-})
-
-test('clicking the highlighted glyph edits that source character at a wrap', async ({ page }) => {
-  const textarea = await openComposer(page)
-  const value = '1. pressing end from any line goes to the end of that line, but then it does not go to t'
-  await textarea.fill(value)
-  const target = value.length - 1
-  const rect = await backdropGlyph(textarea, target)
-
-  await page.mouse.click(rect.right - 1, (rect.top + rect.bottom) / 2)
-  await expect.poll(() => textarea.evaluate((el: HTMLTextAreaElement) => el.selectionStart)).toBe(target + 1)
-})
-
-test('paste preserves the composer scroll position', async ({ page, context, browserName }) => {
-  test.skip(browserName === 'webkit', 'Playwright cannot seed the Linux WebKit system clipboard')
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-  const value = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n')
-  const textarea = await openPersistedScrollableDraft(page, value)
-  await page.evaluate(() => navigator.clipboard.writeText(' pasted'))
-  const before = await textarea.evaluate((el: HTMLTextAreaElement) => el.scrollTop)
-
-  await textarea.press('Control+v')
-  await expect(textarea).toHaveValue(value + ' pasted')
-  const afterPaste = await textarea.evaluate((el: HTMLTextAreaElement) => el.scrollTop)
-  expect(afterPaste).toBeGreaterThanOrEqual(before - 2)
-})
-
-test('undo preserves the composer scroll position', async ({ page, browserName }) => {
-  test.fail(browserName === 'webkit', 'Known Linux WebKit regression: undo resets textarea scrollTop to zero')
-  const value = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n')
-  const textarea = await openPersistedScrollableDraft(page, value)
-  await textarea.press('x')
-  await expect(textarea).toHaveValue(value + 'x')
-  const before = await textarea.evaluate((el: HTMLTextAreaElement) => el.scrollTop)
-
-  await textarea.press('Control+z')
-  await expect(textarea).toHaveValue(value)
-  const afterUndo = await textarea.evaluate((el: HTMLTextAreaElement) => el.scrollTop)
-  expect(afterUndo).toBeGreaterThanOrEqual(before - 2)
+  await page.getByRole('button', { name: 'Remove inline-preview.png' }).click()
+  await expect(chip).toHaveCount(0)
+  await expect(composer).toContainText('before')
 })

@@ -5,7 +5,7 @@
 // image alone made that impossible; making every image in the transcript one
 // gallery would be worse - you would walk out of the message you were reading
 // into screenshots from an hour ago. So the gallery is scoped to the markdown
-// block the clicked image lives in: <Markdown> marks its own subtree with
+// block the clicked image lives in: <RichMarkdown> marks its own subtree with
 // data-md-root, and that is the boundary.
 //
 // The set is read off the DOM at click time rather than collected during render.
@@ -16,7 +16,7 @@
 import type { LightboxItem } from '../components/Lightbox'
 import { densityFromPath } from './imageDensity'
 
-// Markdown media tags itself with data-md-src (the path as authored, which
+// RichMarkdown media tags itself with data-md-src (the path as authored, which
 // copy-as-markdown also reads). A picture is an <img>, a recording a <video> -
 // both belong in the strip, so a message mixing a screenshot with a clip steps
 // through all of it. Media that failed to resolve renders as a chip with no
@@ -41,7 +41,7 @@ function itemFor(el: MdMedia): LightboxItem {
     // A <video> carries no alt; its accessible name is the one MarkdownVideo put
     // on it, which is the same string (the alt text, else the filename).
     filename: (video ? el.getAttribute('aria-label') : el.alt) || (video ? 'video' : 'image'),
-    // Markdown media carries no byte size - the caption leaves it out for 0.
+    // RichMarkdown media carries no byte size - the caption leaves it out for 0.
     size: 0,
     kind: video ? 'video' : 'image',
     // Per file, off its OWN authored path: a message can mix a @2x capture with

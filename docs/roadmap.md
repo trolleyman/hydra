@@ -97,6 +97,17 @@ the linked subsystem documents, and completed work belongs in Git history.
   recording head lifecycle events in chat rather than hiding them in ephemeral
   toasts. See [agent-page-tabs.md](agent-page-tabs.md).
 
+- [x] **Structured rich-text composer.** The prompt surfaces use a compact
+  Tiptap/ProseMirror editor: real
+  editable inline-code spans with predictable inside/outside cursor positions,
+  formatting commands, code blocks, structured Hydra references, a start-of-line
+  command menu and attachment nodes placed in the sentence. Review replies,
+  image-pin notes, question notes and free-text Other answers use the same model;
+  sent attachment and reference nodes keep their inline positions.
+  Markdown stays the backend interchange format; editor integration stays
+  internal to the frontend. Design, interaction tables, migration and gated build order:
+  [rich-text-composer.md](rich-text-composer.md).
+
 - [ ] **Lazy-load syntax highlighting in Markdown fences.** Let uncommon fenced
   languages request their Prism grammar and re-render, matching the diff and
   repository viewers.

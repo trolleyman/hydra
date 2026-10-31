@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useEffectEvent, useCallback, memo } from 'react'
+import { useState, useRef, useEffect, useEffectEvent, useCallback, useMemo, memo, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import { ProjectDirectoryFilesystemMode, WorkspaceKind, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
@@ -12,13 +12,15 @@ import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
 import { Kbd } from './Kbd'
 import { Lightbox } from './Lightbox'
-import { AttachmentChips } from './AttachmentChips'
-import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
-import { HighlightedTextarea } from './HighlightedTextarea'
+import { StorageKeys, promptDraftKey, promptRichDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
+import type { MarkdownComposerHandle } from '../lib/rich-editor/MarkdownComposer'
+import type { ComposerReference } from '../lib/rich-editor/Reference'
+import { AttachmentRegistry } from '../lib/rich-editor/AttachmentRegistry'
+import { restoreAttachment, type ComposerAttachment } from '../lib/rich-editor/Attachment'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
-import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+import { attachmentLightboxItems } from '../lib/attachmentLightbox'
 import { appendToComposer, formatAnnotation } from '../lib/pinNote'
 import { useImageCommentStore } from '../stores/imageCommentStore'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
@@ -33,11 +35,32 @@ import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readEffortMap, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
 import { AGENT_MODELS, type AgentModel } from '../lib/agentModels'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
+import type { Editor, JSONContent } from '@tiptap/core'
 import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
 import { SegmentedControl } from './SegmentedControl'
 import { onDesktopImagePaste } from '../lib/desktopBridge'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
+
+function composerAttachment(attachment: Attachment): ComposerAttachment {
+  const lower = attachment.filename.toLowerCase()
+  const kind: ComposerAttachment['kind'] = attachment.previewUrl
+    ? 'image'
+    : lower.endsWith('.pdf')
+      ? 'pdf'
+      : /\.(txt|md|log|csv|json|ya?ml)$/.test(lower)
+        ? 'text'
+        : /\.(zip|tar|tgz|gz|bz2|xz|7z)$/.test(lower)
+          ? 'archive'
+          : 'file'
+  return {
+    id: String(attachment.id),
+    name: attachment.filename,
+    kind,
+    display: attachment.previewUrl ? 'thumbnail' : 'chip',
+  }
+}
 
 // Native desktop project-directory windows can ask an ordinary project composer
 // to start in project-directory mode.
@@ -426,6 +449,7 @@ export const SpawnForm = memo(function SpawnForm({
   // outgoing project's attachments without depending on (and re-running for)
   // every attachment change.
   const attachmentsRef = useRef<Attachment[]>([])
+  const persistedAttachmentsRef = useRef<Attachment[]>([])
 
   useEffect(() => {
     attachmentsRef.current = attachments
@@ -522,7 +546,26 @@ export const SpawnForm = memo(function SpawnForm({
     void refreshBranches(false)
   }, [refreshBranches])
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const richComposerRef = useRef<MarkdownComposerHandle>(null)
+  const [draftSession, setDraftSession] = useState<{ key: string | null; document?: JSONContent; generation: number }>({ key: null, generation: 0 })
+  const [promptEditor, setPromptEditor] = useState<Editor | null>(null)
+  const [richAttachmentIds, setRichAttachmentIds] = useState<Set<string>>(new Set())
+  const restoredAttachmentIdsRef = useRef(new Set<string>())
+  const uploadProjectIdRef = useRef(projectId)
+  uploadProjectIdRef.current = projectId
+  const attachmentRegistry = useMemo(() => new AttachmentRegistry(async (file, id, signal) => {
+    const uploadProjectId = uploadProjectIdRef.current ?? useProjectStore.getState().selectedProjectId
+    if (!uploadProjectId) throw new Error('Select a project before attaching files')
+    const uploaded = await uploadFile(uploadProjectId, file, signal)
+    reconcile(Number(id), { path: uploaded.path, uploading: false, error: undefined })
+    return { path: uploaded.path }
+  }), [reconcile])
+  const composerReferences = useMemo<ComposerReference[]>(
+    () => (branches ?? []).map((branch) => ({ kind: 'branch', value: branch.name })),
+    [branches],
+  )
+  const promptElementRef = useRef<HTMLElement | null>(null)
+  const promptScrollCleanupRef = useRef<(() => void) | null>(null)
   // The resizable element is the whole card (textarea + footer), so the drag
   // grip sits at the bottom-right of the entire box rather than just the
   // textarea. We persist/restore the card's height for compact mode.
@@ -602,10 +645,10 @@ export const SpawnForm = memo(function SpawnForm({
   }
 
   useEffect(() => {
-    if (!compact) textareaRef.current?.focus()
+    if (!compact) richComposerRef.current?.focus()
   }, [compact])
 
-  // Spawning blurs the composer: the textarea is disabled while the request is
+  // Spawning blurs the composer: the editor is disabled while the request is
   // in flight, and clicking the Spawn button put focus on the button (also
   // disabled) - so focus lands on <body> exactly when the user is ready to type
   // the next task. Put it back once the box is interactive again, so spawn after
@@ -615,13 +658,13 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     if (loading || !refocusRef.current) return
     refocusRef.current = false
-    const ta = textareaRef.current
-    if (!ta || ta.disabled) return
+    const promptElement = promptElementRef.current
+    if (!promptElement || promptElement.getAttribute('contenteditable') !== 'true') return
     // Don't steal focus if the user moved on during the spawn (clicked another
     // control, or navigation focused something on the new agent's page).
     const active = document.activeElement
     if (active && active !== document.body && !cardRef.current?.contains(active)) return
-    ta.focus()
+    richComposerRef.current?.focus()
   }, [loading])
 
   // Persist the in-progress prompt as a per-project draft so it survives page
@@ -629,16 +672,38 @@ export const SpawnForm = memo(function SpawnForm({
   // distinct keys so their drafts never bleed into one another.
   const draftKey = projectId ? promptDraftKey(projectId, compact) : null
   const scrollKey = projectId ? promptScrollKey(projectId, compact) : null
+  const bindPromptEditor = useCallback((editor: Editor | null) => {
+    promptScrollCleanupRef.current?.()
+    promptScrollCleanupRef.current = null
+    promptElementRef.current = editor?.view.dom ?? null
+    setPromptEditor(editor)
+    if (!editor) return
+    const element = editor.view.dom
+    const onScroll = (event: Event) => {
+      if (scrollKey) writeLocal(scrollKey, String((event.currentTarget as HTMLElement).scrollTop))
+    }
+    element.addEventListener('scroll', onScroll)
+    promptScrollCleanupRef.current = () => element.removeEventListener('scroll', onScroll)
+  }, [scrollKey])
+
+  useEffect(() => attachmentRegistry.subscribe(() => {
+    for (const attachment of attachmentsRef.current) {
+      const state = attachmentRegistry.get(String(attachment.id))
+      if (state?.status === 'failed') {
+        reconcile(attachment.id, { uploading: false, error: formatError(state.error) })
+      }
+    }
+  }), [attachmentRegistry, reconcile])
 
   // Restore the project's saved scroll position on mount / project change. The
   // draft text itself is loaded alongside the attachments (and the history
   // baseline reset) in the effect below. The scroll offset is restored in a rAF
-  // because the textarea's scrollable range only exists after that load commits
+  // because the editor's scrollable range only exists after that load commits
   // the new text to the DOM.
   useEffect(() => {
     const saved = scrollKey ? Number(readLocal(scrollKey)) || 0 : 0
     const raf = requestAnimationFrame(() => {
-      if (textareaRef.current) textareaRef.current.scrollTop = saved
+      if (promptElementRef.current) promptElementRef.current.scrollTop = saved
     })
     return () => cancelAnimationFrame(raf)
   }, [draftKey, scrollKey])
@@ -647,11 +712,15 @@ export const SpawnForm = memo(function SpawnForm({
   // post-edit caret so undo/redo can restore it, and mirrors the draft to
   // localStorage like before.
   function handlePromptChange(value: string) {
-    const ta = textareaRef.current
-    const selStart = ta?.selectionStart ?? value.length
-    const selEnd = ta?.selectionEnd ?? value.length
+    const selection = richComposerRef.current?.editor?.state.selection
+    const selStart = selection?.from ?? value.length
+    const selEnd = selection?.to ?? value.length
     commit((prev) => makeSnapshot(value, prev.attachments, selStart, selEnd), true)
     if (draftKey) writeLocal(draftKey, value || null)
+    const editor = richComposerRef.current?.editor
+    if (projectId && editor) writeLocal(promptRichDraftKey(projectId, compact), value
+      ? JSON.stringify({ version: 1, markdown: value, document: editor.getJSON() })
+      : null)
   }
 
   // A pin placed on an ATTACHMENT here, arriving as text. There is no head yet -
@@ -667,17 +736,12 @@ export const SpawnForm = memo(function SpawnForm({
           const next = appendToComposer(prev.prompt, formatAnnotation(note))
           return makeSnapshot(next, prev.attachments, next.length, next.length)
         }, false)
-        requestAnimationFrame(() => textareaRef.current?.focus())
+        requestAnimationFrame(() => richComposerRef.current?.focus())
       },
     })
     return () => registerPinTargets({ annotate: null })
   }, [registerPinTargets, commit])
 
-  // Persist the textarea's scroll offset so it travels with the draft when
-  // switching projects (saved live on scroll; restored by the load effect above).
-  function handlePromptScroll(e: React.UIEvent<HTMLTextAreaElement>) {
-    if (scrollKey) writeLocal(scrollKey, String(e.currentTarget.scrollTop))
-  }
 
   // Per-project attachments + image counter, swapped in/out as the project (or
   // layout) changes so each box keeps its own - just like the text draft. See
@@ -693,15 +757,39 @@ export const SpawnForm = memo(function SpawnForm({
     const prev = prevStoreRef.current
     if ((prev?.key ?? null) === storeKey) return
     // Stash the outgoing project's attachments before loading the new one's.
-    if (prev) saveAttachments(prev.projectId, prev.compact, attachmentsRef.current)
+    if (prev) saveAttachments(prev.projectId, prev.compact, persistedAttachmentsRef.current)
     // A pasted block stashed for one box can't be "re-pasted" into another, and
     // undo history doesn't carry across a project switch.
     lastPasteRef.current = null
     pastedTextCounterRef.current = 0
+    restoredAttachmentIdsRef.current.clear()
+    setRichAttachmentIds(new Set())
     const loadedPrompt = draftKey ? (readLocal(draftKey) ?? '') : ''
+    let document: JSONContent | undefined
+    if (projectId) {
+      try {
+        const draft = JSON.parse(readLocal(promptRichDraftKey(projectId, compact)) ?? 'null')
+        if (draft?.version === 1 && draft.markdown === loadedPrompt && draft.document?.type === 'doc') document = draft.document
+      } catch { /* A malformed draft falls back to its Markdown. */ }
+    }
+    setDraftSession((previous) => ({ key: storeKey, document, generation: previous.generation + 1 }))
     resetHistory(makeSnapshot(loadedPrompt, projectId ? loadAttachments(projectId, compact) : [], 0, 0))
     prevStoreRef.current = storeKey && projectId ? { key: storeKey, projectId, compact } : null
   }, [storeKey, draftKey, projectId, compact, resetHistory])
+
+  useEffect(() => {
+    if (!promptEditor || promptEditor.isDestroyed || draftSession.key !== storeKey) return
+    for (const attachment of attachments) {
+      const metadata = composerAttachment(attachment)
+      if (attachment.path) {
+        attachmentRegistry.registerUploaded(metadata, { path: attachment.path }, attachment.previewUrl)
+      }
+      if (!restoredAttachmentIdsRef.current.has(metadata.id)) {
+        restoreAttachment(promptEditor, metadata)
+        restoredAttachmentIdsRef.current.add(metadata.id)
+      }
+    }
+  }, [attachmentRegistry, attachments, promptEditor, draftSession.key, storeKey])
 
   // Mirror the attachments to the caches on every change, not only when the box
   // goes away: a page RELOAD runs no unmount, so a save deferred to teardown is
@@ -721,8 +809,10 @@ export const SpawnForm = memo(function SpawnForm({
       mirroredKeyRef.current = storeKey
       return
     }
-    saveAttachments(projectId, compact, attachments)
-  }, [attachments, projectId, compact, storeKey])
+    const visible = attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id)))
+    persistedAttachmentsRef.current = visible
+    saveAttachments(projectId, compact, visible)
+  }, [attachments, richAttachmentIds, projectId, compact, storeKey])
 
   // Persist the current box's attachments on unmount too (the full-page form
   // remounts when navigating between projects), so an edit made in the same tick
@@ -730,7 +820,7 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     return () => {
       const prev = prevStoreRef.current
-      if (prev) saveAttachments(prev.projectId, prev.compact, attachmentsRef.current)
+      if (prev) saveAttachments(prev.projectId, prev.compact, persistedAttachmentsRef.current)
     }
   }, [])
 
@@ -757,20 +847,23 @@ export const SpawnForm = memo(function SpawnForm({
     // The upload resolving isn't a user action, so patch this chip across the
     // whole timeline (reconcile) instead of pushing a new undo step - undoing to
     // an earlier snapshot still sees the settled path, not a stale "uploading...".
-    // A native image-paste listener lives for the form's whole mount. During
-    // boot the compact form can mount before the selected project is restored,
-    // so an event callback created in that render may still see a null prop even
-    // though the project store and visible picker have since selected one. Read
-    // the store at event time as the fallback; never send the placeholder `_`
-    // project id, which can only produce a misleading 404.
-    const uploadProjectId = projectId ?? useProjectStore.getState().selectedProjectId
-    if (!uploadProjectId) {
-      reconcile(id, { uploading: false, error: 'Select a project before attaching files' })
-      return id
+    const editor = richComposerRef.current?.editor
+    if (editor) {
+      restoredAttachmentIdsRef.current.add(String(id))
+      attachmentRegistry.add(editor, composerAttachment(chip), file, chip.previewUrl)
+    } else {
+      // The lazy editor normally exists before any attachment control can be
+      // used. Retain the direct path for a native paste arriving during that
+      // brief mount window; the restore effect turns it into a node afterward.
+      const uploadProjectId = projectId ?? useProjectStore.getState().selectedProjectId
+      if (!uploadProjectId) {
+        reconcile(id, { uploading: false, error: 'Select a project before attaching files' })
+        return id
+      }
+      uploadFile(uploadProjectId, file)
+        .then((res) => reconcile(id, { path: res.path, uploading: false }))
+        .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
     }
-    uploadFile(uploadProjectId, file)
-      .then((res) => reconcile(id, { path: res.path, uploading: false }))
-      .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
     return id
   }
 
@@ -808,9 +901,9 @@ export const SpawnForm = memo(function SpawnForm({
   // step. The text before the caret decides whether they need a leading space;
   // they never carry a trailing one, so the caret stays against the "]".
   function insertPasteMarkers(names: string[]) {
-    const ta = textareaRef.current
-    const start = ta?.selectionStart ?? prompt.length
-    const end = ta?.selectionEnd ?? prompt.length
+    const selection = richComposerRef.current?.editor?.state.selection
+    const start = Math.max(0, Math.min(prompt.length, (selection?.from ?? prompt.length) - 1))
+    const end = Math.max(start, Math.min(prompt.length, (selection?.to ?? prompt.length) - 1))
     const insert = pasteMarkerText(names, prompt.slice(0, start))
     const caret = start + insert.length
     const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
@@ -820,37 +913,15 @@ export const SpawnForm = memo(function SpawnForm({
     )
     if (draftKey) writeLocal(draftKey, nextPrompt || null)
     requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = ta.selectionEnd = caret
+      richComposerRef.current?.focus(caret + 1)
     })
   }
 
-  // Stable (memo'd AttachmentChips takes it as a prop): `commit` never changes.
-  const removeAttachment = useCallback((id: number) => {
-    // Don't revoke the preview URL here - an undo can bring this chip back. URLs
-    // are freed in bulk once a spawn consumes the prompt (see objectUrlsRef).
-    attachmentsRef.current = attachmentsRef.current.filter((a) => a.id !== id)
-    commit(
-      (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
-      false,
-    )
-  }, [commit])
-
-  // Stable lightbox opener: resolves the clicked chip to its index in the
-  // openable list at click time (via the attachments mirror ref), so the
-  // callback identity survives every attachment/typing change.
-  const openLightbox = useCallback((id: number, origin: Element) => {
-    setLightboxOrigin(origin)
-    setLightboxIndex(openableAttachments(attachmentsRef.current).findIndex((a) => a.id === id))
-  }, [])
-
-  function handlePaste(e: React.ClipboardEvent) {
+  function handlePaste(e: { clipboardData: DataTransfer | null; preventDefault(): void }) {
     // Consume the "paste literally" flag a Ctrl/Cmd+Shift+V keystroke set, so
     // it never lingers for a later paste.
     const literal = literalPasteRef.current
     literalPasteRef.current = false
-
     // Pasted files (screenshots, copied files) keep their upload behavior -
     // plus, with the preference on, "[filename]" markers at the caret so the
     // prompt references them explicitly.
@@ -858,11 +929,11 @@ export const SpawnForm = memo(function SpawnForm({
     if (files.length > 0) {
       e.preventDefault()
       const names = addFiles(files)
-      if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+      if (!richComposerRef.current?.editor && pasteMarkers && names.length > 0) insertPasteMarkers(names)
       return
     }
 
-    // A Shift-held paste means "paste for real" - let the browser insert the
+    // A Shift-held paste means "paste for real" - let the editor insert the
     // text as-is, never attaching it.
     if (literal) return
 
@@ -879,9 +950,27 @@ export const SpawnForm = memo(function SpawnForm({
       // is stripped too, with the caret adjusted when it sat before it.
       e.preventDefault()
       const insert = last.lang ? fenceCode(text, last.lang) : text
-      const ta = textareaRef.current
-      let start = ta?.selectionStart ?? prompt.length
-      let end = ta?.selectionEnd ?? prompt.length
+      const editor = richComposerRef.current?.editor
+      if (editor) {
+        // ProseMirror positions are document positions, never Markdown offsets.
+        // Remove the previous chip and insert at the mapped selection in one
+        // transaction so undo restores the attachment at its original position.
+        editor.chain().focus().command(({ tr }) => {
+          const ranges: Array<{ from: number; to: number }> = []
+          tr.doc.descendants((node, pos) => {
+            if (node.type.name === 'attachment' && node.attrs.id === String(last.attachmentId)) {
+              ranges.push({ from: pos, to: pos + node.nodeSize })
+            }
+          })
+          for (const range of ranges.reverse()) tr.delete(range.from, range.to)
+          return true
+        }).insertContent(last.lang ? insert : { type: 'text', text }, last.lang ? { contentType: 'markdown' } : undefined).run()
+        lastPasteRef.current = null
+        return
+      }
+      const selection = richComposerRef.current?.editor?.state.selection
+      let start = Math.max(0, Math.min(prompt.length, (selection?.from ?? prompt.length) - 1))
+      let end = Math.max(start, Math.min(prompt.length, (selection?.to ?? prompt.length) - 1))
       const stripped = stripPasteMarker(prompt, last.filename)
       if (stripped) {
         if (stripped.index < start) start = Math.max(stripped.index, start - stripped.length)
@@ -904,9 +993,7 @@ export const SpawnForm = memo(function SpawnForm({
       )
       if (draftKey) writeLocal(draftKey, nextPrompt || null)
       requestAnimationFrame(() => {
-        if (!ta) return
-        ta.focus()
-        ta.selectionStart = ta.selectionEnd = caret
+        richComposerRef.current?.focus(caret + 1)
       })
       lastPasteRef.current = null
       return
@@ -915,22 +1002,24 @@ export const SpawnForm = memo(function SpawnForm({
     // First paste of a large block: attach it instead of dumping it in the box.
     e.preventDefault()
     const { id, filename } = attachPastedText(text, e.clipboardData)
-    if (pasteMarkers) insertPasteMarkers([filename])
+    if (!richComposerRef.current?.editor && pasteMarkers) insertPasteMarkers([filename])
     lastPasteRef.current = { text, attachmentId: id, filename, lang: detectCodeLanguage(e.clipboardData) }
   }
 
   // WebKitGTK does not always expose a copied desktop image on the browser's
   // paste event. The native shell forwards that image separately; only the
-  // projectDirectory spawn composer may consume it because the compact spawn form can
+  // active spawn composer may consume it because the compact spawn form can
   // remain mounted alongside an agent's chat composer.
   const handleDesktopImagePaste = useEffectEvent((file: File) => {
-    if (document.activeElement !== textareaRef.current) return
+    const rich = richComposerRef.current?.editor?.view.dom
+    const active = document.activeElement
+    if (!rich || !active || !rich.contains(active)) return
     // Native paste is dispatched on window rather than by the disabled
-    // textarea, so the browser cannot enforce the form's no-project guard for
+    // editor, so the browser cannot enforce the form's no-project guard for
     // us. Ignore it when there is genuinely no selected project.
     if (!projectId && !useProjectStore.getState().selectedProjectId) return
     const names = addFiles([file])
-    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+    if (!richComposerRef.current?.editor && pasteMarkers && names.length > 0) insertPasteMarkers(names)
   })
   useEffect(() => onDesktopImagePaste(handleDesktopImagePaste), [])
 
@@ -947,11 +1036,12 @@ export const SpawnForm = memo(function SpawnForm({
     e.target.value = ''
   }
 
-  const uploading = attachments.some((a) => a.uploading)
-  const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  const documentAttachments = attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id)))
+  const uploading = documentAttachments.some((a) => a.uploading)
+  const readyAttachments = documentAttachments.filter((a) => a.path && !a.error)
   // Every attachment that has bytes behind it, in chip order - the lightbox
   // navigates this list, and each chip opens its own index here.
-  const lightboxItems = attachmentLightboxItems(attachments)
+  const lightboxItems = attachmentLightboxItems(documentAttachments)
   const canSubmit = (!!prompt.trim() || readyAttachments.length > 0) && !uploading
 
   async function handleSubmit(e: React.FormEvent) {
@@ -1002,12 +1092,16 @@ export const SpawnForm = memo(function SpawnForm({
       }
       const agent = await api.default.spawnAgent(projectId ?? '', req)
       if (draftKey) writeLocal(draftKey, null)
+      if (projectId) writeLocal(promptRichDraftKey(projectId, compact), null)
+      setDraftSession((previous) => ({ key: previous.key, generation: previous.generation + 1 }))
       if (scrollKey) writeLocal(scrollKey, null)
       // The prompt is sent - free every preview URL minted this session (including
       // ones only reachable via undo history) and clear the composer.
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
       objectUrlsRef.current.clear()
       resetHistory(makeSnapshot('', [], 0, 0))
+      setRichAttachmentIds(new Set())
+      restoredAttachmentIdsRef.current.clear()
       if (projectId) saveAttachments(projectId, compact, [])
       setLightboxIndex(null)
       pastedTextCounterRef.current = 0
@@ -1023,20 +1117,6 @@ export const SpawnForm = memo(function SpawnForm({
     } finally {
       setLoading(false)
     }
-  }
-
-  // Renders the attachment chips row (shared by both layout variants). Clicking
-  // an image chip opens the lightbox at that image's index.
-  function renderAttachments(size: 'sm' | 'md') {
-    return (
-      <AttachmentChips
-        attachments={attachments}
-        size={size}
-        className={`mx-3 ${size === 'sm' ? 'mb-1.5' : 'mb-2'}`}
-        onRemove={removeAttachment}
-        onOpen={openLightbox}
-      />
-    )
   }
 
   // The "work on an existing PR" control, rendered as the first section of the
@@ -1240,53 +1320,39 @@ export const SpawnForm = memo(function SpawnForm({
     )
   }
 
-  // Restore a snapshot returned by undo/redo: re-mirror the draft and put the
-  // caret back where it was when that snapshot was current (after the controlled
-  // value commits to the DOM, hence the rAF).
-  function restoreSnapshot(snap: ReturnType<typeof undo>) {
-    if (!snap) return
-    if (draftKey) writeLocal(draftKey, snap.prompt || null)
-    const ta = textareaRef.current
-    requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = snap.selStart
-      ta.selectionEnd = snap.selEnd
-    })
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) {
+  function handleRichKeyDown(e: KeyboardEvent): boolean {
     const mod = e.metaKey || e.ctrlKey
     if (mod && e.key === 'Enter') {
       e.preventDefault()
       handleSubmit(e as unknown as React.FormEvent)
+      return true
     }
-    // Undo/redo over the composer's own history (text + attachments). Only on the
-    // prompt textarea - the agent-id field keeps its native per-field undo. Our
-    // stack drives these because pastes-turned-chips call preventDefault, so the
-    // browser's textarea undo never recorded them. Cmd/Ctrl+Z undo, +Shift redo,
-    // and Ctrl+Y redo (Windows convention).
-    if (e.currentTarget === textareaRef.current && mod && !e.altKey) {
+    if (mod && !e.altKey) {
       const key = e.key.toLowerCase()
-      if (key === 'z') {
+      const editor = richComposerRef.current?.editor
+      if (editor && (key === 'z' || (key === 'y' && !e.shiftKey))) {
         e.preventDefault()
-        restoreSnapshot(e.shiftKey ? redo() : undo())
-        return
+        if (key === 'z' && !e.shiftKey) editor.commands.undo()
+        else editor.commands.redo()
+        return true
       }
-      if (key === 'y' && !e.shiftKey) {
+      const snapshot = key === 'z' ? (e.shiftKey ? redo() : undo()) : key === 'y' && !e.shiftKey ? redo() : null
+      if (snapshot) {
         e.preventDefault()
-        restoreSnapshot(redo())
-        return
+        if (draftKey) writeLocal(draftKey, snapshot.prompt || null)
+        requestAnimationFrame(() => richComposerRef.current?.focus(snapshot.selStart + 1))
+        return true
       }
     }
     // Ctrl/Cmd+Shift+V ("paste as plain text") should paste for real, not
     // attach. The paste event carries no modifier state, so flag it here on the
-    // keystroke that triggers it (the flag is consumed by the paste that
-    // follows; a timer clears it if none does, so it can't go stale).
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+    // keystroke that triggers it; a timer prevents a stale flag when no paste
+    // follows (for example, when the clipboard is empty).
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'v') {
       literalPasteRef.current = true
       setTimeout(() => { literalPasteRef.current = false }, 1000)
     }
+    return false
   }
 
   const submitKeys = isMac ? ['⌘', '↵'] : ['Ctrl', 'Enter']
@@ -1311,24 +1377,55 @@ export const SpawnForm = memo(function SpawnForm({
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
           <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
-            <HighlightedTextarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={(e) => handlePromptChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onScroll={handlePromptScroll}
-              onPaste={handlePaste}
-              data-desktop-image-paste
+            <div
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
-              placeholder={disabled ? 'Select a project first...' : 'Describe a task...'}
-              rows={3}
-              disabled={loading || disabled}
-              wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
-              textClassName="px-3 pt-2.5 pb-1 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
-            />
-            {renderAttachments('sm')}
+              className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+            >
+              <Suspense fallback={<div className="h-full px-3 pt-2.5 text-xs text-gray-400">Loading editor...</div>}>
+                <MarkdownComposer
+                  key={`${draftSession.key}:${draftSession.generation}`}
+                  initialDocument={draftSession.document}
+                  ref={richComposerRef}
+                  value={prompt}
+                  onChange={handlePromptChange}
+                  onEditor={bindPromptEditor}
+                  onDocumentChange={(document) => {
+                    const ids = new Set<string>()
+                    const visit = (node: typeof document) => {
+                      if (node.type === 'attachment' && typeof node.attrs?.id === 'string') ids.add(node.attrs.id)
+                      node.content?.forEach(visit)
+                    }
+                    visit(document)
+                    setRichAttachmentIds(ids)
+                  }}
+                  attachmentRegistry={attachmentRegistry}
+                  onOpenAttachment={(id, origin) => {
+                    setLightboxOrigin(origin)
+                    setLightboxIndex(documentAttachments.findIndex((attachment) => String(attachment.id) === id))
+                  }}
+                  onKeyDown={handleRichKeyDown}
+                  onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                  onDrop={(event) => {
+                    const files = extractFiles(event.dataTransfer)
+                    if (files.length === 0) return false
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setDragOver(false)
+                    addFiles(files)
+                    return true
+                  }}
+                  references={composerReferences}
+                  onRequestFiles={() => fileInputRef.current?.click()}
+                  placeholder={disabled ? 'Select a project first...' : 'Describe a task...'}
+                  editable={!loading && !disabled}
+                  ariaLabel="Describe a task"
+                  dataDesktopImagePaste
+                  className="h-full overflow-y-auto px-3 pt-2.5 pb-1 text-xs leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
+                />
+              </Suspense>
+            </div>
             <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
               <div className="flex items-center gap-1 min-w-0 flex-1">
                 <Tooltip content="Attach files" side="top">
@@ -1384,26 +1481,58 @@ export const SpawnForm = memo(function SpawnForm({
           {/* Gradient border card */}
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
             <div ref={cardRef} className="rounded-[14px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[180px]">
-              {/* Prompt textarea */}
-              <HighlightedTextarea
-                ref={textareaRef}
-                value={prompt}
-                onChange={(e) => handlePromptChange(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onScroll={handlePromptScroll}
-                onPaste={handlePaste}
-                data-desktop-image-paste
+              {/* Prompt editor */}
+              <div
                 onDrop={handleDrop}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
-                placeholder="Describe what you need..."
-                rows={6}
-                disabled={loading}
-                wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
-                textClassName="px-4 pt-4 pb-2 text-sm leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
-              />
+                className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              >
+                <Suspense fallback={<div className="h-full px-4 pt-4 text-sm text-gray-400">Loading editor...</div>}>
+                  <MarkdownComposer
+                    key={`${draftSession.key}:${draftSession.generation}`}
+                    initialDocument={draftSession.document}
+                    ref={richComposerRef}
+                    autoFocus
+                    value={prompt}
+                    onChange={handlePromptChange}
+                    onEditor={bindPromptEditor}
+                    onDocumentChange={(document) => {
+                      const ids = new Set<string>()
+                      const visit = (node: typeof document) => {
+                        if (node.type === 'attachment' && typeof node.attrs?.id === 'string') ids.add(node.attrs.id)
+                        node.content?.forEach(visit)
+                      }
+                      visit(document)
+                      setRichAttachmentIds(ids)
+                    }}
+                    attachmentRegistry={attachmentRegistry}
+                    onOpenAttachment={(id, origin) => {
+                      setLightboxOrigin(origin)
+                      setLightboxIndex(documentAttachments.findIndex((attachment) => String(attachment.id) === id))
+                    }}
+                    onKeyDown={handleRichKeyDown}
+                    onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                    onDrop={(event) => {
+                      const files = extractFiles(event.dataTransfer)
+                      if (files.length === 0) return false
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDragOver(false)
+                      addFiles(files)
+                      return true
+                    }}
+                    references={composerReferences}
+                    onRequestFiles={() => fileInputRef.current?.click()}
+                    placeholder="Describe what you need..."
+                    editable={!loading}
+                    ariaLabel="Describe what you need"
+                    dataDesktopImagePaste
+                    className="h-full overflow-y-auto px-4 pt-4 pb-2 text-sm leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
+                  />
+                </Suspense>
+              </div>
 
-              {renderAttachments('md')}
 
               {/* Footer bar - stacks the controls above the Spawn button on
                   narrow screens instead of overflowing the card */}

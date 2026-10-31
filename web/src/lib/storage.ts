@@ -348,6 +348,10 @@ export const chatImageCounterKey = (projectId: string | null, agentId: string): 
 export const promptDraftKey = (projectId: string, compact: boolean): string =>
   `hydra-prompt-draft-${compact ? 'compact' : 'full'}-${projectId}`
 
+// Structured positions for the same draft; Markdown remains its portable value.
+export const promptRichDraftKey = (projectId: string, compact: boolean): string =>
+  `hydra-prompt-rich-draft-${compact ? 'compact' : 'full'}-${projectId}`
+
 // Scroll offset (textarea scrollTop) of the spawn-prompt box, per project and
 // per layout - mirrors promptDraftKey so a long draft restores to the same
 // scroll position when switching back to its project.

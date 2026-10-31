@@ -6,7 +6,7 @@ import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmBu
 import { BranchPill } from './BranchPill'
 import { withBranchPills } from '../lib/branchPills'
 import { UrlText } from './HostName'
-import { Markdown } from '../lib/MarkdownRenderer'
+import { RichMarkdown } from '../lib/RichMarkdown'
 import type { DialogDetails } from '../stores/dialogStore'
 import { ChangeStats } from './ChangeStats'
 import { useOverlayScrollbarSuppression } from '../lib/useOverlayScrollbarSuppression'
@@ -344,7 +344,7 @@ function SendPromptPanel({
               look in the chat once it is sent, so the confirmation should show
               it that way. The output is fenced in the source, so it still lands
               as a code block - the surrounding prose just reads as prose. */}
-          <Markdown
+          <RichMarkdown
             text={details?.prompt ?? ''}
             className="max-h-[45vh] overflow-auto px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] text-sm text-gray-700 dark:text-[#8b94a6]"
           />

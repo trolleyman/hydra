@@ -1,9 +1,8 @@
 import { createContext, isValidElement, memo, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkBreaks from 'remark-breaks'
+import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
+import { toJsxRuntime, type Components } from 'hast-util-to-jsx-runtime'
 import { useNavigate } from '@tanstack/react-router'
-import { ImageOff, Maximize2, VideoOff } from 'lucide-react'
+import { Bot, GitBranch, GitCommitHorizontal, ImageOff, Maximize2, VideoOff } from 'lucide-react'
 import { highlightCode } from './markdown'
 import { fileKind } from './fileKind'
 import { Tooltip } from '../components/Tooltip'
@@ -18,12 +17,16 @@ import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
 import { renderCommentMentions } from './mentionHighlight'
+import { getFileIcon } from './fileIcons'
+import type { Attachment } from './spawnDrafts'
+import { parseRichMarkdownTree } from './richMarkdownParser'
 import { FilePathLabel } from '../components/FilePathLabel'
 import { UrlText } from '../components/HostName'
 
-// Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
-// rendered-markdown surface (chat messages, the AgentView prompt, README file
-// previews, config pre-prompt previews) gets the same feature set: GFM tables,
+// Shared read-only Markdown boundary. Markdown is the source of truth; parsing
+// produces a private syntax tree used only for this render. Chat messages, the
+// AgentView prompt, README file previews and config pre-prompt previews get the
+// same feature set: GFM tables,
 // task lists, strikethrough, autolinks, plus fenced code highlighted through our
 // existing highlight.js (highlightCode) rather than a second highlighter.
 //
@@ -112,22 +115,64 @@ function RegularLink({ href, children }: { href?: string; children?: ReactNode }
   return <Tooltip content={<UrlText url={href} />} align="left">{anchor}</Tooltip>
 }
 
-// FileLink keeps the author's exact Markdown label in the prose, then uses the
-// tooltip for the richer file treatment shared with repository surfaces: a
-// Lucide file-kind icon, a lowlit directory and an emphasized filename.
+function StructuredReference({ kind, value }: { kind: string; value: string }) {
+  const file = kind === 'file' ? getFileIcon(value.split('/').pop() ?? value).Icon : null
+  const Icon = file ?? (kind === 'commit' ? GitCommitHorizontal : kind === 'branch' ? GitBranch : Bot)
+  return (
+    <Tooltip content={`${kind}: ${value}`}>
+      <span
+        className={`composer-reference composer-reference-${kind}`}
+        data-hydra-reference={kind}
+        data-reference-value={value}
+      >
+        <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />
+        <span className="truncate">{value}</span>
+      </span>
+    </Tooltip>
+  )
+}
+
+function InlineAttachment({ attachment, onOpen }: { attachment: Attachment; onOpen?: (attachment: Attachment, origin: Element) => void }) {
+  const { Icon } = getFileIcon(attachment.filename)
+  return (
+    <button
+      type="button"
+      disabled={!onOpen || !attachment.url}
+      onClick={(event) => onOpen?.(attachment, event.currentTarget)}
+      className="composer-static-attachment"
+      aria-label={attachment.url ? `View ${attachment.filename}` : attachment.filename}
+    >
+      {attachment.previewUrl ? <img src={attachment.previewUrl} alt="" className="composer-attachment-preview" /> : <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />}
+      <span className="truncate">{attachment.filename}</span>
+    </button>
+  )
+}
+
+// FileLink keeps the author's exact Markdown label, but makes the rendered link
+// read as a small file token. This is presentation only: the Markdown source and
+// the editable composer remain untouched.
 function FileLink({ href, path, onClick, children }: {
   href: string
   path: string
   onClick: (e: React.MouseEvent<HTMLAnchorElement>) => void
   children?: ReactNode
 }) {
+  const filename = path.split('/').pop() || path
+  const { Icon } = getFileIcon(filename)
   return (
     <Tooltip
       content={(
         <FilePathLabel path={path} nativeTitle={false} />
       )}
     >
-      <a className={LINK_CLASS} href={href} onClick={onClick}>{children}</a>
+      <a
+        className="inline-flex items-center gap-1 rounded border border-stone-300/70 bg-stone-100/70 px-1.5 align-middle font-mono text-[0.9em] text-stone-700 no-underline hover:bg-stone-200/70 focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/15 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-white/10"
+        href={href}
+        onClick={onClick}
+      >
+        <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />
+        {children}
+      </a>
     </Tooltip>
   )
 }
@@ -172,7 +217,10 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
       hash: lineHash ? lineHash.slice(1) : undefined,
     })
   }
-  if (fileChip && resolved) {
+  const label = typeof children === 'string' ? children : ''
+  const resolvedName = resolved.split('/').pop() ?? resolved
+  const fileLabel = label === resolved || label === resolvedName || label.includes('/')
+  if (fileChip && resolved && fileLabel) {
     // A path inside this head's worktree is already identified by the surrounding
     // chat, so repeating Hydra's long worktree prefix adds no useful information.
     // Keep genuinely external absolute paths explicit; relative and worktree-local
@@ -451,7 +499,7 @@ const STYLES: Record<Variant, Style> = {
     // so it rendered 1.077x its surroundings everywhere and read as a size step
     // up mid-paragraph.
     table: 'border-collapse',
-    th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
+    th: 'px-3 py-1.5 text-left font-normal text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] shadow-[inset_0_2px_#a8a29e] dark:shadow-[inset_0_2px_rgba(168,162,158,0.55)] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
     td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',
     // Claude-app-style code (chat items 1/10): bordered terracotta chips for
@@ -481,7 +529,7 @@ const STYLES: Record<Variant, Style> = {
     // Same framed look as chat, roomier cell padding for document density.
     tableWrap: 'my-4 max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700',
     table: 'w-full border-collapse text-sm',
-    th: 'px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap',
+    th: 'px-4 py-2 text-left font-normal text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 shadow-[inset_0_2px_#93c5fd] dark:shadow-[inset_0_2px_rgba(96,165,250,0.55)] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap',
     td: 'px-4 py-2 border-b border-gray-100 dark:border-gray-800 align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-gray-500/[0.035] dark:[&>tr:nth-child(even)]:bg-white/[0.03]',
     // Doc code stays neutral (a README isn't a chat bubble) but picks up the
@@ -500,7 +548,7 @@ const STYLES: Record<Variant, Style> = {
 //
 // Being a child of <pre> is the only thing that separates the two: markdown
 // gives a fenced (or indented) block and an inline span the same <code>
-// element, and react-markdown dropped the `inline` prop it used to pass in v9.
+// element, and the Markdown AST does not carry an inline prop into JSX.
 // Guessing from the content instead - "no language and no newline means
 // inline", which this did - gets a one-line fence with no info string wrong,
 // and that is exactly how a command gets written:
@@ -519,7 +567,21 @@ const InCodeBlock = createContext(false)
 // a wider selection.
 function MarkdownCode({ s, className, children }: { s: Style; className?: string; children?: ReactNode }) {
   const block = useContext(InCodeBlock)
-  if (!block) return <code className={s.codeInline}>{children}</code>
+  if (!block) {
+    const text = String(children ?? '')
+    if (/^[0-9a-f]{7,40}$/i.test(text)) {
+      return (
+        <code
+          className="inline-flex items-center gap-1 rounded border border-violet-300/60 bg-violet-50 px-1.5 align-middle font-mono text-[0.9em] text-violet-800 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-200"
+          data-md-git-hash=""
+        >
+          <GitCommitHorizontal className="h-[1em] w-[1em] shrink-0 opacity-65" aria-hidden="true" />
+          {text}
+        </code>
+      )
+    }
+    return <code className={s.codeInline}>{children}</code>
+  }
   const text = String(children ?? '').replace(/\n$/, '')
   const lang = /language-([\w-]+)/.exec(className || '')?.[1] ?? ''
   // Captured command/test output is commonly fenced into a prompt or chat
@@ -554,10 +616,6 @@ function alignStyle(align?: string | null): React.CSSProperties | undefined {
 
 // 'chat' honours single newlines as <br> (remark-breaks); 'doc' reflows them
 // (standard CommonMark) - see the file header for why.
-type RemarkPlugins = React.ComponentProps<typeof ReactMarkdown>['remarkPlugins']
-const BREAK_PLUGINS: RemarkPlugins = [remarkGfm, remarkBreaks]
-const REFLOW_PLUGINS: RemarkPlugins = [remarkGfm]
-
 // buildComponents maps markdown elements to the variant's styled React nodes.
 function mentionChildren(children: ReactNode, enabled: boolean): ReactNode {
   if (!enabled) return children
@@ -568,7 +626,14 @@ function mentionChildren(children: ReactNode, enabled: boolean): ReactNode {
   return children
 }
 
-function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, highlightMentions = false): Components {
+function buildComponents(
+  s: Style,
+  variant: Variant,
+  linkCtx?: RepoLinkContext,
+  highlightMentions = false,
+  attachments: Attachment[] = [],
+  onOpenAttachment?: (attachment: Attachment, origin: Element) => void,
+): Components {
   const prose = (children: ReactNode) => mentionChildren(children, highlightMentions)
   return {
     h1: ({ children }) => <h1 className={s.h1}>{prose(children)}</h1>,
@@ -588,12 +653,41 @@ function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, 
     strong: ({ children }) => <strong className="font-semibold">{prose(children)}</strong>,
     em: ({ children }) => <em className="italic">{prose(children)}</em>,
     del: ({ children }) => <del className="line-through opacity-80">{prose(children)}</del>,
-    a: ({ href, children }) =>
-      linkCtx ? (
+    a: ({ href, children }) => {
+      // Preserve the Markdown renderer's URL policy at the static tree boundary.
+      const scheme = Array.from(href ?? '').filter((character) => character.charCodeAt(0) > 32).join('').match(/^([^:/?#]*):/)
+      if (scheme && !/^(https?|ircs?|mailto|xmpp|hydra|hydra-reference|hydra-attachment)$/i.test(scheme[1])) return <span>{children}</span>
+      if (href?.startsWith('hydra://')) {
+        try {
+          const target = new URL(href)
+          if (['file', 'commit', 'branch', 'agent'].includes(target.hostname)) {
+            const value = target.pathname.slice(1).split('/').map(decodeURIComponent).join('/')
+            return <StructuredReference kind={target.hostname} value={value} />
+          }
+        } catch {
+          // Handled below as inert text.
+        }
+        return <span>{children}</span>
+      }
+      if (href?.startsWith('hydra-reference:')) {
+        const [, kind, encoded = ''] = href.split(':')
+        try {
+          if (!['file', 'commit', 'branch', 'agent'].includes(kind)) return <span>{children}</span>
+          return <StructuredReference kind={kind} value={decodeURIComponent(encoded)} />
+        } catch {
+          return <span>{children}</span>
+        }
+      }
+      if (href?.startsWith('hydra-attachment:')) {
+        const attachment = attachments[Number(href.slice('hydra-attachment:'.length))]
+        return attachment ? <InlineAttachment attachment={attachment} onOpen={onOpenAttachment} /> : children
+      }
+      return linkCtx ? (
         <RepoLink href={href} ctx={linkCtx} fileChip={variant === 'chat'}>{children}</RepoLink>
       ) : (
         <RegularLink href={href}>{children}</RegularLink>
-      ),
+      )
+    },
     img: ({ src, alt }) => <MarkdownMedia src={typeof src === 'string' ? src : undefined} alt={alt} ctx={linkCtx} />,
     table: ({ children }) => (
       <div className={s.tableWrap}>
@@ -603,7 +697,7 @@ function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, 
     tbody: ({ children }) => <tbody className={s.tbody}>{children}</tbody>,
     th: ({ children, style }) => <th className={s.th} style={alignStyle(style?.textAlign)}>{children}</th>,
     td: ({ children, style }) => <td className={s.td} style={alignStyle(style?.textAlign)}>{children}</td>,
-    // react-markdown wraps code blocks in <pre>; we style the inner <code> as a
+    // remark-rehype wraps code blocks in <pre>; we style the inner <code> as a
     // display:block element instead, so strip <pre>'s own box - but not before
     // it has marked what it holds as a block (see InCodeBlock).
     pre: ({ children }) => <InCodeBlock.Provider value={true}>{children}</InCodeBlock.Provider>,
@@ -611,7 +705,7 @@ function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, 
   }
 }
 
-export interface MarkdownProps {
+export interface RichMarkdownProps {
   // The markdown source to render.
   text: string
   // Styling density. 'chat' (default) is compact; 'doc' is document-like (README).
@@ -625,41 +719,42 @@ export interface MarkdownProps {
   // reflow paragraphs the way CommonMark (and GitHub) do.
   hardBreaks?: boolean
   // Paint routing mentions in review comments. Mentions have no meaning on
-  // ordinary Markdown surfaces, so callers opt in explicitly.
+  // ordinary RichMarkdown surfaces, so callers opt in explicitly.
   highlightMentions?: boolean
+  attachments?: Attachment[]
+  onOpenAttachment?: (attachment: Attachment, origin: Element) => void
 }
 
-// Markdown renders read-only markdown for a given surface. Do NOT wrap it in a
-// whitespace-pre-wrap container - block elements manage their own spacing and
-// remark-breaks already preserves single newlines as <br>.
-//
-// memo'd: parsing markdown is not cheap, and a chat transcript can hold hundreds
-// of these. Without memo, typing in the chat composer (a sibling state change)
-// re-parses every rendered message on each keystroke, which is visibly laggy.
-export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false }: MarkdownProps): ReactNode {
-  const components = useMemo(
-    () => buildComponents(STYLES[variant], variant, linkCtx, highlightMentions),
-    [variant, linkCtx, highlightMentions],
+// RichMarkdown parses external/persisted Markdown into a private tree and then
+// renders that tree. The parsed representation never leaves this boundary or
+// becomes persisted application state.
+export const RichMarkdown = memo(function RichMarkdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false, attachments = [], onOpenAttachment }: RichMarkdownProps): ReactNode {
+  const document = useMemo(
+    () => parseRichMarkdownTree(text, { hardBreaks: hardBreaks ?? variant === 'chat', attachments }),
+    [attachments, hardBreaks, text, variant],
   )
-  // data-md-root marks the subtree as rendered markdown: copying a selection
-  // that touches it re-serializes it back to markdown source (lib/copyMarkdown).
-  // The source itself is registered against the root so a selection covering the
-  // whole thing can be copied verbatim instead of re-serialized.
+  const components = useMemo(
+    () => buildComponents(STYLES[variant], variant, linkCtx, highlightMentions, attachments, onOpenAttachment),
+    [variant, linkCtx, highlightMentions, attachments, onOpenAttachment],
+  )
+  const rendered = useMemo(
+    () => toJsxRuntime(document.root, {
+      Fragment,
+      jsx,
+      jsxs,
+      components,
+      elementAttributeNameCase: 'react',
+      stylePropertyNameCase: 'dom',
+      passKeys: true,
+    }),
+    [components, document.root],
+  )
   const rootRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const el = rootRef.current
     if (!el) return
-    setMarkdownSource(el, text)
+    setMarkdownSource(el, document.source)
     return () => setMarkdownSource(el, null)
-  }, [text])
-  return (
-    <div ref={rootRef} className={className ?? ''} data-md-root="">
-      <ReactMarkdown
-        remarkPlugins={(hardBreaks ?? variant === 'chat') ? BREAK_PLUGINS : REFLOW_PLUGINS}
-        components={components}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  )
+  }, [document.source])
+  return <div ref={rootRef} className={className ?? ''} data-md-root="">{rendered}</div>
 })

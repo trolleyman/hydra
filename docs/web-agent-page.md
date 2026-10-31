@@ -200,7 +200,7 @@ and `web/src/DiffViewer.tsx`):
   `selectionToMarkdown` (`web/src/lib/copyMarkdown.ts`), which walks the selected
   DOM and re-serializes headings, emphasis, inline code, links, lists (incl. task
   lists), blockquotes, fenced blocks with their language, and GFM tables.
-  `MarkdownRenderer` marks the surfaces it owns with `data-md-root` /
+  `RichMarkdown` marks the surfaces it owns with `data-md-root` /
   `data-md-code-block` + `data-md-lang`; everything else in the transcript (tool
   cards, diffs) is copied as plain text. When a selection covers *all* of a
   root's text (a whole message, or every message under a select-all) the walk is

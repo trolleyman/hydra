@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
-import { Markdown } from './MarkdownRenderer'
+import { RichMarkdown } from './RichMarkdown'
 import { selectionToMarkdown } from './copyMarkdown'
 
 // A fake Selection over one range - jsdom implements Range (and the boundary
@@ -15,7 +15,7 @@ function sel(range: Range): Selection {
 
 // copyAll renders markdown and copies the whole rendered subtree.
 function copyAll(text: string, variant: 'chat' | 'doc' = 'chat'): string {
-  const { container } = render(<Markdown text={text} variant={variant} />)
+  const { container } = render(<RichMarkdown text={text} variant={variant} />)
   const range = document.createRange()
   range.selectNodeContents(container)
   return selectionToMarkdown(sel(range))
@@ -81,7 +81,7 @@ describe('selectionToMarkdown', () => {
   it('widens the fence when the code contains backticks', () => {
     // Not a whole-message selection (that would copy the source verbatim) -
     // a partial drag from the intro through the end of the block.
-    const { container } = render(<Markdown text={'Intro line\n\n```\na ``` b\nsecond line\n```'} />)
+    const { container } = render(<RichMarkdown text={'Intro line\n\n```\na ``` b\nsecond line\n```'} />)
     const out = copyBetween(container, { text: 'Intro', offset: 6 }, { text: 'second line', offset: 11 })
     expect(out).toBe('line\n\n````\na ``` b\nsecond line\n````')
   })
@@ -95,7 +95,7 @@ describe('selectionToMarkdown', () => {
     // A trailing paragraph keeps this off the whole-message verbatim path, so
     // the alignment has to come out of the rendered cells' text-align.
     const md = '| l | c | r | n |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | 4 |\n\ntail'
-    const { container } = render(<Markdown text={md} />)
+    const { container } = render(<RichMarkdown text={md} />)
     const out = copyBetween(container, { text: 'l', offset: 0 }, { text: '4', offset: 1 })
     expect(out).toBe('| l | c | r | n |\n| :--- | :---: | ---: | --- |\n| 1 | 2 | 3 | 4 |')
   })
@@ -110,7 +110,7 @@ describe('selectionToMarkdown', () => {
   })
 
   it('copies a partial selection with the emphasis it touches', () => {
-    const { container } = render(<Markdown text="alpha **beta gamma** delta" />)
+    const { container } = render(<RichMarkdown text="alpha **beta gamma** delta" />)
     expect(copyBetween(container, { text: 'beta', offset: 0 }, { text: ' delta', offset: 3 })).toBe(
       '**beta gamma** de',
     )
@@ -140,7 +140,7 @@ describe('selectionToMarkdown', () => {
   })
 
   it('copies raw code when the selection stays inside a code block', () => {
-    const { container } = render(<Markdown text={'```js\nconst a = 1\nconst b = 2\n```'} />)
+    const { container } = render(<RichMarkdown text={'```js\nconst a = 1\nconst b = 2\n```'} />)
     const code = container.querySelector('[data-md-code-block]')!
     const range = document.createRange()
     range.selectNodeContents(code)
@@ -159,8 +159,8 @@ describe('selectionToMarkdown', () => {
     function spillingRange(text: string, startsWith: string) {
       const { container } = render(
         <div>
-          <div><Markdown text={text} /></div>
-          <div><Markdown text="next message" /></div>
+          <div><RichMarkdown text={text} /></div>
+          <div><RichMarkdown text="next message" /></div>
         </div>,
       )
       const walk = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
@@ -202,14 +202,14 @@ describe('selectionToMarkdown', () => {
 
     it('still fences a selection that reaches out of the code block', () => {
       const md = 'Run this:\n\n```bash\nnpm run dev\n```'
-      const { container } = render(<Markdown text={md} />)
+      const { container } = render(<RichMarkdown text={md} />)
       expect(copyBetween(container, { text: 'Run', offset: 0 }, { text: 'run dev', offset: 7 })).toBe(md)
     })
 
     // Narrowing must stop at content that has no text of its own, or the image
     // a selection ends on would fall outside it.
     it('keeps a trailing image the selection ends past', () => {
-      const { container } = render(<Markdown text="text ![alt](https://example.com/a.png)" />)
+      const { container } = render(<RichMarkdown text="text ![alt](https://example.com/a.png)" />)
       const first = document.createTreeWalker(container, NodeFilter.SHOW_TEXT).nextNode() as Text
       const range = document.createRange()
       range.setStart(first, 2)
@@ -222,14 +222,14 @@ describe('selectionToMarkdown', () => {
     const { container } = render(
       <div>
         <div className="bubble">
-          <Markdown text="**hi** there" />
+          <RichMarkdown text="**hi** there" />
         </div>
         <div className="card">
           <div>Read</div>
           <div>src/main.go</div>
         </div>
         <div className="bubble">
-          <Markdown text={'- a\n- b'} />
+          <RichMarkdown text={'- a\n- b'} />
         </div>
       </div>,
     )
@@ -277,7 +277,7 @@ describe('selectionToMarkdown', () => {
       <div>
         <button type="button">Read<span>internal/heads/heads.go</span></button>
         <div>
-          <Markdown text="the reply" />
+          <RichMarkdown text="the reply" />
         </div>
       </div>,
     )
@@ -291,7 +291,7 @@ describe('selectionToMarkdown', () => {
       <div>
         <span aria-hidden="true">*</span>
         <div>
-          <Markdown text="visible text" />
+          <RichMarkdown text="visible text" />
         </div>
       </div>,
     )
@@ -326,7 +326,7 @@ describe('selectionToMarkdown', () => {
     ].join('\n')
 
     it('copies the original source verbatim when the whole root is selected', () => {
-      const { container } = render(<Markdown text={source} variant="doc" />)
+      const { container } = render(<RichMarkdown text={source} variant="doc" />)
       const range = document.createRange()
       range.selectNodeContents(container)
       // Including the reference definition, which renders to nothing but which
@@ -335,7 +335,7 @@ describe('selectionToMarkdown', () => {
     })
 
     it('takes the verbatim path from inside the message too (triple-click)', () => {
-      const { container } = render(<Markdown text={'a **b** c'} />)
+      const { container } = render(<RichMarkdown text={'a **b** c'} />)
       const p = container.querySelector('p')!
       const range = document.createRange()
       range.selectNodeContents(p)
@@ -343,7 +343,7 @@ describe('selectionToMarkdown', () => {
     })
 
     it('falls back to serializing when the selection stops short', () => {
-      const { container } = render(<Markdown text={'* first\n* second'} />)
+      const { container } = render(<RichMarkdown text={'* first\n* second'} />)
       // Everything except the last character of the last item.
       const out = copyBetween(container, { text: 'first', offset: 0 }, { text: 'second', offset: 5 })
       expect(out).toBe('- first\n- secon')
@@ -352,8 +352,8 @@ describe('selectionToMarkdown', () => {
     it('copies each fully selected message from its own source', () => {
       const { container } = render(
         <div>
-          <div><Markdown text={'* one'} /></div>
-          <div><Markdown text={'* two'} /></div>
+          <div><RichMarkdown text={'* one'} /></div>
+          <div><RichMarkdown text={'* two'} /></div>
         </div>,
       )
       const range = document.createRange()
@@ -362,7 +362,7 @@ describe('selectionToMarkdown', () => {
     })
 
     it('still copies raw code for a code block that is the whole message', () => {
-      const { container } = render(<Markdown text={'```js\nconst a = 1\n```'} />)
+      const { container } = render(<RichMarkdown text={'```js\nconst a = 1\n```'} />)
       const code = container.querySelector('[data-md-code-block]')!
       const range = document.createRange()
       range.selectNodeContents(code)
@@ -371,7 +371,7 @@ describe('selectionToMarkdown', () => {
   })
 
   it('returns nothing for an empty selection', () => {
-    const { container } = render(<Markdown text="hello" />)
+    const { container } = render(<RichMarkdown text="hello" />)
     const range = document.createRange()
     range.setStart(container, 0)
     range.collapse(true)

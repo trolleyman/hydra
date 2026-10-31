@@ -1,6 +1,6 @@
 // Copy-as-markdown: turn a DOM selection back into markdown source.
 //
-// Chat messages are rendered markdown (see ./MarkdownRenderer), so a plain
+// Chat messages are rendered markdown (see ./RichMarkdown), so a plain
 // browser copy flattens them: **bold** loses its asterisks, a fenced code block
 // loses its fence and language, a bullet list loses its dashes, and a GFM table
 // comes out as a run of words. Selecting a region of the transcript and pasting
@@ -22,7 +22,7 @@
 // (see rangeToMarkdown, and narrowRange for why a triple-click counts as
 // "wholly inside" even though the browser's range reaches past the block).
 //
-// Elements are recognised by the data attributes MarkdownRenderer sets
+// Elements are recognised by the data attributes RichMarkdown sets
 // (data-md-root, data-md-code, data-md-lang) plus standard tag names, so this
 // stays independent of the Tailwind classes those elements happen to carry.
 
@@ -66,7 +66,7 @@ const SKIP_TAGS = new Set([
 // second copy of every message in the DOM.
 const SOURCES = new WeakMap<Element, string>()
 
-// setMarkdownSource is called by the Markdown component for its root element;
+// setMarkdownSource is called by the RichMarkdown component for its root element;
 // passing null (on unmount) forgets it.
 export function setMarkdownSource(el: Element, text: string | null): void {
   if (text == null) SOURCES.delete(el)
@@ -112,7 +112,7 @@ function intersectsRange(range: Range, node: Node): boolean {
 // selection covers all of its text, and '' otherwise.
 //
 // "Covers all of its text" is measured from the first to the last non-blank
-// character rather than from the element's boundaries: react-markdown leaves
+// character rather than from the element's boundaries: the static renderer leaves
 // whitespace-only text nodes between block elements, and a drag (or a
 // triple-click) that visually spans the whole message usually stops at the last
 // visible character, which would fail a strict element-containment test.
@@ -205,7 +205,7 @@ function narrowRange(range: Range): Range {
   const root = range.commonAncestorContainer
   const doc = root.ownerDocument
   if (!doc || root.nodeType !== Node.ELEMENT_NODE) return range
-  // "Contributes" means a visible character, as in wholeSource: react-markdown
+  // "Contributes" means a visible character, as in wholeSource: RichMarkdown
   // leaves a newline text node between every pair of block elements, and a
   // triple-click that ends at the next block reaches over one of them. Trimming
   // those off the ends costs nothing - the result is trimmed at the end anyway.
@@ -296,7 +296,7 @@ function inlineCode(text: string): string {
 //   - a run of newlines where two siblings meet is MERGED, not summed, so two
 //     adjacent plain blocks stay one line apart while two markdown blocks
 //     (which pad with a blank line each) stay one blank line apart;
-//   - indentation following a hard break (react-markdown keeps the source
+//   - indentation following a hard break (RichMarkdown keeps the source
 //     newline as a text node after the <br>) is dropped.
 function children(node: Node, ctx: Ctx): string {
   let out = ''
@@ -491,7 +491,7 @@ function convert(node: Node, ctx: Ctx): string {
     }
     case 'IMG': {
       // data-md-src carries the path as it was WRITTEN, for an image whose real
-      // src is a blob endpoint we rewrote it to (MarkdownRenderer.MarkdownImage);
+      // src is a blob endpoint we rewrote it to (RichMarkdown.MarkdownImage);
       // copying should give back the source, not our internal URL.
       const src = el.getAttribute('data-md-src') || el.getAttribute('src') || ''
       return src ? `![${el.getAttribute('alt') ?? ''}](${src})` : ''
@@ -499,7 +499,7 @@ function convert(node: Node, ctx: Ctx): string {
     case 'VIDEO': {
       // Same syntax as an image (that is what it was written as), and the same
       // authored path. A <video> has no alt attribute, so the authored alt text
-      // rides on data-md-alt - see MarkdownRenderer.MarkdownVideo.
+      // rides on data-md-alt - see RichMarkdown.MarkdownVideo.
       const src = el.getAttribute('data-md-src') || ''
       return src ? `![${el.getAttribute('data-md-alt') ?? ''}](${src})` : ''
     }
