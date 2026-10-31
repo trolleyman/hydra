@@ -29,7 +29,8 @@ test('profiles contain policy while provider runtime and fonts have independent 
     assert.equal(profile.effort, undefined)
   }
   assert.equal(properties['hydra.defaultProvider'].default, 'codex')
-  assert.equal(properties['hydra.providers.codex.defaultModel'].default, 'gpt-5.6-sol')
+  assert.equal(properties['hydra.providers.claude.defaultModel'].default, 'claude-sonnet-5-5')
+  assert.equal(properties['hydra.providers.codex.defaultModel'].default, 'gpt-6.1-sol')
   assert.ok(properties['hydra.appearance.interfaceFont'].enum.includes('inter'))
   assert.ok(properties['hydra.appearance.chatFont'].enum.includes('merriweather'))
   assert.ok(properties['hydra.appearance.codeFont'].enum.includes('iosevka'))

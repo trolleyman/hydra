@@ -251,7 +251,7 @@
         },
         "hydra.providers.claude.defaultModel": {
           "type": "string",
-          "default": "sonnet",
+          "default": "claude-sonnet-5-5",
           "scope": "window",
           "description": "Claude model selected for new conversations."
         },
@@ -275,7 +275,7 @@
         },
         "hydra.providers.codex.defaultModel": {
           "type": "string",
-          "default": "gpt-5.6-sol",
+          "default": "gpt-6.1-sol",
           "scope": "window",
           "description": "Codex model selected for new conversations."
         },

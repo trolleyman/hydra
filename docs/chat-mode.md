@@ -139,7 +139,7 @@ is what makes reconnect, recovery and multi-attach safe.
   },
   "turn": { "id": "turn-9", "status": "running" },
   "interaction": null,
-  "model": "gpt-5.4"
+  "model": "gpt-6.1-sol"
 }
 ```
 

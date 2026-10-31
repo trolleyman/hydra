@@ -417,7 +417,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private configuredRuntime(provider: Provider): { model: string; effort: string } {
     const settings = vscode.workspace.getConfiguration(`hydra.providers.${provider}`)
     return {
-      model: settings.get('defaultModel', provider === 'codex' ? 'gpt-5.6-sol' : 'sonnet'),
+      model: settings.get('defaultModel', provider === 'codex' ? 'gpt-6.1-sol' : 'claude-sonnet-5-5'),
       effort: settings.get('defaultEffort', provider === 'codex' ? 'medium' : ''),
     }
   }

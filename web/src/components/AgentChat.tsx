@@ -2007,14 +2007,11 @@ const CHAT_CODE_LEADING = 'leading-[calc(1rem_+_var(--app-font-code-step,_0px))]
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 
 // Effective context window (tokens) for a model, used to turn a turn's prompt
-// size into a "context left" percentage (item 40). Opus, Sonnet and Fable all
-// expose a 1M window; only Haiku is 200k. A flat 200k constant (the old value)
-// read >100% used on the 1M models once a conversation passed 200k tokens, so
-// the window has to follow the model. An unknown model (before the first
-// system:init lands) defaults to 1M, since every offered model except Haiku is
-// 1M - the model is also persisted per-agent now, so this is rarely hit.
-function contextWindowTokens(model: string): number {
-  return model.toLowerCase().includes('haiku') ? 200_000 : 1_000_000
+// size into a "context left" percentage (item 40). Every current Claude model
+// exposes a 1M window. Unknown models use the same default; the active model is
+// persisted per agent, so that fallback is rarely needed.
+function contextWindowTokens(): number {
+  return 1_000_000
 }
 
 // contextInputTokens sums the prompt-side tokens of a usage sample (everything
@@ -2026,8 +2023,8 @@ function contextInputTokens(u: TokenUsage | undefined): number {
   return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
 }
 
-// modelDisplayLabel shortens a full model id ("claude-fable-5") to its alias
-// label ("Fable") for the dropdown trigger.
+// modelDisplayLabel shortens a full model id ("claude-fable-5-1") to its
+// curated label ("Fable 5.1") for the dropdown trigger.
 function modelDisplayLabel(model: string): string {
   // An empty Codex model is meaningful: app-server interprets an omitted
   // model as the user's configured default and does not echo its concrete id
@@ -2040,8 +2037,8 @@ function modelDisplayLabel(model: string): string {
   }
   for (const m of CODEX_MODELS) if (lower.includes(m.id)) return m.label
   // A BARE alias. The CLI accepts `/model opus`, and then reports `opus` - which
-  // matches no entry above, because those deliberately carry full ids so the two
-  // Opus versions stay distinguishable. Without this the chip rendered the raw
+  // matches no entry above, because the curated choices carry explicit version
+  // ids. Without this the chip rendered the raw
   // lowercase alias ("opus") next to labels that are all title case. The version
   // is genuinely unknown here, so the label says "Opus" and does not guess one.
   const bare: Record<string, string> = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable' }
@@ -11070,7 +11067,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   const modelLabel = modelDisplayLabel(model)
-  const contextWindow = contextWindowTokens(model)
+  const contextWindow = contextWindowTokens()
   // "Context left" percentage for the composer chip (item 40): null until the
   // first usage sample lands. Clamped to 0-100.
   const contextPct =

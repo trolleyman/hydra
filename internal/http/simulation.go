@@ -466,7 +466,7 @@ func simAgentChat() api.AgentResponse {
 		WorktreePath: ptr("/repo/.hydra/local/worktrees/feat-uploader-retry"),
 		// Model as the daemon would have captured it from the head's system:init
 		// line (see simChatEvents); the chat selector seeds its label from this.
-		Model: ptr("claude-opus-4-8"),
+		Model: ptr("claude-opus-5-5"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:    api.Waiting,
 			Timestamp: simNow().Format(time.RFC3339),
@@ -507,7 +507,7 @@ func simProjectDirectoryAgents() []api.AgentResponse {
 			Id: "project-directory-edit", Title: ptr("Tidy the release notes"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1010, SessionStatus: "running", CreatedAt: &createdEdit,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
-			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
+			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-5-5"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
 			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("project-directory-edit"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Waiting, Timestamp: simNow().Format(time.RFC3339)},
 		},
@@ -515,7 +515,7 @@ func simProjectDirectoryAgents() []api.AgentResponse {
 			Id: "project-directory-readonly", Title: ptr("Review the desktop architecture"), AgentType: "codex",
 			BranchName: nil, SessionPid: 1011, SessionStatus: "running", CreatedAt: &createdReadonly,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
-			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
+			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-6.1-sol"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
 			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("project-directory-readonly"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 		},
@@ -523,7 +523,7 @@ func simProjectDirectoryAgents() []api.AgentResponse {
 			Id: "project-directory-working", Title: ptr("Trace preview port allocation"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1012, SessionStatus: "running", CreatedAt: &createdWorking,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
-			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
+			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-5-5"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
 			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("project-directory-working"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Running, Timestamp: simNow().Format(time.RFC3339), Activity: ptr("Reading `internal/preview/ports.go`")},
 		},
@@ -576,7 +576,7 @@ func (s *SimulationServer) simAgentAsk() api.AgentResponse {
 			CreatedAt:     &createdAt,
 			Prompt:        simAgentAskPrompt,
 			ChatMode:      ptr(true),
-			Model:         ptr("claude-opus-4-8"),
+			Model:         ptr("claude-opus-5-5"),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
@@ -596,7 +596,7 @@ func (s *SimulationServer) simAgentAsk() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentAskPrompt,
 		ChatMode:      ptr(true),
-		Model:         ptr("claude-opus-4-8"),
+		Model:         ptr("claude-opus-5-5"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:      api.NeedsInput,
 			Timestamp:   simNow().Format(time.RFC3339),
@@ -630,7 +630,7 @@ func simAgentWorking() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentWorkingPrompt,
 		ChatMode:      ptr(true),
-		Model:         ptr("claude-opus-4-8"),
+		Model:         ptr("claude-opus-5-5"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:    api.Running,
 			Timestamp: simNow().Format(time.RFC3339),
@@ -688,7 +688,7 @@ func (s *SimulationServer) simAgentApprovals() api.AgentResponse {
 		CreatedAt:     &createdAt,
 		Prompt:        simAgentApprovalsPrompt,
 		ChatMode:      ptr(true),
-		Model:         ptr("claude-opus-4-8"),
+		Model:         ptr("claude-opus-5-5"),
 		AgentStatus:   status,
 	}
 }
@@ -5308,7 +5308,7 @@ func simApprovalsQuestion() string {
 // question + its interaction request, which the handler re-sends to re-ask.
 func simApprovalsEvents(questionToolID, requestID string) []simNorm {
 	return []simNorm{
-		simConversationStarted("claude-opus-4-8", []string{"compact", "context", "cost", "usage"}).
+		simConversationStarted("claude-opus-5-5", []string{"compact", "context", "cost", "usage"}).
 			set("conversation_id", "sim-approvals"),
 		simUser("sim-approvals-prompt", simAgentApprovalsPrompt),
 		simSay("msg_approvals_1", "Listener check first. I can't see host ports from inside the sandbox, so this one has to go through the escape hatch:"),
@@ -5426,7 +5426,7 @@ const simExpiredQuestionInput = `{"questions":[` +
 // interaction request) the head is parked waiting on - so the page renders one
 // dead card and one live, answerable one.
 var simAskEvents = []simNorm{
-	simConversationStarted("claude-opus-4-8", []string{"compact", "context", "cost", "init", "review", "usage"}).
+	simConversationStarted("claude-opus-5-5", []string{"compact", "context", "cost", "init", "review", "usage"}).
 		set("conversation_id", "sim-ask"),
 	simUser("sim-ask-prompt", simAgentAskPrompt),
 	simSay("msg_ask_0", "One thing before I start:"),
@@ -5590,7 +5590,7 @@ func simAgentHistory() api.AgentResponse {
 		Prompt:        simAgentHistoryPrompt,
 		ChatMode:      ptr(true),
 		WorktreePath:  ptr("/repo/.hydra/local/worktrees/sqlc-port"),
-		Model:         ptr("claude-opus-4-8"),
+		Model:         ptr("claude-opus-5-5"),
 		AgentStatus: &api.AgentStatusInfo{
 			Status:    api.Finished,
 			Timestamp: simNow().Format(time.RFC3339),
@@ -5628,7 +5628,7 @@ func simHistoryEvents() []simNorm {
 	// This fixture represents API-key auth so its finished turns exercise the
 	// billable cost footer; the other Claude simulations stay on subscription
 	// auth and keep hiding the client-side estimate.
-	add(simConversationStarted("claude-opus-4-8", nil).
+	add(simConversationStarted("claude-opus-5-5", nil).
 		set("conversation_id", "sim-history").
 		set("api_key_source", "ANTHROPIC_API_KEY"))
 	add(simUser("sim-history-prompt", simAgentHistoryPrompt))
@@ -5740,7 +5740,7 @@ func handleSimHistoryWS(conn *safeConn) {
 // opening paragraph and one finished tool step. Everything after this is
 // streamed live by handleSimWorkingWS and never settles into a result.
 var simWorkingEvents = []simNorm{
-	simConversationStarted("claude-opus-4-8", []string{"compact", "context", "cost", "init", "review", "usage"}).
+	simConversationStarted("claude-opus-5-5", []string{"compact", "context", "cost", "init", "review", "usage"}).
 		set("conversation_id", "sim-working"),
 	simUser("sim-working-prompt", simAgentWorkingPrompt),
 	simSay("msg_working_1", "Starting from the allocator - the range and the retry behaviour on a busy port are the two things worth writing down precisely."),

@@ -925,7 +925,7 @@ function Composer({
     : [{ id: model, label: friendlyModelName(model) }, ...models];
   const efforts =
     provider === "codex"
-      ? ["", "low", "medium", "high", "xhigh"]
+      ? ["", "low", "medium", "high", "xhigh", "max"]
       : ["", "low", "medium", "high"];
   const ready = Boolean(draft.trim() || attachments.length);
   return (
@@ -1195,17 +1195,14 @@ const WORKING_VERBS = [
   "Wrangling",
 ];
 const CLAUDE_MODELS = [
-  { id: "fable", label: "Fable" },
-  { id: "claude-opus-5", label: "Opus 5" },
-  { id: "claude-opus-4-8", label: "Opus 4.8" },
-  { id: "sonnet", label: "Sonnet" },
-  { id: "haiku", label: "Haiku" },
+  { id: "claude-fable-5-1", label: "Fable 5.1" },
+  { id: "claude-opus-5-5", label: "Opus 5.5" },
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
+  { id: "claude-haiku-5-5", label: "Haiku 5.5" },
 ];
 const CODEX_MODELS = [
-  { id: "gpt-5.6-sol", label: "5.6 Sol" },
-  { id: "gpt-5.6-terra", label: "5.6 Terra" },
-  { id: "gpt-5.6-luna", label: "5.6 Luna" },
-  { id: "gpt-5.5", label: "5.5" },
-  { id: "gpt-5.4", label: "5.4" },
-  { id: "gpt-5.4-mini", label: "5.4 Mini" },
+  { id: "gpt-6-astra", label: "6 Astra" },
+  { id: "gpt-6.1-sol", label: "6.1 Sol" },
+  { id: "gpt-6.1-terra", label: "6.1 Terra" },
+  { id: "gpt-6-luna", label: "6 Luna" },
 ];
