@@ -6661,7 +6661,7 @@ export function stepSummary(items: ChatItem[]): {
 }
 
 // GrowIn mounts CLOSED and opens on the next frame, so the "N steps" line grows
-// into place rather than popping in above the steps it now owns. It is the only
+// into place rather than popping in as a run becomes a group. It is the only
 // motion a group makes on its own: nothing ever folds itself while you are
 // looking at it (see StepGroup).
 function GrowIn({ children }: { children: ReactNode }) {
@@ -6701,16 +6701,9 @@ function useGroupApproval(items: ChatItem[]): boolean {
 // StepGroup is the run itself: one line while closed, the rows it holds while
 // open (rendered by the caller through renderRow).
 //
-// It NEVER folds itself while you are looking at it. A group born while you are
-// watching a turn starts open - you are here to watch the work, and a collapse
-// under your eyes moves the text you are reading (a long run is a 1000px shrink,
-// and the pane deliberately has no browser scroll anchoring). It stays open for
-// the rest of the visit unless you close it yourself.
-//
-// The tidying happens on the way back in: fold state is per-mount, so leaving
-// the page and returning - or a reload - renders every group folded, which is
-// what liveFrom (the transcript's first live item id) distinguishes. A replayed
-// transcript has no live items, so it comes back quiet.
+// Groups start folded, including runs arriving while the reader follows a live
+// turn. Manual expansion lasts for the visit; incoming steps do not change it.
+// A pending approval still reveals the card that needs the reader's response.
 function StepGroup({
   items,
   liveFrom,
@@ -6720,12 +6713,9 @@ function StepGroup({
   liveFrom: number | null
   renderRow: (item: ChatItem, animate: boolean) => ReactNode
 }) {
-  // Whether the group came into being while the reader was watching, rather than
-  // arriving with a replayed transcript. That decides both how it enters (the
-  // header grows in above steps already on screen) and how it starts: open for a
-  // live run, folded for history.
+  // Live groups grow their header into place; history renders it immediately.
   const [bornLive] = useState(() => liveFrom != null && items.some((it) => it.id >= liveFrom))
-  const [open, setOpen] = useState(bornLive)
+  const [open, setOpen] = useState(false)
   const { label, tools, thinkingMs, failed, running } = stepSummary(items)
   // A parked approval overrides the fold: the row you have to answer is inside.
   const needsApproval = useGroupApproval(items)

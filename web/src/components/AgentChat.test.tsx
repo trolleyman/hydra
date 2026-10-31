@@ -1005,17 +1005,21 @@ describe('an expanded tool card survives its run becoming a step group', () => {
     act(() => read!.click())
     expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
 
-    // The second call: the run now earns a group, and the Read card moves inside
-    // it. It must come back open, not folded.
+    // The run starts collapsed even when its first card was expanded. Opening
+    // the group restores that card's choice without expanding the other cards.
     call(ws, 'toolu_grp_2', 'Grep')
+    const group = (await screen.findByText('2 steps')).closest('button')!
+    expect(group).toHaveAttribute('aria-expanded', 'false')
+    act(() => group.click())
+    expect(group).toHaveAttribute('aria-expanded', 'true')
     expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
-    // The card the reader never touched is unaffected - the fix restores a
-    // choice, it doesn't open everything.
     expect(cardHeader('Grep')).toHaveAttribute('aria-expanded', 'false')
-    // The group's own header grows in a frame later (GrowIn), so it settles
-    // after the cards it now owns - proof the run really did fold.
-    await screen.findByText('2 steps')
-    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+
+    call(ws, 'toolu_grp_3', 'Glob')
+    expect(group).toHaveAttribute('aria-expanded', 'true')
+    act(() => group.click())
+    call(ws, 'toolu_grp_4', 'Read')
+    expect(group).toHaveAttribute('aria-expanded', 'false')
   })
 
   // The other half of the rule: the memory belongs to the VISIT. What you
@@ -1101,6 +1105,9 @@ describe('a shell_cwd read by the daemon captions the command after it', () => {
     emit('shell_cwd', { tool_use_id: 'toolu_a', cwd: '/wt/web' })
     emit('tool_started', { id: 'toolu_b', name: 'Bash', input: { command: 'bun test' } })
     emit('tool_completed', { id: 'toolu_b', content: '12 pass' })
+
+    const group = (await screen.findByText('2 steps')).closest('button')!
+    act(() => group.click())
 
     const header = [...document.querySelectorAll('[role="button"][aria-expanded]')].find((el) =>
       el.textContent?.includes('bun test'),

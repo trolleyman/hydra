@@ -287,6 +287,10 @@ and `web/src/DiffViewer.tsx`):
   title. When the floating conversation selector or Plan control is present, the
   transcript reserves their first row so this divider remains visible at
   scroll-top.
+- Tool step groups start collapsed in both live and replayed transcripts. Their
+  headers summarize the tools and current activity. Manual expansion stays in
+  place as new steps arrive during the visit; pending approvals reveal their
+  group automatically so the response controls stay visible.
 - A pinned running chat follows new output until the user takes control. Wheel
   movement and a pointer press in the native scrollbar gutter cancel the active
   follow animation before scrolling begins, so dragging the thumb never fights
