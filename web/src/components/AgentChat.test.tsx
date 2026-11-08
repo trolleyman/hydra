@@ -1060,6 +1060,13 @@ describe('an expanded tool card survives its run becoming a step group', () => {
     call(ws, 'toolu_grp_2', 'Grep')
     const group = (await screen.findByText('2 steps')).closest('button')!
     expect(group).toHaveAttribute('aria-expanded', 'false')
+    const body = group.closest('div.text-xs')!.lastElementChild as HTMLElement
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+    await waitFor(() => {
+      expect(body.style.maxHeight).toBe('0px')
+      expect(body.style.transition).toBe('max-height 0.22s ease')
+    })
+    await waitFor(() => expect(cardHeader('Read')).toBeUndefined())
     act(() => group.click())
     expect(group).toHaveAttribute('aria-expanded', 'true')
     expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')

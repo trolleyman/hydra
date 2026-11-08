@@ -6710,9 +6710,8 @@ export function stepSummary(items: ChatItem[]): {
 }
 
 // GrowIn mounts CLOSED and opens on the next frame, so the "N steps" line grows
-// into place rather than popping in as a run becomes a group. It is the only
-// motion a group makes on its own: nothing ever folds itself while you are
-// looking at it (see StepGroup).
+// into place rather than popping in as a run becomes a group. The existing
+// rows collapse through Expandable alongside the header entrance.
 function GrowIn({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
@@ -6765,6 +6764,19 @@ function StepGroup({
   // Live groups grow their header into place; history renders it immediately.
   const [bornLive] = useState(() => liveFrom != null && items.some((it) => it.id >= liveFrom))
   const [open, setOpen] = useState(false)
+  // A live run replaces cards already on screen. Start their body at full
+  // height, then close it with the same Expandable motion as a manual fold.
+  const [foldingIn, setFoldingIn] = useState(() =>
+    bornLive && !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
+  useEffect(() => {
+    if (!foldingIn) return
+    const timer = setTimeout(() => {
+      markSelfReflow()
+      setFoldingIn(false)
+    }, 16)
+    return () => clearTimeout(timer)
+  }, [foldingIn])
   const { label, tools, thinkingMs, failed, running } = stepSummary(items)
   // A parked approval overrides the fold: the row you have to answer is inside.
   const needsApproval = useGroupApproval(items)
@@ -6838,7 +6850,7 @@ function StepGroup({
       {bornLive ? <GrowIn>{header}</GrowIn> : header}
       {/* The rows sit tighter than the transcript's gap-3 so an expanded run
           still reads as one block rather than as loose messages. */}
-      <Expandable open={shown}>
+      <Expandable open={shown || foldingIn}>
         <div className="flex flex-col gap-2 pt-2">
           {items.map((it) => renderRow(it, entered.get(it.id) ?? false))}
         </div>
