@@ -4334,6 +4334,9 @@ components:
         ephemeral:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
+        local:
+          type: boolean
+          description: Run Claude or Codex directly on the host without OS sandboxing. Worktree workspace only. Defaults to false and persists across resumes.
         git_isolation:
           type: string
           description: >-
@@ -4538,6 +4541,9 @@ components:
             nft lock - an inescapable boundary), "filtered-advisory" (allow-list
             enforced by the proxy via HTTP(S)_PROXY only; a determined process can
             bypass it), or absent/empty (the head isn't live).
+        local:
+          type: boolean
+          description: Whether this agent runs directly on the host without OS sandboxing.
         git_isolation:
           type: string
           description: >-

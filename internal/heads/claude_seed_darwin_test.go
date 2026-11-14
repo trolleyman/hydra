@@ -38,7 +38,7 @@ func TestSeedClaudeHeadUsesDarwinRedirectedStateAndImmutableInputs(t *testing.T)
 		t.Fatal(err)
 	}
 
-	res, err := seedHead(projectRoot, "claude-head", sandbox.AgentTypeClaude, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff)
+	res, err := seedHead(projectRoot, "claude-head", sandbox.AgentTypeClaude, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestSeedClaudeHeadUsesDarwinRedirectedStateAndImmutableInputs(t *testing.T)
 	if err := os.Symlink(victim, settingsPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := seedHead(projectRoot, "claude-head", sandbox.AgentTypeClaude, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff); err != nil {
+	if _, err := seedHead(projectRoot, "claude-head", sandbox.AgentTypeClaude, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff, false); err != nil {
 		t.Fatal(err)
 	}
 	if auth, err := os.ReadFile(filepath.Join(runtimeConfigDir, ".credentials.json")); err != nil || string(auth) != "refreshed" {
@@ -155,7 +155,7 @@ func TestSeedClaudeHeadClonesLegacyTranscriptOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	if _, err := seedHead(projectRoot, "legacy", sandbox.AgentTypeClaude, worktree, home, "", gate.Policy{}, sandbox.GitIsolationOff); err != nil {
+	if _, err := seedHead(projectRoot, "legacy", sandbox.AgentTypeClaude, worktree, home, "", gate.Policy{}, sandbox.GitIsolationOff, false); err != nil {
 		t.Fatal(err)
 	}
 	target := paths.ClaudeProjectDirForSession(projectRoot, "legacy", home, worktree)
@@ -165,7 +165,7 @@ func TestSeedClaudeHeadClonesLegacyTranscriptOnce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "new-session.jsonl"), []byte("new\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := seedHead(projectRoot, "legacy", sandbox.AgentTypeClaude, worktree, home, "", gate.Policy{}, sandbox.GitIsolationOff); err != nil {
+	if _, err := seedHead(projectRoot, "legacy", sandbox.AgentTypeClaude, worktree, home, "", gate.Policy{}, sandbox.GitIsolationOff, false); err != nil {
 		t.Fatal(err)
 	}
 	if data, err := os.ReadFile(filepath.Join(target, "new-session.jsonl")); err != nil || string(data) != "new\n" {

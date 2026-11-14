@@ -3,8 +3,12 @@
 package heads
 
 import "os"
+import "braces.dev/errtrace"
 
-func prepareClaudeSeedLayout(_ string, _ string, home, _ string, res *seedResult) (claudeSeedLayout, error) {
+func prepareClaudeSeedLayout(projectRoot, id, home, worktreePath string, res *seedResult) (claudeSeedLayout, error) {
+	if res.local {
+		return errtrace.Wrap2(prepareNativeClaudeSeedLayout(projectRoot, id, home, worktreePath, res))
+	}
 	configDir := configuredClaudeConfigDir(home)
 	if os.Getenv("CLAUDE_CONFIG_DIR") != "" {
 		res.Env = append(res.Env, "CLAUDE_CONFIG_DIR="+configDir)

@@ -34,7 +34,7 @@ func TestSeedCodexHeadUsesDarwinRedirectedHomeAndImmutableInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := seedHead(projectRoot, "codex-head", sandbox.AgentTypeCodex, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff)
+	res, err := seedHead(projectRoot, "codex-head", sandbox.AgentTypeCodex, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSeedCodexHeadUsesDarwinRedirectedHomeAndImmutableInputs(t *testing.T) {
 	if err := os.Symlink(victim, generatedConfig); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := seedHead(projectRoot, "codex-head", sandbox.AgentTypeCodex, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff); err != nil {
+	if _, err := seedHead(projectRoot, "codex-head", sandbox.AgentTypeCodex, worktree, home, "hydra instructions", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff, false); err != nil {
 		t.Fatal(err)
 	}
 	if auth, err := os.ReadFile(filepath.Join(runtimeHome, "auth.json")); err != nil || string(auth) != "refreshed" {
@@ -170,7 +170,7 @@ func TestSeedCodexHeadRejectsMalformedRequiredConfigOnDarwin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(hostCodexHome, "config.toml"), []byte("this = [is invalid"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := seedHead(projectRoot, "bad-config", sandbox.AgentTypeCodex, worktree, home, "prompt", gate.Policy{}, sandbox.GitIsolationOff)
+	_, err := seedHead(projectRoot, "bad-config", sandbox.AgentTypeCodex, worktree, home, "prompt", gate.Policy{}, sandbox.GitIsolationOff, false)
 	if err == nil || !strings.Contains(err.Error(), "required macOS Codex config") {
 		t.Fatalf("seedHead malformed config error = %v", err)
 	}

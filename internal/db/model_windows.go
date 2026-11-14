@@ -22,6 +22,7 @@ type Agent struct {
 	// GitIsolation is the per-head git-isolation mode override (off/readonly; "" =
 	// use the agent-type policy default). See docs/git-isolation.md.
 	GitIsolation string
+	Local        bool // Run directly on the host without OS confinement.
 
 	// Identity
 	AgentType string `gorm:"not null"` // "claude" | "gemini" | "copilot" | "codex" | "bash"

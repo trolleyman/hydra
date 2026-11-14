@@ -63,6 +63,7 @@ type Head struct {
 	// GitIsolation is the head's per-head git-isolation override (off/readonly;
 	// "" = agent-type policy default). See docs/git-isolation.md.
 	GitIsolation string
+	Local        bool // Run directly on the host without OS confinement.
 	// AgentStatus holds the computed status for display.
 	AgentStatus *api.AgentStatusInfo
 	CreatedAt   int64 // Unix timestamp; 0 if not started
@@ -192,6 +193,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			Prompt:           a.Prompt,
 			BaseBranch:       a.BaseBranch,
 			WorkspaceBaseRef: a.WorkspaceBaseRef,
+			Local:            a.Local,
 			GitIsolation:     a.GitIsolation,
 			Ephemeral:        a.Ephemeral,
 			ChatMode:         a.ChatMode,
@@ -385,6 +387,7 @@ func archivedHead(a *db.Agent) Head {
 		Prompt:           a.Prompt,
 		BaseBranch:       a.BaseBranch,
 		WorkspaceBaseRef: a.WorkspaceBaseRef,
+		Local:            a.Local,
 		GitIsolation:     a.GitIsolation,
 		Ephemeral:        a.Ephemeral,
 		ChatMode:         a.ChatMode,
@@ -442,6 +445,7 @@ type SpawnHeadOptions struct {
 	// head (off/readonly; empty = use the policy default). See
 	// docs/git-isolation.md. Persisted on the agent so resume applies the same mode.
 	GitIsolation string
+	Local        bool // Run directly on the host without OS confinement.
 	Resume       bool // if true, resume the agent's prior conversation
 	// Replace allows an explicit ID to take over an ARCHIVED head with the same
 	// ID in the SAME project, overwriting its archived record (the restart and
@@ -502,6 +506,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 	if opts.WorkspaceKind != api.WorkspaceKindWorktree && opts.WorkspaceKind != api.WorkspaceKindProjectDirectory {
 		return nil, errtrace.Wrap(fmt.Errorf("unknown workspace kind %q", opts.WorkspaceKind))
+	}
+	if opts.Local && (opts.WorkspaceKind != api.WorkspaceKindWorktree || (opts.AgentType != sandbox.AgentTypeClaude && opts.AgentType != sandbox.AgentTypeCodex)) {
+		return nil, errtrace.Wrap(errors.New("local execution requires a Claude or Codex worktree head"))
 	}
 	projectDirectory := opts.WorkspaceKind == api.WorkspaceKindProjectDirectory
 	if projectDirectory {
@@ -625,6 +632,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			BranchName:       branchName,
 			BaseBranch:       baseBranch,
 			WorkspaceBaseRef: workspaceBaseRef,
+			Local:            opts.Local,
 			GitIsolation:     opts.GitIsolation,
 			AgentType:        string(opts.AgentType),
 			PrePrompt:        opts.PrePrompt,
@@ -753,9 +761,16 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// PrePrompt keeps the placeholder so a mode toggle is re-resolved on resume).
 	tmpDir := ensureHeadTmpDir(projectRoot, opts.ID)
 	launchPrePrompt := strings.ReplaceAll(opts.PrePrompt, "<run-mode>", config.RunModeLine(opts.ChatMode))
-	launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
+	if !opts.Local {
+		launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
+	}
 
-	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)), gitIso)
+	if opts.Local {
+		gitIso = sandbox.GitIsolationOff
+		net = sandbox.NetworkPolicy{Mode: sandbox.NetUnrestricted, Enabled: true}
+		launchPrePrompt = localExecutionPrompt(launchPrePrompt, opts.ChatMode)
+	}
+	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)), gitIso, opts.Local)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("seed head: %w", err))
 		return nil, errtrace.Wrap(err)
@@ -780,6 +795,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
+		NoSandbox:             opts.Local,
 		AgentType:             opts.AgentType,
 		WorktreePath:          worktreePath,
 		WorkingDirReadOnly:    projectDirectory && opts.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
@@ -860,6 +876,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		PrePrompt:      opts.PrePrompt,
 		Prompt:         opts.Prompt,
 		BaseBranch:     baseBranch,
+		Local:          opts.Local,
 		GitIsolation:   opts.GitIsolation,
 		Ephemeral:      opts.Ephemeral,
 		ChatMode:       opts.ChatMode,
@@ -945,6 +962,9 @@ func resolveGitIsolation(cfg config.Config, agentType, override string) sandbox.
 // head (its per-head override, else the agent-type policy default), for display
 // on the API response. Config load is cached, so this is cheap per call.
 func EffectiveGitIsolation(h Head) sandbox.GitIsolationMode {
+	if h.Local {
+		return sandbox.GitIsolationOff
+	}
 	cfg, _ := config.Load(h.ProjectPath)
 	return resolveGitIsolation(cfg, string(h.AgentType), h.GitIsolation)
 }
@@ -1161,6 +1181,9 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			// is running; nil in unrestricted/off modes, where the shell needs none.
 			tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
 			shellEnv := sandbox.RuntimeEnv(append([]string(nil), env...), tmpDir, cfg.ResolveInheritedEnv(string(head.AgentType))...)
+			if head.Local {
+				shellEnv = localRuntimeEnv(env, tmpDir)
+			}
 			shellEnv = sandbox.SharedCacheEnv(shellEnv, filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
 			// Persisted pre-spawn values are trusted project policy and intentionally
 			// override Hydra's private cache defaults, just as they do for the agent.
@@ -1198,7 +1221,7 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		// The bash shell shares the head's worktree, so it inherits the head's
 		// git-isolation mode: a shell must not be able to write refs the agent can't.
 		shellGitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
-		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "", gate.Policy{}, shellGitIso)
+		seed, err := seedHead(projectRoot, shellID, sandbox.AgentTypeBash, worktreePath, home, "", gate.Policy{}, shellGitIso, false)
 		if err != nil {
 			return "", errtrace.Wrap(err)
 		}
@@ -1402,14 +1425,21 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// made while the session was down takes effect on this relaunch.
 	tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
 	launchPrePrompt := strings.ReplaceAll(head.PrePrompt, "<run-mode>", config.RunModeLine(head.ChatMode))
-	launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
+	if !head.Local {
+		launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
+	}
 	// Re-apply the head's persisted git-isolation override (empty = policy default),
 	// so a resume after a daemon restart keeps the same .git lockdown.
 	gitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
 	if head.UsesProjectDirectory() {
 		gitIso = sandbox.GitIsolationReadonly
 	}
-	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(head.AgentType)), gitIso)
+	if head.Local {
+		gitIso = sandbox.GitIsolationOff
+		net = sandbox.NetworkPolicy{Mode: sandbox.NetUnrestricted, Enabled: true}
+		launchPrePrompt = localExecutionPrompt(launchPrePrompt, head.ChatMode)
+	}
+	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(head.AgentType)), gitIso, head.Local)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -1456,6 +1486,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
+		NoSandbox:             head.Local,
 		AgentType:             head.AgentType,
 		WorktreePath:          worktreePath,
 		WorkingDirReadOnly:    head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
@@ -1905,7 +1936,11 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	writable, readable, masked, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
 	tmpDir := ensureHeadTmpDir(head.ProjectPath, head.ID)
 	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseEnv(head.ProjectPath, worktree)...)
-	env = sandbox.RuntimeEnv(env, tmpDir, cfg.ResolveInheritedEnv(string(head.AgentType))...)
+	if head.Local {
+		env = localRuntimeEnv(env, tmpDir)
+	} else {
+		env = sandbox.RuntimeEnv(env, tmpDir, cfg.ResolveInheritedEnv(string(head.AgentType))...)
+	}
 	env = sandbox.SharedCacheEnv(env, filepath.Join(paths.GetCacheDirFromProjectRoot(head.ProjectPath), "sandbox"), cfg.ResolveSharedCaches(string(head.AgentType)))
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)
@@ -1926,6 +1961,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	}
 
 	spec, err := sandbox.BuildSpec(sandbox.Options{
+		NoSandbox:             head.Local,
 		AgentType:             sandbox.AgentTypeBash,
 		WorktreePath:          worktree,
 		WorkingDirReadOnly:    head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),

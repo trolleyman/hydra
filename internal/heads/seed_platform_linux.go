@@ -17,6 +17,9 @@ func seedFilePath(seedDir, id, name string) string {
 }
 
 func deliverSeedFile(res *seedResult, source, target string, readOnly bool) string {
+	if res.local {
+		return source
+	}
 	res.Binds = append(res.Binds, sandbox.Bind{Source: source, Target: target, ReadOnly: readOnly})
 	return target
 }

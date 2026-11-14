@@ -66,6 +66,10 @@ export type AgentResponse = {
      */
     network_enforcement?: string;
     /**
+     * Whether this agent runs directly on the host without OS sandboxing.
+     */
+    local?: boolean;
+    /**
      * Effective git-isolation mode for this head: "off" (the shared .git is writable in the sandbox) or "readonly" (the whole .git is bound read-only, so commits are host-mediated). See docs/git-isolation.md.
      */
     git_isolation?: string;

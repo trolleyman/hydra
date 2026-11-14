@@ -24,6 +24,7 @@ type Agent struct {
 	// use the agent-type policy default). Chosen at spawn and persisted so resume
 	// re-applies the same .git lockdown. See docs/git-isolation.md.
 	GitIsolation string
+	Local        bool // Run directly on the host without OS confinement.
 
 	// Identity
 	AgentType string `gorm:"not null"` // "claude" | "gemini" | "copilot" | "codex" | "bash"

@@ -286,7 +286,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	policy.MCPToolsBlocked = append(append([]string(nil), policy.MCPToolsBlocked...), reviewBlockedTools...)
 
 	reviewPrompt := withPrivateTempPrompt(reviewSystemPrompt, tmpDir)
-	seed, err := seedHead(projectRoot, id, agentType, worktreePath, home, reviewPrompt, policy, sandbox.GitIsolationReadonly)
+	seed, err := seedHead(projectRoot, id, agentType, worktreePath, home, reviewPrompt, policy, sandbox.GitIsolationReadonly, false)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}

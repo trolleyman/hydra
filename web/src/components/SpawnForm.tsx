@@ -385,6 +385,7 @@ export const SpawnForm = memo(function SpawnForm({
   // request omits git_isolation). See docs/git-isolation.md. Not persisted: a locked
   // .git is a deliberate per-spawn choice, defaulted to the project policy.
   const [gitIsolation, setGitIsolation] = useState('')
+  const [localExecution, setLocalExecution] = useState(false)
   const [loading, setLoading] = useState(false)
   // Base branch the new agent will be created from. Defaults to the repository's
   // stable default branch; can be pointed at another agent's hydra/<id> branch to stack
@@ -472,6 +473,8 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     if (gitIsolation === 'readonly' && !GIT_TOOL_AGENTS.includes(agentType)) setGitIsolation('')
   }, [agentType, gitIsolation])
+
+  useEffect(() => { setLocalExecution(false) }, [agentType, projectDirectory])
 
   useEffect(() => {
     if (projectDirectoryOnly && agentType !== 'claude' && agentType !== 'codex') {
@@ -1102,7 +1105,8 @@ export const SpawnForm = memo(function SpawnForm({
         // server bases the head on the PR head and its target branch.
         ...(!projectDirectorySession && (adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {})),
         // Omit git_isolation when '' so the server applies the project policy default.
-        ...(!projectDirectorySession && gitIsolation ? { git_isolation: gitIsolation } : {}),
+        ...(localExecution && !projectDirectorySession && (agentType === 'claude' || agentType === 'codex') ? { local: true } : {}),
+        ...(!localExecution && !projectDirectorySession && gitIsolation ? { git_isolation: gitIsolation } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
       }
@@ -1180,6 +1184,7 @@ export const SpawnForm = memo(function SpawnForm({
     setBaseBranch(defaultBranch)
     setChatMode(true)
     setGitIsolation('')
+    setLocalExecution(false)
     setProjectDirectory(projectDirectoryDefault)
     setProjectDirectoryFilesystemMode(ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit)
     setProjectDirectoryAllowCommits(true)
@@ -1204,6 +1209,7 @@ export const SpawnForm = memo(function SpawnForm({
     // the one remembered pick with no representation outside this panel (the
     // agent and model both show on the picker trigger beside it).
     const nonDefaults: string[] = []
+    if (localExecution && showChat && !projectDirectory) nonDefaults.push('Execution: local (no sandbox)')
     if (projectDirectory && !projectDirectoryDefault) nonDefaults.push(`Workspace: project directory (${projectDirectoryFilesystemMode})`)
     if (projectDirectory && projectDirectoryAllowCommits) nonDefaults.push('Commits: allowed')
     if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
@@ -1211,7 +1217,7 @@ export const SpawnForm = memo(function SpawnForm({
       nonDefaults.push(`Base branch: ${baseBranch}`)
     }
     if (showChat && !projectDirectory && !chatMode) nonDefaults.push('Run mode: terminal')
-    if (!projectDirectory && gitIsolation) {
+    if (!projectDirectory && !localExecution && gitIsolation) {
       nonDefaults.push(`Git isolation: ${GIT_ISOLATION_OPTS.find((o) => o.id === gitIsolation)?.label ?? gitIsolation}`)
     }
     return (
@@ -1314,13 +1320,29 @@ export const SpawnForm = memo(function SpawnForm({
         {showChat && !projectDirectory && (
           <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
         )}
+        {showChat && !projectDirectory && <>
+          <SettingsGroupLabel className="mb-1.5">Execution</SettingsGroupLabel>
+          <SegmentedControl<'sandbox' | 'local'>
+            label="Execution"
+            value={localExecution ? 'local' : 'sandbox'}
+            onChange={(value) => setLocalExecution(value === 'local')}
+            options={[
+              { value: 'sandbox', label: 'Sandboxed' },
+              { value: 'local', label: 'Local' },
+            ]}
+          />
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            {localExecution ? 'Runs on this machine with access to your files and credentials. Keeps its own worktree. Sandbox and Git isolation do not apply.' : 'Runs in an OS sandbox with restricted filesystem and network access.'}
+          </p>
+          <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
+        </>}
         {/* Git isolation (per-head override; Default inherits the project policy,
             which is readonly unless the project sets otherwise). Last in the
             popover, as a dropdown: its options carry two-line explanations that
             crowded out the other controls when listed inline. See
             docs/git-isolation.md. */}
-        {!projectDirectory && <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>}
-        {!projectDirectory && <SettingsSelect
+        {!projectDirectory && !localExecution && <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>}
+        {!projectDirectory && !localExecution && <SettingsSelect
           label="Git isolation"
           value={gitIsolation}
           onChange={setGitIsolation}

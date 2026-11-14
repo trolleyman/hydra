@@ -42,10 +42,11 @@ const strictMCPConfigSandboxPath = "/tmp/hydra-mcp-config.json"
 
 // seedResult holds the per-head sandbox inputs produced by seedHead.
 type seedResult struct {
+	local bool
 	// seedDir is the host directory for this platform's generated immutable
 	// inputs. Linux uses the existing project cache; Darwin uses seed/<head-id>.
 	seedDir string
-	// nativeSeedPaths selects real-path delivery on Darwin after a provider has
+	// nativeSeedPaths selects real-path delivery after a provider has
 	// established the corresponding path redirect (currently per-head CODEX_HOME).
 	nativeSeedPaths bool
 	// Binds are host->sandbox file binds for agent config (Linux only; macOS
@@ -95,7 +96,7 @@ type seedResult struct {
 // seeded here as context files (~/.gemini/GEMINI.md,
 // ~/.copilot/copilot-instructions.md, ~/.codex/AGENTS.md), merged on top of any
 // the host user already has.
-func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string, policy gate.Policy, gitIso sandbox.GitIsolationMode) (*seedResult, error) {
+func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath, home, prePrompt string, policy gate.Policy, gitIso sandbox.GitIsolationMode, local bool) (*seedResult, error) {
 	// Uploads are a built-in read-only input to every head. Create the directory
 	// before the sandbox mount namespace is assembled: Linux skips missing
 	// readable paths, so creating it only when a later chat paste arrives would
@@ -112,7 +113,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		return nil, errtrace.Wrap(err)
 	}
 
-	res := &seedResult{seedDir: seedDir}
+	res := &seedResult{seedDir: seedDir, local: local}
 	if projectID, ok := statepath.ProjectID(projectRoot); ok {
 		res.Env = append(res.Env,
 			statepath.ProjectEnvironment+"="+projectID,
@@ -217,6 +218,10 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	runtimeBin, err := hydraRuntimeForSandbox()
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("materialize hydra runtime: %w", err))
+	}
+	if local && runtimeBin.Bind != nil {
+		runtimeBin.VisiblePath = runtimeBin.Bind.Source
+		runtimeBin.Bind = nil
 	}
 	stableHydraBin := runtimeBin.VisiblePath
 	res.HydraBinPath = stableHydraBin
@@ -426,7 +431,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		codexCfg, cfgErr := sandbox.BuildCodexConfig(hostCodexConfig, stableHydraBin, mcpKeep)
 		if cfgErr != nil {
 			if res.nativeSeedPaths {
-				return nil, errtrace.Wrap(fmt.Errorf("build required macOS Codex config for %s: %w", id, cfgErr))
+				return nil, errtrace.Wrap(fmt.Errorf("build required native Codex config for %s: %w", id, cfgErr))
 			}
 			log.Printf("warn: not seeding hydra MCP into codex config for %s: %v", id, cfgErr)
 		} else {

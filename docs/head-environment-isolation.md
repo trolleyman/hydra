@@ -205,3 +205,21 @@ This is an intentional security boundary and has no broad "inherit everything"
 compatibility switch. A project adds each nonstandard requirement deliberately
 through `inherit_env` or produces a value from `pre_spawn_script` through
 `$HYDRA_ENV`.
+
+## Local agent execution
+
+The spawn options popup offers Execution -> Sandboxed / Local for Claude and
+Codex heads using a worktree. Sandboxed is the default. Local runs the coding
+tool directly on the machine running Hydra, as Hydra's user, with access to that
+user's files and credentials. OS filesystem masks, read-only Git mounts, COW
+paths, and network isolation do not apply. The dedicated worktree still selects
+the working directory, and Hydra retains chat, status hooks, MCP policy, resource
+limits, and the filtered launch environment. Local is a per-spawn choice, reset
+by Reset spawn options, and is stored with the head for resume and restart.
+
+Local heads use persistent per-head Claude/Codex configuration directories so
+Hydra's generated hooks and MCP configuration do not overwrite the user's own
+provider settings. Authentication is copied into that private provider state at
+creation. Pre-spawn and pre-exit scripts and composer `!commands` run locally with the head. Local mode
+is unavailable for project-directory heads, whose read-only and guarded-commit
+controls require sandbox enforcement.

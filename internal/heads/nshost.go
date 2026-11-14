@@ -280,8 +280,16 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	// Persist the resolved $HYDRA_ENV to the per-head /tmp so the daemon can read
 	// it back and inject the same vars into this head's sibling sandboxed shells
 	// (StartShellSession), which do not re-run the script.
-	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sandbox.SandboxPreSpawnEnvFile(sb.TmpDir), sb.Argv)
-	req := nshost.SpawnRequest{Argv: argv, Env: sandbox.SharedCacheEnv(sandbox.RuntimeEnv(sb.Env, sb.TmpDir, sb.InheritedEnv...), sb.CacheRoot, sb.Caches), Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes}
+	envFile := sandbox.SandboxPreSpawnEnvFile(sb.TmpDir)
+	if sb.NoSandbox {
+		envFile = sandbox.HostPreSpawnEnvFile(sb.TmpDir)
+	}
+	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, envFile, sb.Argv)
+	runtimeEnv := sandbox.RuntimeEnv(sb.Env, sb.TmpDir, sb.InheritedEnv...)
+	if sb.NoSandbox {
+		runtimeEnv = localRuntimeEnv(sb.Env, sb.TmpDir)
+	}
+	req := nshost.SpawnRequest{Argv: argv, Env: sandbox.SharedCacheEnv(runtimeEnv, sb.CacheRoot, sb.Caches), Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes}
 	if sb.StdioPipes {
 		req.StderrPrefix = fmt.Sprintf("[%s:%s] ", agentType, id)
 	}

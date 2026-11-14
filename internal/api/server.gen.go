@@ -719,6 +719,9 @@ type AgentResponse struct {
 	HasUnreadChanges *bool  `json:"has_unread_changes,omitempty"`
 	Id               string `json:"id"`
 
+	// Local Whether this agent runs directly on the host without OS sandboxing.
+	Local *bool `json:"local,omitempty"`
+
 	// MergeWhenGreen True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN
 	MergeWhenGreen *bool `json:"merge_when_green,omitempty"`
 
@@ -3798,6 +3801,9 @@ type SpawnAgentRequest struct {
 
 	// Id Explicit identifier for the agent (letters/digits plus ._-, usable as a git branch component). When omitted, the server derives a slug from the prompt and uniquifies it with a -2/-3... suffix, so spawns can never collide. An explicit ID that already exists (active, archived, or in another project) fails with 409 instead of overwriting the existing head.
 	Id *string `json:"id,omitempty"`
+
+	// Local Run Claude or Codex directly on the host without OS sandboxing. Worktree workspace only. Defaults to false and persists across resumes.
+	Local *bool `json:"local,omitempty"`
 
 	// Model Model the agent CLI should use for this session (e.g. "opus", "sonnet", "haiku" for Claude). Passed as the CLI's --model flag at spawn only; on resume it is omitted so the agent restores the model its transcript was saved with (and honours any in-session /model change). Empty/omitted inherits the CLI's own default.
 	Model *string `json:"model,omitempty"`

@@ -494,10 +494,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		worktree = paths.GetReviewCheckoutDirFromProjectRoot(projectRoot, head.ID)
 	}
 	shellPolicy := heads.ShellCommandPolicy{
+		Local:              head.Local,
 		WorkingDirReadOnly: head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
 		GitIsolation:       head.GitIsolation,
 	}
 	if useReview {
+		shellPolicy.Local = false
 		shellPolicy.WorkingDirReadOnly = true
 		shellPolicy.GitIsolation = string(sandbox.GitIsolationReadonly)
 	}

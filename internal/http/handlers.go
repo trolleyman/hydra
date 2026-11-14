@@ -820,6 +820,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		CreatedAt:          createdAt,
 		AgentStatus:        h.AgentStatus,
 		NetworkEnforcement: netEnf,
+		Local:              &h.Local,
 		GitIsolation:       &gitIso,
 		HasUnreadChanges:   &h.HasUnreadChanges,
 		UnreadComments:     unreadCommentCount(h.ProjectPath, h.ID),
@@ -1994,6 +1995,10 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		}, nil
 	}
 	projectDirectory := workspaceKind == api.WorkspaceKindProjectDirectory
+	if request.Body.Local != nil && *request.Body.Local && (projectDirectory || (agentType != sandbox.AgentTypeClaude && agentType != sandbox.AgentTypeCodex)) {
+		return api.SpawnAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "local execution requires a Claude or Codex worktree head"}, nil
+	}
+
 	filesystemMode := ""
 	allowCommits := false
 	if projectDirectory {
@@ -2079,6 +2084,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		WorkspaceKind:  workspaceKind,
 		FilesystemMode: filesystemMode,
 		AllowCommits:   allowCommits,
+		Local:          request.Body.Local != nil && *request.Body.Local,
 		GitIsolation:   gitIsolation,
 		Replace:        force,
 		Rows:           rows,
@@ -2811,6 +2817,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 		BaseBranch:     baseBranch,
 		ChatMode:       head.ChatMode,
 		WorkspaceKind:  head.WorkspaceKind(),
+		Local:          head.Local,
 		FilesystemMode: head.FilesystemMode,
 		AllowCommits:   head.AllowCommits,
 		// The kill above just archived this ID; Replace lets the respawn take

@@ -23,7 +23,7 @@ func seedClaudeHead(t *testing.T, projectRoot, home, id string, policy gate.Poli
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res, err := seedHead(projectRoot, id, sandbox.AgentTypeClaude, worktree, home, "", policy, sandbox.GitIsolationOff)
+	res, err := seedHead(projectRoot, id, sandbox.AgentTypeClaude, worktree, home, "", policy, sandbox.GitIsolationOff, false)
 	if err != nil {
 		t.Fatalf("seedHead(%s): %v", id, err)
 	}
@@ -172,7 +172,7 @@ command = "drop"
 	res, err := seedHead(projectRoot, "codex-head", sandbox.AgentTypeCodex, worktree, home, "", gate.Policy{
 		GateEnabled: true,
 		MCPAllowed:  []string{"keep"},
-	}, sandbox.GitIsolationReadonly)
+	}, sandbox.GitIsolationReadonly, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestReadableGrantStoreIsCreatedAndMasked(t *testing.T) {
 		t.Fatal(err)
 	}
 	const id = "grant-head"
-	if _, err := seedHead(projectRoot, id, sandbox.AgentTypeCodex, worktree, home, "", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff); err != nil {
+	if _, err := seedHead(projectRoot, id, sandbox.AgentTypeCodex, worktree, home, "", gate.Policy{GateEnabled: true}, sandbox.GitIsolationOff, false); err != nil {
 		t.Fatal(err)
 	}
 	grantFile := gate.GrantedReadablePathsPath(paths.GetApprovalsDirFromProjectRoot(projectRoot, id))
@@ -260,7 +260,7 @@ func TestSeededInstructionFilesArePerSession(t *testing.T) {
 				if err := os.MkdirAll(worktree, 0o755); err != nil {
 					t.Fatal(err)
 				}
-				res, err := seedHead(projectRoot, id, tt.agentType, worktree, home, prompt, gate.Policy{}, sandbox.GitIsolationOff)
+				res, err := seedHead(projectRoot, id, tt.agentType, worktree, home, prompt, gate.Policy{}, sandbox.GitIsolationOff, false)
 				if err != nil {
 					t.Fatalf("seedHead(%s): %v", id, err)
 				}

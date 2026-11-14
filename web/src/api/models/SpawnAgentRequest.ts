@@ -53,6 +53,10 @@ export type SpawnAgentRequest = {
      */
     ephemeral?: boolean;
     /**
+     * Run Claude or Codex directly on the host without OS sandboxing. Worktree workspace only. Defaults to false and persists across resumes.
+     */
+    local?: boolean;
+    /**
      * How much of the repo's shared .git this head may write (see docs/git-isolation.md). "readonly" (default) locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue); "off" leaves it writable. Omitted inherits the agent-type policy default.
      */
     git_isolation?: string;

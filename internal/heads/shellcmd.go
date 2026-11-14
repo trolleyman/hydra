@@ -37,6 +37,7 @@ type ShellCommandResult struct {
 // ShellCommandPolicy carries the per-head restrictions that are persisted in
 // the database rather than derived solely from the project config.
 type ShellCommandPolicy struct {
+	Local              bool
 	WorkingDirReadOnly bool
 	GitIsolation       string
 }
@@ -185,6 +186,16 @@ func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sa
 
 	writable, readable, masked, cow, netPol, _ := cfg.ResolveSandboxOptions(string(agentType))
 	cfg.ApplySharedCaches(&opts, projectRoot, string(agentType), true)
+	if policy.Local {
+		opts.NoSandbox = true
+		opts.Env = localRuntimeEnv(env, ensureHeadTmpDir(projectRoot, sessionID))
+		launch, err := sandbox.BuildSpec(opts)
+		if err != nil {
+			return nil, func() {}, errtrace.Wrap(err)
+		}
+		return launch, launch.Cleanup, nil
+	}
+
 	gitIsolation := resolveGitIsolation(cfg, string(agentType), policy.GitIsolation)
 	opts.GitCommonDir = commonDirForSandbox(projectRoot, gitIsolation)
 	opts.GitIsolation = gitIsolation
