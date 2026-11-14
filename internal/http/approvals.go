@@ -159,6 +159,26 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 		return api.DecideAgentApproval204Response{}, nil
 	}
 
+	// Denials cover both network layers and all parked requests for this exact
+	// host. Persist first so a failed save leaves the request available to retry.
+	if !allow {
+		if req, ok, _ := gate.ReadRequest(dir, request.Reqid); ok && (req.Kind == "webfetch" || req.Kind == "egress") {
+			if remember {
+				if err := rememberHostDenial(projectRoot, req.Target); err != nil {
+					return approvalDecisionError(err.Error()), nil
+				}
+			}
+			until := time.Now().Add(gate.HostDenyDuration)
+			if remember {
+				until = time.Time{}
+			}
+			if err := gate.DenyHost(dir, req.Target, until); err != nil {
+				return approvalDecisionError(err.Error()), nil
+			}
+			resolveSiblingHostDenials(dir, request.Reqid, req.Target)
+		}
+	}
+
 	// Persist a remembered "always allow" to the trusted config BEFORE writing the
 	// decision file, so the allow-list update can't be lost if the next launch
 	// races the agent unblocking. A failure leaves the request pending.
@@ -413,4 +433,32 @@ func appendUnique(list []string, v string) []string {
 		}
 	}
 	return append(list, v)
+}
+
+// rememberHostDenial keeps the project-wide host block in the local settings
+// layer, preserving all other local overrides without copying merged defaults.
+func rememberHostDenial(projectRoot, host string) error {
+	path := paths.GetProjectConfigLocalPath(projectRoot)
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	net := ensureNetwork(&cfg.Defaults)
+	net.BlockedHosts = appendUnique(net.BlockedHosts, strings.ToLower(host))
+	return errtrace.Wrap(config.SaveToFile(path, *cfg))
+}
+
+func resolveSiblingHostDenials(dir, exceptReqID, host string) {
+	reqs, err := gate.ListRequests(dir)
+	if err != nil {
+		return
+	}
+	for _, r := range reqs {
+		if r.ReqID != exceptReqID && (r.Kind == "webfetch" || r.Kind == "egress") && strings.EqualFold(r.Target, host) {
+			_ = gate.WriteDecision(dir, r.ReqID, gate.DecisionFile{Decision: gate.Deny})
+		}
+	}
 }

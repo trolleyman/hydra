@@ -100,6 +100,7 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 	if policy.WebFetchFilter {
 		if dir := os.Getenv(gate.EnvApprovalDir); dir != "" {
 			policy.WebFetchAllowHosts = append(policy.WebFetchAllowHosts, gate.LoadGrantedHosts(dir)...)
+			policy.WebFetchBlockedHosts = append(policy.WebFetchBlockedHosts, gate.LoadDeniedHosts(dir)...)
 		}
 	}
 
@@ -281,6 +282,7 @@ func resolveAsk(toolName string, result gate.Result) gate.Decision {
 	// head sat at needs_input long after the user had answered - with no card left
 	// to answer. The gate writes the parent's wait, so the gate must clear it.
 	defer writeRunningStatus("")
+	defer gate.RemoveRequest(dir, reqid)
 
 	deadline := time.Now().Add(askTimeout)
 	for {
@@ -292,6 +294,9 @@ func resolveAsk(toolName string, result gate.Result) gate.Decision {
 			if d.Decision == gate.Allow {
 				return gate.Allow
 			}
+			return gate.Deny
+		}
+		if (result.Kind == "webfetch" || result.Kind == "egress") && gate.HostAllowed(gate.LoadDeniedHosts(dir), result.Target) {
 			return gate.Deny
 		}
 		if time.Now().After(deadline) {

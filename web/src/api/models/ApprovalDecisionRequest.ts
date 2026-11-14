@@ -8,7 +8,7 @@ export type ApprovalDecisionRequest = {
      */
     decision: ApprovalDecisionRequest.decision;
     /**
-     * When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again
+     * When true and decision is allow, persist the grant to the trusted config. With deny for a WebFetch or egress host, persist the host to the project local network block-list. Otherwise host denials suppress prompts for five minutes.
      */
     remember?: boolean;
     /**

@@ -480,6 +480,7 @@ export const pages: {
       actions: [
         { label: 'Allow', variant: 'primary' },
         { label: 'Always allow', variant: 'primary' },
+        { label: 'Always deny', variant: 'danger' },
         { label: 'Deny', variant: 'danger' },
       ],
       approval: { kind: 'webfetch', target: 'docs.linear.app', agentName: 'Publish the changelog', agentId: 'agent-approval', projectId: 'sim-project', url: 'https://docs.linear.app/api/changelog' },
@@ -497,6 +498,7 @@ export const pages: {
       actions: [
         { label: 'Allow', variant: 'primary' },
         { label: 'Always allow', variant: 'primary' },
+        { label: 'Always deny', variant: 'danger' },
         { label: 'Deny', variant: 'danger' },
       ],
       approval: { kind: 'egress', target: 'telemetry.example.com', agentName: 'Add crash reporting', agentId: 'agent-approval', projectId: 'sim-project' },

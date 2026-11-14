@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"braces.dev/errtrace"
 )
@@ -397,4 +398,65 @@ func WriteDecision(dir, reqid string, d DecisionFile) error {
 		return errtrace.Wrap(err)
 	}
 	return errtrace.Wrap(os.WriteFile(filepath.Join(dir, reqid+decisionSuffix), data, 0644))
+}
+
+// HostDenyDuration is the prompt cooldown for an explicitly denied host.
+const HostDenyDuration = 5 * time.Minute
+
+var deniedHostsMu sync.Mutex
+
+// DenyHost suppresses prompts for this exact host. A zero expiry lasts for the
+// head's lifetime; remembered denials also live in the project local config.
+func DenyHost(dir, host string, until time.Time) error {
+	deniedHostsMu.Lock()
+	defer deniedHostsMu.Unlock()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	hosts := map[string]time.Time{}
+	path := filepath.Join(dir, "denied-hosts.json")
+	data, _ := os.ReadFile(path)
+	_ = json.Unmarshal(data, &hosts)
+	if hosts == nil {
+		hosts = map[string]time.Time{}
+	}
+	hosts[strings.ToLower(strings.TrimSuffix(host, "."))] = until
+	data, err := json.Marshal(hosts)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Close()
+	tmp, name, err := createRootTemp(root, ".denied-hosts-")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	defer root.Remove(name)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return errtrace.Wrap(err)
+	}
+	if err := tmp.Close(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(root.Rename(name, "denied-hosts.json"))
+}
+
+// LoadDeniedHosts returns active exact-host denials, excluding expired entries.
+func LoadDeniedHosts(dir string) []string {
+	deniedHostsMu.Lock()
+	defer deniedHostsMu.Unlock()
+	data, _ := os.ReadFile(filepath.Join(dir, "denied-hosts.json"))
+	var hosts map[string]time.Time
+	_ = json.Unmarshal(data, &hosts)
+	var active []string
+	for host, until := range hosts {
+		if until.IsZero() || time.Now().Before(until) {
+			active = append(active, host)
+		}
+	}
+	return active
 }

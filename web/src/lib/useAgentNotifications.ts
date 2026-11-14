@@ -460,6 +460,15 @@ export function useAgentNotifications(
                   },
                 ]
               : []),
+            ...(sessionHostGrant ? [{
+              label: 'Always deny',
+              variant: 'danger' as const,
+              onClick: (toastId: number) => {
+                void decide(agentId, a.reqid, ApprovalDecisionRequest.decision.DENY, true)
+                reqMap!.delete(a.reqid)
+                toast.dismiss(toastId, { silent: true })
+              },
+            }] : []),
             {
               label: 'Deny',
               variant: 'danger' as const,

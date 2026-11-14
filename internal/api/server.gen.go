@@ -842,7 +842,7 @@ type ApprovalDecisionRequest struct {
 	// Path For a filesystem_read approval only: the canonical host path the UI displayed and the user approved. The daemon grants this echoed path, never the target in the agent-writable request file.
 	Path *string `json:"path,omitempty"`
 
-	// Remember When true and decision is allow, persist the server, host, or readable path to the trusted config's allow-list so future launches don't ask again
+	// Remember When true and decision is allow, persist the grant to the trusted config. With deny for a WebFetch or egress host, persist the host to the project local network block-list. Otherwise host denials suppress prompts for five minutes.
 	Remember *bool `json:"remember,omitempty"`
 }
 

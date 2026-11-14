@@ -9,6 +9,7 @@ import (
 
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/gate"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // TestRememberApprovalHostGoesToDefaults verifies that a remembered WebFetch/egress
@@ -133,5 +134,63 @@ func TestGrantHostForSessionUnblocksSiblingRequests(t *testing.T) {
 	}
 	if _, ok, err := gate.ReadDecision(dir, "other"); err != nil || ok {
 		t.Errorf("unrelated host decision ok=%v err=%v", ok, err)
+	}
+}
+
+func TestRememberHostDenialUsesLocalSettings(t *testing.T) {
+	root := t.TempDir()
+	if err := rememberApproval(root, "claude", "egress", "allowed.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rememberHostDenial(root, "blocked.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rememberHostDenial(root, "blocked.example"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFile(paths.GetProjectConfigLocalPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts := cfg.Defaults.Sandbox.Network.BlockedHosts
+	if len(hosts) != 1 || hosts[0] != "blocked.example" {
+		t.Fatalf("local blocks: %v", hosts)
+	}
+	project, err := config.LoadFile(config.GetProjectConfigPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Defaults.Sandbox.Network.BlockedHosts) != 0 {
+		t.Fatal("block leaked to committed config")
+	}
+	if !slices.Contains(project.Defaults.Sandbox.Network.AllowedHosts, "allowed.example") {
+		t.Fatal("existing allow lost")
+	}
+}
+
+func TestHostDenialResolvesOnlyMatchingNetworkSiblings(t *testing.T) {
+	dir := t.TempDir()
+	for _, req := range []gate.Request{
+		{ReqID: "fetch", Kind: "webfetch", Target: "example.com"},
+		{ReqID: "egress", Kind: "egress", Target: "EXAMPLE.COM"},
+		{ReqID: "other", Kind: "egress", Target: "other.example"},
+		{ReqID: "sub", Kind: "egress", Target: "sub.example.com"},
+		{ReqID: "mcp", Kind: "mcp", Target: "example.com"},
+	} {
+		if err := gate.WriteRequest(dir, req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolveSiblingHostDenials(dir, "chosen", "example.com")
+	for _, id := range []string{"fetch", "egress"} {
+		d, ok, err := gate.ReadDecision(dir, id)
+		if err != nil || !ok || d.Decision != gate.Deny {
+			t.Fatalf("%s: %+v %v %v", id, d, ok, err)
+		}
+	}
+	for _, id := range []string{"other", "sub", "mcp"} {
+		if _, ok, err := gate.ReadDecision(dir, id); err != nil || ok {
+			t.Fatalf("unrelated %s decided", id)
+		}
 	}
 }

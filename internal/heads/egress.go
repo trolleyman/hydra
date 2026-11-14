@@ -322,6 +322,17 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) egress.App
 	if e.projectRoot == "" {
 		return egress.Approval{} // no channel to ask over (e.g. tests) -> deny, as before
 	}
+	dir := paths.GetApprovalsDirFromProjectRoot(e.projectRoot, e.id)
+	if gate.HostAllowed(gate.LoadDeniedHosts(dir), host) {
+		return egress.Approval{}
+	}
+	cfg, err := config.Load(e.projectRoot)
+	if err == nil {
+		_, _, _, _, net, _ := cfg.ResolveSandboxOptions(string(e.agentType))
+		if gate.HostAllowed(net.BlockedHosts, host) {
+			return egress.Approval{}
+		}
+	}
 	// A host allow-listed in config.toml after this head launched isn't in the
 	// proxy's launch-time snapshot, so it would be parked for a prompt even though
 	// the user already granted it. Re-read the on-disk config first and allow it
@@ -331,7 +342,6 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) egress.App
 		log.Printf("hydra egress[%s]: %q is on the current config allow-list; allowing without prompt", e.id, host)
 		return egress.Approval{Allow: true, Remember: true}
 	}
-	dir := paths.GetApprovalsDirFromProjectRoot(e.projectRoot, e.id)
 	// A host the user already allowed this session must not prompt again.
 	// granted-hosts.json is the shared session grant store written when any
 	// WebFetch or egress approval card is allowed; without this check, allowing
@@ -367,6 +377,9 @@ func (e *egressApprover) approve(host string, cancel <-chan struct{}) egress.App
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			allowed := d.Decision == gate.Allow
 			return egress.Approval{Allow: allowed, Remember: allowed}
+		}
+		if gate.HostAllowed(gate.LoadDeniedHosts(dir), host) {
+			return egress.Approval{}
 		}
 		if time.Now().After(deadline) {
 			log.Printf("hydra egress[%s]: approval for %q timed out; denying", e.id, host)

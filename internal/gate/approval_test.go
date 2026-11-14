@@ -2,6 +2,7 @@ package gate
 
 import (
 	"testing"
+	"time"
 )
 
 func TestApprovalRoundTrip(t *testing.T) {
@@ -74,5 +75,27 @@ func TestHostRunResultRoundTrip(t *testing.T) {
 	RemoveRequest(dir, "42")
 	if _, ok, _ := ReadHostRunResult(dir, "42"); ok {
 		t.Fatal("result should be gone after RemoveRequest")
+	}
+}
+
+func TestHostDenialExpiryAndScope(t *testing.T) {
+	dir := t.TempDir()
+	for host, until := range map[string]time.Time{
+		"EXAMPLE.COM":       time.Now().Add(HostDenyDuration),
+		"expired.example":   time.Now().Add(-time.Second),
+		"permanent.example": {},
+	} {
+		if err := DenyHost(dir, host, until); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hosts := LoadDeniedHosts(dir)
+	if !HostAllowed(hosts, "example.com") || !HostAllowed(hosts, "permanent.example") {
+		t.Fatalf("missing denials: %v", hosts)
+	}
+	for _, host := range []string{"expired.example", "sub.example.com", "other.example"} {
+		if HostAllowed(hosts, host) {
+			t.Errorf("unexpected denial for %s", host)
+		}
 	}
 }

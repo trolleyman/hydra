@@ -526,3 +526,15 @@ change" recommendations (gate, MCP allow-list + approval UI, filtering egress
 proxy) have since been implemented for Claude, with the gate and MCP filtering
 also implemented for Codex - see the implementation-status callout under
 "Recommendations" above and the commit history.*
+
+## Network approval decisions
+
+Allow grants the requested host for the head's current session. Always allow
+also adds it to the project's network allow-list. Deny rejects pending WebFetch
+and egress requests for that exact host and suppresses further prompts in the
+same head for five minutes. Other hosts remain independent.
+
+Always deny rejects the host immediately for the current head and saves it in
+`.hydra/config.local.toml`, under `[sandbox.network].blocked_hosts`. This local
+project block-list applies to every agent type on subsequent launches and can be
+edited in project local settings. Block-list entries take precedence over allows.

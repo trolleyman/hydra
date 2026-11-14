@@ -392,7 +392,12 @@ export const ApprovalCard: React.FC<{
           )}
           {data.kind === 'egress' && (
             <Caption icon={<TriangleAlert className="w-3 h-3" />}>
-              Allow opens <span className="font-mono"><HostName host={data.target} /></span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
+              Allow opens <span className="font-mono"><HostName host={data.target} /></span> for the rest of this session; Always allow adds it to the project&rsquo;s network allow-list.
+            </Caption>
+          )}
+          {(data.kind === 'webfetch' || data.kind === 'egress') && (
+            <Caption icon={<Shield className="w-3 h-3" />}>
+              Deny blocks this specific host for 5 minutes. Always deny adds it to the project&rsquo;s local network block-list.
             </Caption>
           )}
           {data.kind === 'tool' && (
@@ -413,7 +418,7 @@ export const ApprovalCard: React.FC<{
         </div>
 
         {actions.length > 0 && (
-          <div className="mt-3.5 flex items-center gap-2">
+          <div className="mt-3.5 flex flex-wrap items-center gap-2">
             {actions.map((a) => (
               <button key={a.label} onClick={() => a.onClick(toastId)} className={actionClass(a)}>
                 {a.variant === 'primary' && !a.label.toLowerCase().startsWith('always') && <Check className="w-3.5 h-3.5" />}
