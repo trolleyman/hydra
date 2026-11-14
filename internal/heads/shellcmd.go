@@ -87,6 +87,10 @@ func RunShellCommand(ctx context.Context, projectRoot, worktree, sessionID strin
 	cmd.Dir = launch.Dir
 	cmd.Env = launch.Env
 	cmd.ExtraFiles = launch.ExtraFiles
+	configureShellCommandCancellation(cmd)
+	// A descendant can retain an output fd even after the shell exits. Keep
+	// Stop bounded rather than waiting forever for the output-copy goroutine.
+	cmd.WaitDelay = time.Second
 	// Combine stdout+stderr into one interleaved buffer - the user wants to see
 	// exactly what the command printed, in order, like a terminal.
 	var buf capBuffer

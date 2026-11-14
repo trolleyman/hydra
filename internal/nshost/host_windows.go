@@ -16,7 +16,7 @@ var errUnsupported = fmt.Errorf("nshost: namespace host is not supported on Wind
 
 func Serve(socketPath string) error { return errtrace.Wrap(errUnsupported) }
 
-func WaitForSocket(socketPath string, timeout time.Duration) error {
+func WaitForSocket(socketPath string, timeout time.Duration, exited <-chan struct{}) error {
 	return errtrace.Wrap(errUnsupported)
 }
 

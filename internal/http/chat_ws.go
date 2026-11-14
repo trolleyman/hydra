@@ -137,7 +137,19 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		if strings.TrimSpace(msg.Command) == "" {
 			return
 		}
-		go s.runChatShellCommand(conn, projectRoot, worktree, sessionID, shellPolicy, msg.Id, msg.Command)
+		// Register before launching the goroutine so an immediate Stop frame
+		// cannot arrive before the command becomes cancellable.
+		ctx, cancel := context.WithCancel(context.Background())
+		if msg.Id != "" {
+			s.shellCancels.Store(msg.Id, cancel)
+		}
+		go func() {
+			defer cancel()
+			if msg.Id != "" {
+				defer s.shellCancels.Delete(msg.Id)
+			}
+			s.runChatShellCommand(ctx, conn, projectRoot, worktree, sessionID, shellPolicy, msg.Id, msg.Command)
+		}()
 	case "shell_stop":
 		// Stop button on a running "!command" card: cancel its context, which
 		// kills the sandboxed process. The run then settles as "stopped" with
@@ -206,15 +218,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 // to the agent (a user turn carrying the command + output). Runs on its own
 // goroutine. conn streams the live output; a closed socket just drops the live
 // frames (the durable settle still persists).
-func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sessionID string, policy heads.ShellCommandPolicy, msgID, command string) {
-	// Make the run cancellable so a shell_stop frame can kill it mid-flight. Keyed
-	// by the send id; registered for its whole lifetime and cleaned up on exit.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if msgID != "" {
-		s.shellCancels.Store(msgID, cancel)
-		defer s.shellCancels.Delete(msgID)
-	}
+func (s *Server) runChatShellCommand(ctx context.Context, conn *safeConn, projectRoot, worktree, sessionID string, policy heads.ShellCommandPolicy, msgID, command string) {
 	onChunk := func(chunk string) {
 		writeFrame(conn, api.ChatShellOutputFrame{Type: api.ShellOutput, Id: msgID, Chunk: chunk})
 	}

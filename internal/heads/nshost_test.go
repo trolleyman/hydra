@@ -22,7 +22,7 @@ func TestRunPreExitInNamespace(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "control.sock")
 	go func() { _ = nshost.Serve(sock) }()
-	if err := nshost.WaitForSocket(sock, 2*time.Second); err != nil {
+	if err := nshost.WaitForSocket(sock, 2*time.Second, nil); err != nil {
 		t.Fatalf("supervisor never listened: %v", err)
 	}
 
@@ -50,7 +50,7 @@ func TestRunPreExitInNamespaceTimeout(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "control.sock")
 	go func() { _ = nshost.Serve(sock) }()
-	if err := nshost.WaitForSocket(sock, 2*time.Second); err != nil {
+	if err := nshost.WaitForSocket(sock, 2*time.Second, nil); err != nil {
 		t.Fatalf("supervisor never listened: %v", err)
 	}
 
@@ -77,7 +77,9 @@ func registerStubHost(t *testing.T, id string, proc *exec.Cmd) chan struct{} {
 		t.Fatalf("start stub supervisor: %v", err)
 	}
 	cleaned := make(chan struct{})
-	h := &nsHost{id: id, proc: proc, sockDir: t.TempDir(), cleanup: func() { close(cleaned) }, done: make(chan struct{})}
+	exited := make(chan struct{})
+	go func() { _ = proc.Wait(); close(exited) }()
+	h := &nsHost{id: id, proc: proc, exited: exited, sockDir: t.TempDir(), cleanup: func() { close(cleaned) }, done: make(chan struct{})}
 	e := &nsHostEntry{ready: make(chan struct{}), host: h}
 	close(e.ready)
 	nsHosts.mu.Lock()

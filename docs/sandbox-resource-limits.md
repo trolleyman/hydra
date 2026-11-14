@@ -29,6 +29,15 @@ immediately. Project and local config cannot change machine-wide policy. The
 use safe defaults, while an explicit `0` opts out. Memory and task limits remain
 opt-in.
 
+## Supervisor startup failures
+
+A head's supervisor has ten seconds to publish its control socket. If the
+supervisor exits first, startup fails immediately after its output is drained.
+The failure reports the socket path, process exit status, and the last 4096 bytes
+of combined supervisor stdout and stderr. A supervisor that remains alive without
+publishing its socket is killed at the deadline; its scope and socket directory
+are reclaimed. Output draining is bounded if a descendant retains the pipe.
+
 ## Motivation
 
 An ungraceful daemon death used to orphan every sandbox (agent, preview, service,

@@ -26,7 +26,7 @@ func TestSupervisorSharedWrites(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "control.sock")
 	go func() { _ = Serve(sock) }()
-	if err := WaitForSocket(sock, 2*time.Second); err != nil {
+	if err := WaitForSocket(sock, 2*time.Second, nil); err != nil {
 		t.Fatalf("supervisor never listened: %v", err)
 	}
 	client := Dial(sock)
@@ -78,7 +78,7 @@ func TestSpawnReportsExitCode(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "control.sock")
 	go func() { _ = Serve(sock) }()
-	if err := WaitForSocket(sock, 2*time.Second); err != nil {
+	if err := WaitForSocket(sock, 2*time.Second, nil); err != nil {
 		t.Fatalf("supervisor never listened: %v", err)
 	}
 	client := Dial(sock)
@@ -109,7 +109,7 @@ func TestSpawnPipes(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "control.sock")
 	go func() { _ = Serve(sock) }()
-	if err := WaitForSocket(sock, 2*time.Second); err != nil {
+	if err := WaitForSocket(sock, 2*time.Second, nil); err != nil {
 		t.Fatalf("supervisor never listened: %v", err)
 	}
 	client := Dial(sock)
@@ -166,5 +166,26 @@ func TestLinePrefixWriter(t *testing.T) {
 	want := "[codex:head-1] first line\n[codex:head-1] second\n[codex:head-1] third line"
 	if got := out.String(); got != want {
 		t.Fatalf("prefixed stderr = %q, want %q", got, want)
+	}
+}
+
+func TestWaitForSocketSupervisorExit(t *testing.T) {
+	exited := make(chan struct{})
+	close(exited)
+	sock := filepath.Join(t.TempDir(), "control.sock")
+	start := time.Now()
+	err := WaitForSocket(sock, 10*time.Second, exited)
+	if err == nil || !strings.Contains(err.Error(), "supervisor exited") || !strings.Contains(err.Error(), sock) {
+		t.Fatalf("expected supervisor exit and socket path, got %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("waited for the socket timeout after supervisor exit")
+	}
+}
+
+func TestWaitForSocketTimeout(t *testing.T) {
+	err := WaitForSocket(filepath.Join(t.TempDir(), "control.sock"), time.Millisecond, nil)
+	if err == nil || !strings.Contains(err.Error(), "did not appear within") {
+		t.Fatalf("expected a bounded startup timeout, got %v", err)
 	}
 }

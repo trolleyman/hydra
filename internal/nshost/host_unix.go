@@ -244,17 +244,24 @@ type Client struct {
 func Dial(socket string) *Client { return &Client{socket: socket} }
 
 // WaitForSocket blocks until socketPath exists (the supervisor has begun
-// listening) or timeout elapses.
-func WaitForSocket(socketPath string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+// listening), the supervisor exits, or timeout elapses. A nil exited channel
+// disables process-exit monitoring.
+func WaitForSocket(socketPath string, timeout time.Duration, exited <-chan struct{}) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		if _, err := os.Stat(socketPath); err == nil {
 			return nil
 		}
-		if time.Now().After(deadline) {
-			return errtrace.Wrap(fmt.Errorf("nshost: control socket %s never appeared", socketPath))
+		select {
+		case <-exited:
+			return errtrace.Wrap(fmt.Errorf("nshost: supervisor exited before control socket %s became ready", socketPath))
+		case <-timer.C:
+			return errtrace.Wrap(fmt.Errorf("nshost: control socket %s did not appear within %s", socketPath, timeout))
+		case <-ticker.C:
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 type nsHost struct {
 	id      string
 	proc    *exec.Cmd
+	exited  <-chan struct{}
 	client  *nshost.Client
 	sockDir string
 	// scopeUnit is the transient systemd scope wrapping the supervisor (and thus
@@ -168,8 +169,11 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 	// also keeping the tail so a startup failure (e.g. a bad bwrap mount) can be
 	// folded into the error below instead of vanishing into "socket never appeared".
 	var errTail capWriter
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = io.MultiWriter(os.Stderr, &errTail)
+	cmd.Stdout = io.MultiWriter(os.Stderr, &errTail)
+	cmd.Stderr = cmd.Stdout
+	// Bound pipe draining if a descendant inherits stdout/stderr after the
+	// supervisor exits. Wait still drains normal startup diagnostics first.
+	cmd.WaitDelay = time.Second
 	// scope.Start ties the outermost process to the daemon's lifetime (parent-death
 	// SIGKILL + bwrap's --die-with-parent cascade through the head's PID namespace)
 	// so an ungraceful daemon death (crash, SIGKILL, botched auto-upgrade) brings
@@ -185,16 +189,29 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		return nil, errtrace.Wrap(fmt.Errorf("start supervisor: %w", startErr))
 	}
 
-	if err := nshost.WaitForSocket(sockPath, 10*time.Second); err != nil {
+	// One waiter owns cmd.Wait for both startup and the running host. Closing
+	// exited publishes its result and the fully drained diagnostic tail.
+	exited := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		close(exited)
+	}()
+
+	if err := nshost.WaitForSocket(sockPath, 10*time.Second, exited); err != nil {
 		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
 		if scoped {
 			sandbox.StopScope(scopeUnit) // reap the cgroup; killing systemd-run alone may not
 		}
+		<-exited
 		spec.Cleanup()
+		_ = os.RemoveAll(sockDir)
 		launchErr := err
+		if waitErr != nil {
+			launchErr = fmt.Errorf("%w; supervisor process: %v", launchErr, waitErr)
+		}
 		if tail := strings.TrimSpace(errTail.String()); tail != "" {
-			launchErr = fmt.Errorf("%w; supervisor output: %s", err, tail)
+			launchErr = fmt.Errorf("%w; supervisor output: %s", launchErr, tail)
 		}
 		// Log the same composed failure returned to attach callers. The supervisor's
 		// stderr is also streamed above, but that line alone lacks the socket path
@@ -208,15 +225,15 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		unit = scopeUnit
 	}
 	log.Printf("heads: namespace host ready for %s (pid %d)", id, cmd.Process.Pid)
-	return &nsHost{id: id, proc: cmd, client: nshost.Dial(sockPath), sockDir: sockDir, scopeUnit: unit, cleanup: spec.Cleanup, done: make(chan struct{})}, nil
+	return &nsHost{id: id, proc: cmd, exited: exited, client: nshost.Dial(sockPath), sockDir: sockDir, scopeUnit: unit, cleanup: spec.Cleanup, done: make(chan struct{})}, nil
 }
 
-// watchNamespaceHost is the sole waiter on the supervisor process. It blocks until
+// watchNamespaceHost waits for the supervisor process to be reaped. It blocks until
 // the supervisor exits - whether on its own (crash) or because removeNamespaceHost
 // killed it - then evicts the registry slot, runs the spec cleanup, removes the
 // socket dir, and signals done.
 func watchNamespaceHost(id string, h *nsHost, e *nsHostEntry) {
-	_ = h.proc.Wait()
+	<-h.exited
 	nsHosts.mu.Lock()
 	if nsHosts.m[id] == e {
 		delete(nsHosts.m, id)

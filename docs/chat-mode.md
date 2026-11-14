@@ -115,6 +115,19 @@ Client to server: `user_message`, `interrupt`, `set_model`, `control_response`,
 and an empty transcript is indistinguishable from a head that never spoke - so
 the daemon logs at ERROR and the pane shows a banner instead.
 
+## Composer shell commands
+
+A leading `!` runs a command with no interactive terminal or stdin input. Supply
+input in the command itself with a pipe or heredoc. Commands needing interactive
+authentication belong in a terminal tab; for unattended sudo, use `sudo -n` so a
+password requirement fails immediately.
+
+The command card's Stop button cancels that command independently of the agent's
+turn. On Unix, cancellation kills the command's entire process group, including
+pipeline stages and children waiting for input. Output draining is bounded to
+one second if a descendant still holds a pipe open. The card keeps captured
+output and settles as stopped. Commands also have a ten-minute timeout.
+
 ## The event log and the projection
 
 `internal/chat` owns both halves of the durable state.
